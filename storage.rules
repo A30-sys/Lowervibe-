@@ -1,0 +1,48 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email == 'odulamw@gmail.com';
+    }
+
+    // Uploaded song audio masters: 120MB limit, audio/* only, owner or admin
+    match /tracks/{ownerId}/{trackId}/audio/{fileName} {
+      allow read: if true;
+      allow write: if (isSignedIn() && request.auth.uid == ownerId || isAdmin())
+        && request.resource.size <= 120 * 1024 * 1024
+        && request.resource.contentType.matches('audio/.*');
+      allow delete: if (isSignedIn() && request.auth.uid == ownerId) || isAdmin();
+    }
+
+    // Uploaded square track cover art: 10MB limit, image/* only, owner or admin
+    match /tracks/{ownerId}/{trackId}/cover/{fileName} {
+      allow read: if true;
+      allow write: if (isSignedIn() && request.auth.uid == ownerId || isAdmin())
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if (isSignedIn() && request.auth.uid == ownerId) || isAdmin();
+    }
+
+    // User & artist profile/cover photos: 5MB limit, image/* only
+    match /avatars/{userId}/{fileName} {
+      allow read: if true;
+      allow write: if (isSignedIn() && request.auth.uid == userId || isAdmin())
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if (isSignedIn() && request.auth.uid == userId) || isAdmin();
+    }
+
+    // Artist profile & cover photo assets scoped to owner UID
+    match /artists/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if (isSignedIn() && request.auth.uid == userId || isAdmin())
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if (isSignedIn() && request.auth.uid == userId) || isAdmin();
+    }
+  }
+}

@@ -1,0 +1,578 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && 'email' in request.auth.token
+        && 'email_verified' in request.auth.token
+        && request.auth.token.email == 'odulamw@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function hasLegacyUserArtistLink(artistId, uid) {
+      return exists(/databases/$(database)/documents/users/$(uid))
+        && get(/databases/$(database)/documents/users/$(uid)).data.get('artistId', '') == artistId;
+    }
+
+    function isArtistOwner(artistId) {
+      return isSignedIn() && (
+        resource.data.get('ownerUserId', '') == request.auth.uid
+        || resource.data.get('claimedByUserId', '') == request.auth.uid
+        || (
+          resource.data.get('ownerUserId', '') == ''
+          && resource.data.get('claimedByUserId', '') == ''
+          && hasLegacyUserArtistLink(artistId, request.auth.uid)
+        )
+      );
+    }
+
+    function isArtistDocOwnedBy(artistId, uid) {
+      return isValidId(artistId)
+        && exists(/databases/$(database)/documents/artists/$(artistId))
+        && (
+          get(/databases/$(database)/documents/artists/$(artistId)).data.get('ownerUserId', '') == uid
+          || get(/databases/$(database)/documents/artists/$(artistId)).data.get('claimedByUserId', '') == uid
+          || (
+            get(/databases/$(database)/documents/artists/$(artistId)).data.get('ownerUserId', '') == ''
+            && get(/databases/$(database)/documents/artists/$(artistId)).data.get('claimedByUserId', '') == ''
+            && hasLegacyUserArtistLink(artistId, uid)
+          )
+        );
+    }
+
+    function isValidUserCreate(data, userId) {
+      return data.id == userId
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
+        && (!('role' in data) || data.role in ['listener', 'artist'] || isAdmin())
+        && (!('isAdmin' in data) || data.isAdmin == false || isAdmin())
+        && (!('artistId' in data) || data.artistId == null || data.artistId == '' || isArtistDocOwnedBy(data.artistId, userId));
+    }
+
+    function isValidUserOwnerUpdate(data, prev, userId) {
+      return data.diff(prev).affectedKeys().hasOnly([
+        'name',
+        'username',
+        'handleUpdatedAt',
+        'avatar',
+        'banner',
+        'storageAvatarPath',
+        'storageBannerPath',
+        'bio',
+        'city',
+        'country',
+        'role',
+        'artistId',
+        'applicationStatus',
+        'artistApplication',
+        'emailVerified',
+        'phoneVerified',
+        'phoneNumber',
+        'likedTrackIds',
+        'likedArtistIds',
+        'followingArtistIds',
+        'savedTrackIds',
+        'playlists',
+        'recentSearches',
+        'termsAcceptedAt',
+        'termsVersion',
+        'hasCompletedTour',
+        'onboarded',
+        'sessions',
+        'updatedAt'
+      ])
+        && data.get('id', userId) == userId
+        && data.get('isAdmin', false) == prev.get('isAdmin', false)
+        && data.get('isDeactivated', false) == prev.get('isDeactivated', false)
+        && (!('name' in data) || (data.name is string && data.name.size() > 0 && data.name.size() <= 100))
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
+        && (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 4096))
+        && (!('banner' in data) || (data.banner is string && data.banner.size() <= 4096))
+        && (
+          data.get('role', 'listener') == prev.get('role', 'listener')
+          || data.get('role', 'listener') in ['listener', 'artist']
+          || isAdmin()
+        )
+        && (
+          !('artistId' in data)
+          || data.artistId == prev.get('artistId', '')
+          || data.artistId == null
+          || data.artistId == ''
+          || isArtistDocOwnedBy(data.artistId, userId)
+        );
+    }
+
+    function isValidArtistCreate(data, uid) {
+      return data.ownerUserId == uid
+        && (!('claimedByUserId' in data) || data.claimedByUserId == uid)
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 1000))
+        && (!('city' in data) || (data.city is string && data.city.size() <= 60))
+        && (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 4096))
+        && (!('banner' in data) || (data.banner is string && data.banner.size() <= 4096))
+        && (!('isMonetized' in data) || data.isMonetized == false)
+        && (!('monetizationStatus' in data) || data.monetizationStatus == 'locked')
+        && (!('verified' in data) || data.verified == false);
+    }
+
+    function meetsAutoEligibilityBaseline(prev) {
+      let hasConfig = exists(/databases/$(database)/documents/config/platform);
+      let reqFollowers = hasConfig
+        ? get(/databases/$(database)/documents/config/platform).data.get('requiredFollowers', 50)
+        : 50;
+      let maxStrikes = hasConfig
+        ? get(/databases/$(database)/documents/config/platform).data.get('maxActiveStrikes', 0)
+        : 0;
+      return prev.get('monetizationStatus', 'locked') != 'suspended'
+        && prev.get('copyrightStrikes', 0) <= maxStrikes
+        && prev.get('followersCount', 0) >= reqFollowers;
+    }
+
+    function isValidArtistOwnerUpdate(data, prev) {
+      let autoEligibleApproved = data.get('isMonetized', false) == true
+        && data.get('monetizationStatus', 'locked') == 'approved'
+        && data.get('monetizationApprovedBy', '') == 'auto-eligibility'
+        && meetsAutoEligibilityBaseline(prev);
+
+      return data.diff(prev).affectedKeys().hasOnly([
+        'name',
+        'handle',
+        'bio',
+        'city',
+        'country',
+        'location',
+        'avatar',
+        'banner',
+        'storageAvatarPath',
+        'storageBannerPath',
+        'socials',
+        'genres',
+        'isMonetized',
+        'monetizationStatus',
+        'monetizationApprovedAt',
+        'monetizationApprovedBy',
+        'monetizationApprovalToken',
+        'monetizationTokenSignature',
+        'monetizationRejectionReason',
+        'monetizationTermsAcceptedAt',
+        'monetizationRequestedAt',
+        'updatedAt'
+      ])
+        && (!('name' in data) || (data.name is string && data.name.size() > 0 && data.name.size() <= 100))
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 1000))
+        && (!('city' in data) || (data.city is string && data.city.size() <= 60))
+        && (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 4096))
+        && (!('banner' in data) || (data.banner is string && data.banner.size() <= 4096))
+        && (!('monetizationApprovalToken' in data) || (data.monetizationApprovalToken is string && data.monetizationApprovalToken.size() <= 128))
+        && (!('monetizationTokenSignature' in data) || (data.monetizationTokenSignature is string && data.monetizationTokenSignature.size() <= 1024))
+        && (
+          (
+            data.get('isMonetized', false) == prev.get('isMonetized', false)
+            && (
+              data.get('monetizationStatus', 'locked') == prev.get('monetizationStatus', 'locked')
+              || data.get('monetizationStatus', 'locked') == 'pending'
+            )
+          )
+          || autoEligibleApproved
+        )
+        && data.get('verified', false) == prev.get('verified', false)
+        && data.get('isVerified', false) == prev.get('isVerified', false)
+        && data.get('earningsBalanceMwk', 0) == prev.get('earningsBalanceMwk', 0)
+        && data.get('ownerUserId', '') == prev.get('ownerUserId', '')
+        && data.get('claimedByUserId', '') == prev.get('claimedByUserId', '');
+    }
+
+    function isValidTrackCreate(data, uid) {
+      return data.uploadedByUserId == uid
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 160
+        && data.durationSeconds is number && data.durationSeconds > 0
+        && data.artistId is string
+        && (isArtistDocOwnedBy(data.artistId, uid) || hasLegacyUserArtistLink(data.artistId, uid) || isAdmin());
+    }
+
+    function isValidTrackOwnerUpdate(data, prev) {
+      return data.uploadedByUserId == prev.uploadedByUserId
+        && data.artistId == prev.artistId
+        && data.diff(prev).affectedKeys().hasOnly([
+          'title',
+          'artistName',
+          'artistAvatar',
+          'genre',
+          'mood',
+          'region',
+          'vibeTags',
+          'bpm',
+          'lyrics',
+          'story',
+          'coverArt',
+          'audioUrl',
+          'storageAudioPath',
+          'storageCoverPath',
+          'audioChecksum',
+          'verifiedMetadata',
+          'isMaster24Bit',
+          'waveformData',
+          'audioFormat',
+          'fileSize',
+          'bitrate',
+          'durationSeconds',
+          'metadata',
+          'isDraft',
+          'scheduledPublishDate',
+          'downloadable',
+          'artworkRightsConfirmed',
+          'releaseDate',
+          'updatedAt'
+        ])
+        && (!('title' in data) || (data.title is string && data.title.size() > 0 && data.title.size() <= 160));
+    }
+
+    // Users Collection: strictly owner or admin read; ONLY the owner can edit personal details
+    match /users/{userId} {
+      allow read: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserCreate(request.resource.data, userId);
+      allow update: if isValidId(userId) && (
+        (isOwner(userId) && isValidUserOwnerUpdate(request.resource.data, resource.data, userId))
+        || (
+          // Admin can only toggle moderation/application flags, never overwrite user personal profile details
+          isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'isDeactivated',
+            'role',
+            'applicationStatus',
+            'artistId',
+            'artistApplication',
+            'updatedAt'
+          ])
+        )
+      );
+      allow delete: if isValidId(userId) && (isOwner(userId) || isAdmin());
+
+      match /settings/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Public handle lookup for unique @username enforcement without exposing private user documents
+    match /handles/{handle} {
+      allow read: if true;
+      allow create: if isValidId(handle)
+        && isSignedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if isValidId(handle)
+        && isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid;
+      allow delete: if isValidId(handle)
+        && (isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid));
+    }
+
+    // Artists Collection: public read; ONLY the verified artist owner can edit profile & photo details.
+    match /artists/{artistId} {
+      allow read: if true;
+      allow create: if isValidId(artistId) && (
+        (isSignedIn() && isValidArtistCreate(request.resource.data, request.auth.uid))
+        || isAdmin()
+      );
+
+      allow update: if isValidId(artistId) && (
+        // 1. Artist owner editing their own profile, bio, socials, avatar, and cover photo
+        (isArtistOwner(artistId) && isValidArtistOwnerUpdate(request.resource.data, resource.data))
+        || (
+          // 2. Signed-in listeners updating follow/like/stream counters ONLY
+          isSignedIn()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'followersCount',
+            'likesCount',
+            'likedByUserIds',
+            'totalStreams',
+            'regionStats'
+          ])
+        )
+        || (
+          // 3. Admin moderation ONLY (verification, monetization, strikes) — cannot rewrite artist bio/name/photos
+          isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'verified',
+            'isVerified',
+            'isCertified',
+            'isMonetized',
+            'monetizationStatus',
+            'monetizationApprovedAt',
+            'monetizationApprovedBy',
+            'monetizationApprovalToken',
+            'monetizationTokenSignature',
+            'monetizationRejectionReason',
+            'monetizationRejectedAt',
+            'monetizationReapplyAvailableAt',
+            'monetizationRevokedReason',
+            'earningsBalanceMwk',
+            'copyrightStrikes',
+            'ownerUserId',
+            'claimedByUserId',
+            'updatedAt'
+          ])
+        )
+      );
+
+      allow delete: if isValidId(artistId) && (isAdmin() || isArtistOwner(artistId));
+    }
+
+    // Tracks Catalog: public read; ONLY track owner edits metadata; listeners update counters; admin moderates status
+    match /tracks/{trackId} {
+      allow read: if true;
+      allow create: if isValidId(trackId)
+        && isSignedIn()
+        && isValidTrackCreate(request.resource.data, request.auth.uid);
+
+      allow update: if isValidId(trackId) && (
+        // 1. Track owner editing their own track details
+        (
+          isSignedIn()
+          && resource.data.uploadedByUserId == request.auth.uid
+          && isValidTrackOwnerUpdate(request.resource.data, resource.data)
+        )
+        || (
+          // 2. Listener interactions ONLY (plays, likes, downloads, comments, reactions, regionStats)
+          isSignedIn()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'plays',
+            'likes',
+            'likedByUserIds',
+            'downloads',
+            'comments',
+            'reactions',
+            'regionStats'
+          ])
+        )
+        || (
+          // 3. Admin catalog moderation ONLY
+          isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'isCertified',
+            'chartRank',
+            'isDeranked',
+            'isDraft',
+            'updatedAt'
+          ])
+        )
+      );
+
+      allow delete: if isValidId(trackId) && (isAdmin() || (isSignedIn() && resource.data.uploadedByUserId == request.auth.uid));
+    }
+
+    // Persistent Media Assets & Chunks (tracks, cover art, avatars, banners; zero PII)
+    match /mediaAssets/{assetId} {
+      allow read: if true;
+      allow create: if isValidId(assetId)
+        && isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.contentType is string
+        && request.resource.data.sizeBytes is number
+        && request.resource.data.sizeBytes > 0
+        && request.resource.data.sizeBytes <= 104857600
+        && request.resource.data.chunkCount is number
+        && request.resource.data.chunkCount >= 0
+        && request.resource.data.chunkCount <= 200
+        && (!('dataBase64' in request.resource.data) || (request.resource.data.dataBase64 is string && request.resource.data.dataBase64.size() <= 900000));
+      allow update: if isValidId(assetId)
+        && isSignedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId;
+      allow delete: if isValidId(assetId)
+        && (isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid));
+
+      match /chunks/{chunkId} {
+        allow read: if true;
+        allow create, update: if isValidId(chunkId)
+          && isSignedIn()
+          && (
+            request.resource.data.get('ownerId', '') == request.auth.uid
+            || get(/databases/$(database)/documents/mediaAssets/$(assetId)).data.get('ownerId', '') == request.auth.uid
+          )
+          && request.resource.data.dataBase64 is string
+          && request.resource.data.dataBase64.size() <= 900000;
+        allow delete: if isAdmin() || (
+          isSignedIn() && (
+            resource.data.get('ownerId', '') == request.auth.uid
+            || get(/databases/$(database)/documents/mediaAssets/$(assetId)).data.get('ownerId', '') == request.auth.uid
+          )
+        );
+      }
+    }
+
+    // Verified Plays Ledger: immutable after creation, requires >= 30s listen and matching userId
+    match /plays/{playId} {
+      allow read: if isSignedIn();
+      allow create: if isValidId(playId)
+        && isSignedIn()
+        && (request.resource.data.userId == request.auth.uid || isAdmin())
+        && request.resource.data.listenedSeconds is number
+        && request.resource.data.listenedSeconds >= 30;
+      allow update, delete: if isAdmin();
+    }
+
+    // Payout Methods: strictly owner-scoped (artistId must belong to owner; hold timestamps immutable for owners)
+    match /payoutMethods/{methodId} {
+      allow get: if isValidId(methodId) && ((isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin());
+      allow list: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
+      allow create: if isValidId(methodId)
+        && isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.accountHolderName is string
+        && request.resource.data.accountHolderName.size() >= 2
+        && request.resource.data.accountHolderName.size() <= 120
+        && request.resource.data.payoutHoldUntil is string
+        && (
+          !('artistId' in request.resource.data)
+          || request.resource.data.artistId == null
+          || request.resource.data.artistId == ''
+          || isArtistDocOwnedBy(request.resource.data.artistId, request.auth.uid)
+          || hasLegacyUserArtistLink(request.resource.data.artistId, request.auth.uid)
+        );
+      allow update: if isValidId(methodId) && (
+        isAdmin()
+        || (
+          isSignedIn()
+          && resource.data.userId == request.auth.uid
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isDefault', 'updatedAt'])
+          && request.resource.data.isDefault is bool
+        )
+      );
+      allow delete: if isValidId(methodId) && (isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid));
+    }
+
+    // Payout Requests: strictly owner creates for own artist + own payout method; ONLY admin updates status
+    match /payoutRequests/{requestId} {
+      allow get: if isValidId(requestId) && ((isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin());
+      allow list: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
+      allow create: if isValidId(requestId)
+        && isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && (
+          isArtistDocOwnedBy(request.resource.data.artistId, request.auth.uid)
+          || hasLegacyUserArtistLink(request.resource.data.artistId, request.auth.uid)
+        )
+        && isValidId(request.resource.data.payoutMethodId)
+        && exists(/databases/$(database)/documents/payoutMethods/$(request.resource.data.payoutMethodId))
+        && get(/databases/$(database)/documents/payoutMethods/$(request.resource.data.payoutMethodId)).data.userId == request.auth.uid
+        && request.resource.data.grossAmountMwk is number
+        && request.resource.data.grossAmountMwk > 0
+        && request.resource.data.netAmountMwk is number
+        && request.resource.data.netAmountMwk > 0
+        && request.resource.data.status in ['awaiting_review', 'processing']
+        && (!('txRef' in request.resource.data) || (request.resource.data.txRef is string && request.resource.data.txRef.size() <= 128))
+        && (!('payoutToken' in request.resource.data) || (request.resource.data.payoutToken is string && request.resource.data.payoutToken.size() <= 128))
+        && (!('payoutTokenSignature' in request.resource.data) || (request.resource.data.payoutTokenSignature is string && request.resource.data.payoutTokenSignature.size() <= 1024))
+        && (!('settlementVerified' in request.resource.data) || request.resource.data.settlementVerified is bool);
+      allow update, delete: if isAdmin();
+    }
+
+    // Playlists: owner edits metadata/tracks; listeners may only like/play public playlists
+    match /playlists/{playlistId} {
+      allow read: if resource.data.isPublic == true || isAdmin() || (isSignedIn() && resource.data.createdBy == request.auth.uid);
+      allow create: if isValidId(playlistId) && isSignedIn() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isValidId(playlistId) && (
+        (isSignedIn() && resource.data.createdBy == request.auth.uid)
+        || (isSignedIn() && resource.data.isPublic == true && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'likedByUserIds', 'plays', 'followers']))
+      );
+      allow delete: if isValidId(playlistId) && (isAdmin() || (isSignedIn() && resource.data.createdBy == request.auth.uid));
+    }
+
+    // Artist Applications
+    match /applications/{appId} {
+      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
+      allow create: if isValidId(appId) && isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // Artist Claims
+    match /claims/{claimId} {
+      allow read: if (isSignedIn() && resource.data.applicantUserId == request.auth.uid) || isAdmin();
+      allow create: if isValidId(claimId) && isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // Reports & Support Tickets
+    match /reports/{reportId} {
+      allow create: if isValidId(reportId) && isSignedIn();
+      allow read: if (isSignedIn() && resource.data.reporterUserId == request.auth.uid) || isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    match /tickets/{ticketId} {
+      allow create: if isValidId(ticketId) && isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // Public reference collections & Admin Config
+    match /genres/{genreId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    match /events/{eventId} {
+      allow read: if true;
+      allow create: if isValidId(eventId) && isSignedIn();
+      allow update, delete: if isValidId(eventId) && (isAdmin() || (isSignedIn() && resource.data.artistOwnerUserId == request.auth.uid));
+    }
+
+    match /activities/{activityId} {
+      allow read: if true;
+      allow create: if isValidId(activityId) && isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    match /config/{configId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /admin_config/{configId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /admins/{adminId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn();
+      allow create: if isValidId(notificationId) && (isAdmin() || isSignedIn());
+      allow update: if isValidId(notificationId) && (
+        isAdmin()
+        || (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy']))
+      );
+      allow delete: if isAdmin();
+    }
+  }
+}

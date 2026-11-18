@@ -1,0 +1,54 @@
+import React from 'react';
+
+interface LowerVibeLogoProps {
+  className?: string;
+  size?: 'sm' | 'md' | 'lg' | 'hero';
+  showTagline?: boolean;
+  isPlaying?: boolean;
+  onClick?: () => void;
+}
+
+const BRAND_LOGO_SRC =
+  '/assets/aistudio/hf_20261027_065809_f2446c35-920d-4d5a-a97a-dcfad0262ef1_802ab9c5.png';
+
+export const LowerVibeLogo: React.FC<LowerVibeLogoProps> = ({
+  className = '',
+  size = 'md',
+  showTagline = false,
+  isPlaying = false,
+  onClick,
+}) => {
+  const frameSizes: Record<NonNullable<LowerVibeLogoProps['size']>, string> = {
+    sm: 'h-7 w-[112px] px-1.5 rounded-lg',
+    md: 'h-8 sm:h-9 w-[126px] sm:w-[144px] px-2 rounded-xl',
+    lg: 'h-12 w-[196px] px-2.5 rounded-2xl',
+    hero: 'h-16 sm:h-20 w-[260px] sm:w-[320px] px-3 rounded-2xl',
+  };
+
+  return (
+    <div
+      onClick={onClick}
+      className={`inline-flex flex-col select-none group ${onClick ? 'cursor-pointer' : ''} ${className}`}
+      title="LOWERVIBE"
+    >
+      <div
+        className={`relative overflow-hidden bg-white border border-[var(--border)] shadow-xs flex items-center justify-center transition-transform ${
+          onClick ? 'group-hover:scale-[1.02] active:scale-[0.98]' : ''
+        } ${isPlaying ? 'ring-1 ring-[var(--violet)]/45' : ''} ${frameSizes[size]}`}
+      >
+        <img
+          src={BRAND_LOGO_SRC}
+          alt="LOWERVIBE"
+          draggable={false}
+          className="w-full h-full object-cover object-[50%_52.5%] scale-[1.32] pointer-events-none select-none"
+        />
+      </div>
+
+      {showTagline && (
+        <span className="text-[11px] font-medium text-[var(--lv-muted)] mt-1">
+          Independent music
+        </span>
+      )}
+    </div>
+  );
+};

@@ -1,0 +1,6 @@
+{
+  "name": "LOWERVIBE - Underground & Ambient Music Discovery Platform",
+  "description": "Discover curated downtempo, lo-fi, and ambient music. Submit artist profiles, share tracks, explore listening history, and connect through deep audio vibes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

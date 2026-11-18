@@ -1,0 +1,56 @@
+{
+  "id": "/studio?standalone=artist",
+  "name": "LOWERVIBE Artist",
+  "short_name": "LOWERVIBE",
+  "description": "Standalone LOWERVIBE Artist WebApp for approved creators — access your Artist Page, upload tracks, track real-time earnings, and manage withdrawals.",
+  "start_url": "/studio?standalone=artist",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#FFFFFF",
+  "background_color": "#FFFFFF",
+  "icons": [
+    {
+      "src": "/icons/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["music", "entertainment", "audio"],
+  "shortcuts": [
+    {
+      "name": "Artist Studio",
+      "url": "/studio?standalone=artist",
+      "description": "Open your Artist Studio & uploads"
+    },
+    {
+      "name": "My Artist Page",
+      "url": "/studio?standalone=artist&view=artist-page",
+      "description": "Open your standalone Artist Page"
+    },
+    {
+      "name": "Withdrawals",
+      "url": "/studio?standalone=artist&tab=withdrawals",
+      "description": "Check earnings balance and request payouts"
+    }
+  ]
+}

@@ -1,0 +1,259 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Registered listener, creator, or admin account on LOWERVIBE",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phoneNumber": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "username": { "type": "string", "maxLength": 40 },
+        "handleUpdatedAt": { "type": "string" },
+        "role": { "type": "string", "enum": ["listener", "artist", "admin"] },
+        "avatar": { "type": "string" },
+        "banner": { "type": "string" },
+        "storageAvatarPath": { "type": "string" },
+        "storageBannerPath": { "type": "string" },
+        "bio": { "type": "string", "maxLength": 500 },
+        "artistId": { "type": "string" },
+        "isAdmin": { "type": "boolean" },
+        "termsAcceptedAt": { "type": "string" },
+        "termsVersion": { "type": "string" },
+        "likedTrackIds": { "type": "array" },
+        "savedTrackIds": { "type": "array" },
+        "followingArtistIds": { "type": "array" },
+        "country": { "type": "string" },
+        "city": { "type": "string" },
+        "hasCompletedTour": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "email", "name", "role"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "Persisted playback, data saver, notification, privacy, and theme settings",
+      "type": "object",
+      "properties": {
+        "playback": { "type": "object" },
+        "dataSaver": { "type": "object" },
+        "notifications": { "type": "object" },
+        "privacy": { "type": "object" },
+        "appearance": { "type": "object" }
+      }
+    },
+    "ArtistProfile": {
+      "title": "ArtistProfile",
+      "description": "Artist profile, follower counts, and admin-approved monetization state",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerUserId": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "handle": { "type": "string", "maxLength": 40 },
+        "avatar": { "type": "string" },
+        "banner": { "type": "string" },
+        "storageAvatarPath": { "type": "string" },
+        "storageBannerPath": { "type": "string" },
+        "bio": { "type": "string", "maxLength": 1000 },
+        "city": { "type": "string", "maxLength": 60 },
+        "location": { "type": "string" },
+        "country": { "type": "string" },
+        "genres": { "type": "array" },
+        "followersCount": { "type": "number" },
+        "monthlyListeners": { "type": "number" },
+        "verified": { "type": "boolean" },
+        "isMonetized": { "type": "boolean" },
+        "monetizationStatus": { "type": "string", "enum": ["locked", "pending", "approved", "rejected", "suspended"] },
+        "monetizationTermsAcceptedAt": { "type": "string" },
+        "monetizationRequestedAt": { "type": "string" },
+        "monetizationApprovedAt": { "type": "string" },
+        "monetizationApprovedBy": { "type": "string" },
+        "monetizationApprovalToken": { "type": "string", "maxLength": 128 },
+        "monetizationTokenSignature": { "type": "string", "maxLength": 1024 },
+        "monetizationRejectedAt": { "type": "string" },
+        "monetizationRejectionReason": { "type": "string" },
+        "monetizationReapplyAvailableAt": { "type": "string" },
+        "earningsBalanceMwk": { "type": "number" },
+        "pendingBalanceMwk": { "type": "number" },
+        "lifetimeEarningsMwk": { "type": "number" },
+        "copyrightStrikes": { "type": "number" }
+      },
+      "required": ["id", "name", "handle", "followersCount"]
+    },
+    "TrackRecord": {
+      "title": "TrackRecord",
+      "description": "Published or draft song uploaded to Firebase Storage",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string", "maxLength": 160 },
+        "artistId": { "type": "string" },
+        "artistName": { "type": "string", "maxLength": 100 },
+        "uploadedByUserId": { "type": "string" },
+        "coverArt": { "type": "string" },
+        "audioUrl": { "type": "string" },
+        "storageAudioPath": { "type": "string" },
+        "storageCoverPath": { "type": "string" },
+        "audioChecksum": { "type": "string" },
+        "artworkRightsConfirmed": { "type": "boolean" },
+        "durationSeconds": { "type": "number" },
+        "metadata": { "type": "object" },
+        "genre": { "type": "string" },
+        "mood": { "type": "string" },
+        "region": { "type": "string" },
+        "bpm": { "type": "number" },
+        "plays": { "type": "number" },
+        "likes": { "type": "number" },
+        "likedByUserIds": { "type": "array" },
+        "downloads": { "type": "number" },
+        "isDraft": { "type": "boolean" },
+        "releaseDate": { "type": "string" }
+      },
+      "required": ["id", "title", "artistId", "artistName", "durationSeconds"]
+    },
+    "PlayRecord": {
+      "title": "PlayRecord",
+      "description": "Deduplicated 30-second qualifying stream event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "trackId": { "type": "string" },
+        "artistId": { "type": "string" },
+        "userId": { "type": "string" },
+        "country": { "type": "string" },
+        "listenedSeconds": { "type": "number" },
+        "windowKey": { "type": "number" },
+        "isArtistSelfPlay": { "type": "boolean" },
+        "qualifiesForPayout": { "type": "boolean" },
+        "playedAt": { "type": "string" }
+      },
+      "required": ["id", "trackId", "artistId", "userId", "listenedSeconds", "windowKey"]
+    },
+    "PayoutMethod": {
+      "title": "PayoutMethod",
+      "description": "Mobile money or USDT wallet payout method with 24-hour security hold",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["airtel_money", "tnm_mpamba", "usdt_trc20", "usdt_bep20"] },
+        "label": { "type": "string" },
+        "maskedIdentifier": { "type": "string" },
+        "accountHolderName": { "type": "string" },
+        "isDefault": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["accepted", "pending", "rejected"] },
+        "acceptedAt": { "type": "string" },
+        "addedAt": { "type": "string" },
+        "payoutHoldUntil": { "type": "string" }
+      },
+      "required": ["id", "userId", "type", "maskedIdentifier", "payoutHoldUntil"]
+    },
+    "PayoutRequest": {
+      "title": "PayoutRequest",
+      "description": "Artist withdrawal request with explicit fee & net breakdown",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "artistId": { "type": "string" },
+        "userId": { "type": "string" },
+        "payoutMethodId": { "type": "string" },
+        "grossAmountMwk": { "type": "number" },
+        "feeMwk": { "type": "number" },
+        "netAmountMwk": { "type": "number" },
+        "status": { "type": "string", "enum": ["awaiting_review", "processing", "paid", "failed"] },
+        "txRef": { "type": "string", "maxLength": 128 },
+        "payoutToken": { "type": "string", "maxLength": 128 },
+        "payoutTokenSignature": { "type": "string", "maxLength": 1024 },
+        "settlementVerified": { "type": "boolean" },
+        "requestedAt": { "type": "string" }
+      },
+      "required": ["id", "artistId", "userId", "grossAmountMwk", "netAmountMwk", "status"]
+    },
+    "MonetizationConfig": {
+      "title": "MonetizationConfig",
+      "description": "Admin-configurable payout rate and eligibility thresholds",
+      "type": "object",
+      "properties": {
+        "ratePerPlayMwk": { "type": "number" },
+        "minWithdrawalMwk": { "type": "number" },
+        "payoutFeePercent": { "type": "number" },
+        "requiredPublishedTracks": { "type": "number" },
+        "requiredPlays30d": { "type": "number" },
+        "requiredFollowers": { "type": "number" },
+        "maxActiveStrikes": { "type": "number" },
+        "reapplyCooldownDays": { "type": "number" },
+        "payoutProviderConfigured": { "type": "boolean" }
+      }
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "User help ticket sent to admin support queue",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "subject": { "type": "string" },
+        "category": { "type": "string", "enum": ["account", "playback", "uploads", "payouts", "other"] },
+        "message": { "type": "string" },
+        "status": { "type": "string", "enum": ["open", "answered", "closed"] },
+        "adminReply": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "subject", "message", "status"]
+    },
+    "HandleLookup": {
+      "title": "HandleLookup",
+      "description": "Public uniqueness reservation mapping @username handles to owner userId",
+      "type": "object",
+      "properties": {
+        "handle": { "type": "string", "maxLength": 40 },
+        "userId": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["handle", "userId"]
+    },
+    "MediaAsset": {
+      "title": "MediaAsset",
+      "description": "Persistent media asset manifest (tracks, covers, avatars, banners) backed by server streaming and chunk fallback",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "contentType": { "type": "string" },
+        "sizeBytes": { "type": "number" },
+        "chunkCount": { "type": "number" },
+        "dataBase64": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "ownerId", "contentType", "sizeBytes", "chunkCount"]
+    },
+    "MediaChunk": {
+      "title": "MediaChunk",
+      "description": "Base64 media chunk stored under a MediaAsset manifest for cross-instance playback/image recovery",
+      "type": "object",
+      "properties": {
+        "index": { "type": "number" },
+        "ownerId": { "type": "string" },
+        "dataBase64": { "type": "string" }
+      },
+      "required": ["index", "dataBase64"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "UserProfile", "description": "User account profiles" },
+    "/users/{userId}/settings/{docId}": { "schema": "UserSettings", "description": "User preferences" },
+    "/handles/{handle}": { "schema": "HandleLookup", "description": "Public username availability lookup" },
+    "/artists/{artistId}": { "schema": "ArtistProfile", "description": "Artist profiles & monetization gating" },
+    "/tracks/{trackId}": { "schema": "TrackRecord", "description": "Song catalog" },
+    "/plays/{playId}": { "schema": "PlayRecord", "description": "Verified >=30s stream events" },
+    "/payoutMethods/{methodId}": { "schema": "PayoutMethod", "description": "Owner payout methods" },
+    "/payoutRequests/{requestId}": { "schema": "PayoutRequest", "description": "Withdrawal requests" },
+    "/config/{configId}": { "schema": "MonetizationConfig", "description": "Platform monetization config" },
+    "/tickets/{ticketId}": { "schema": "SupportTicket", "description": "Support tickets" },
+    "/mediaAssets/{assetId}": { "schema": "MediaAsset", "description": "Uploaded audio and artwork metadata manifests" },
+    "/mediaAssets/{assetId}/chunks/{chunkId}": { "schema": "MediaChunk", "description": "Uploaded binary media chunks" }
+  }
+}

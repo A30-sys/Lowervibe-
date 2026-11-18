@@ -1,0 +1,3271 @@
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  increment,
+  onSnapshot,
+  query,
+  runTransaction,
+  setDoc,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
+import { auth, db, formatFirebaseError, handleFirestoreError, OperationType, testFirestoreConnection } from '../services/firebase';
+import { audioEngine } from '../services/audioEngine';
+import { getAudioBlobUrl, saveAudioBlob } from '../services/audioStorage';
+import { upsertCustomGenre } from '../services/genresService';
+import { requestServerApprovalToken, requestServerPayoutToken } from '../services/payoutTokenService';
+import { durableDeleteDoc, durableSetDoc, durableUpdateDoc, flushPendingSyncOperations } from '../services/reliableSync';
+import { detectDefaultCountry } from '../data/regions';
+import {
+  Artist,
+  ArtistClaim,
+  ArtistEvent,
+  AuditLogEntry,
+  DEFAULT_MONETIZATION_CONFIG,
+  EqPreset,
+  FeaturedVibe,
+  FirestoreGenre,
+  MonetizationConfig,
+  PayoutMethod,
+  PayoutProviderType,
+  PayoutRequest,
+  PlayHistoryItem,
+  Playlist,
+  PlayRecord,
+  ReportRecord,
+  SupportTicket,
+  Track,
+  TrackComment,
+} from '../types';
+import { formatTime } from '../utils/formatters';
+import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG, DEFAULT_BANNER_SVG } from '../utils/artworkFallback';
+import { useAuth } from './AuthContext';
+import { useRouter } from './RouterContext';
+import { PRIMARY_ADMIN_EMAIL } from '../services/authService';
+
+export type RepeatMode = 'off' | 'all' | 'one';
+export type AudioQualityPreference = 'auto' | 'high' | 'saver' | 'lossless';
+export type PlaybackState = 'idle' | 'playing' | 'paused' | 'error';
+
+interface ResumePlaybackState {
+  trackId: string;
+  positionSeconds: number;
+  playbackRate: number;
+  updatedAt: number;
+}
+
+interface AudioContextType {
+  tracks: Track[];
+  artists: Artist[];
+  playlists: Playlist[];
+  events: ArtistEvent[];
+  claims: ArtistClaim[];
+  auditLogs: AuditLogEntry[];
+  featuredVibe: FeaturedVibe;
+  savedTrackIds: string[];
+  currentTrack: Track | null;
+  isPlaying: boolean;
+  playbackState: PlaybackState;
+  isMiniPlayerVisible: boolean;
+  hasPlayedInSession: boolean;
+  resumedFromStorage: boolean;
+  currentTime: number;
+  duration: number;
+  volume: number;
+  isMuted: boolean;
+  repeatMode: RepeatMode;
+  isLooping: boolean;
+  isShuffling: boolean;
+  queue: Track[];
+  crossfadeSeconds: number;
+  playbackRate: number;
+  audioQuality: AudioQualityPreference;
+  effectiveAudioQuality: 'high' | 'saver' | 'lossless';
+  estimatedMbPerMinute: number;
+  playbackError: string | null;
+  catalogError: string | null;
+  playHistory: PlayHistoryItem[];
+  isFullscreenPlayerOpen: boolean;
+  activeShareTrack: Track | null;
+  activeDetailTrack: Track | null;
+  selectedArtistModal: Artist | null;
+  isArtistSubmitModalOpen: boolean;
+  isAuthModalOpen: boolean;
+  authModalTab: 'login' | 'register';
+  isPlaylistModalOpen: boolean;
+  playlistModalTrack: Track | null;
+
+  // Visualizer & Audio Quality
+  isVisualizerActive: boolean;
+  visualizerStyle: 'bars' | 'wave' | 'pulse';
+  toggleVisualizer: () => void;
+  setVisualizerStyle: (style: 'bars' | 'wave' | 'pulse') => void;
+  eqPreset: EqPreset;
+  setEqPreset: (preset: EqPreset) => void;
+
+  isCatalogLoaded: boolean;
+
+  // Playback Controls
+  playTrack: (track: Track, options?: { crossfade?: boolean; startAtSeconds?: number; expandFullscreen?: boolean }) => void;
+  playTrackList: (items: Track[], startIndex?: number) => void;
+  togglePlayPause: () => void;
+  clearActiveTrack: () => void;
+  seekTo: (timeInSeconds: number) => void;
+  setVolume: (val: number) => void;
+  toggleMute: () => void;
+  cycleRepeatMode: () => void;
+  toggleLoop: () => void;
+  toggleShuffle: () => void;
+  playNextTrack: () => void;
+  playPrevTrack: () => void;
+  addToQueue: (track: Track) => void;
+  playNextInQueue: (track: Track) => void;
+  reorderQueue: (startIndex: number, endIndex: number) => void;
+  removeFromQueue: (index: number) => void;
+  clearQueue: () => void;
+  setCrossfadeSeconds: (sec: number) => void;
+  setPlaybackRate: (rate: number) => void;
+  setAudioQuality: (q: AudioQualityPreference) => void;
+  clearPlaybackError: () => void;
+  retryPlayback: () => void;
+  retryCatalogLoad: () => void;
+
+  // Sleep Timer
+  sleepTimerMinutes: number | null;
+  sleepAtEndOfTrack: boolean;
+  sleepTimerRemainingSeconds: number | null;
+  setSleepTimer: (minutes: number | null) => void;
+  setSleepAtEndOfTrack: (enabled: boolean) => void;
+  cancelSleepTimer: () => void;
+
+  clearHistory: () => void;
+  addCommentToTrack: (trackId: string, comment: Omit<TrackComment, 'id' | 'createdAt' | 'likes'>) => void;
+  likeComment: (trackId: string, commentId: string) => void;
+  addNewArtist: (artist: Omit<Artist, 'id' | 'followersCount' | 'monthlyListeners' | 'joinedDate' | 'verified'>) => Artist;
+  addNewTrack: (
+    trackData: Omit<Track, 'id' | 'plays' | 'likes' | 'reposts' | 'releaseDate' | 'comments'> &
+      Partial<Pick<Track, 'id' | 'plays' | 'likes' | 'reposts' | 'releaseDate' | 'comments'>>
+  ) => Track;
+  saveNewTrack: (
+    trackData: Omit<Track, 'id' | 'plays' | 'likes' | 'reposts' | 'releaseDate' | 'comments'> &
+      Partial<Pick<Track, 'id' | 'plays' | 'likes' | 'reposts' | 'releaseDate' | 'comments'>>
+  ) => Promise<Track>;
+  updateArtistProfile: (artistId: string, updates: Partial<Artist>) => Promise<{ success: boolean; error?: string }>;
+  updateTrack: (trackId: string, updates: Partial<Track>) => Promise<void>;
+  downloadTrack: (track: Track) => void;
+  deleteTrack: (trackId: string) => Promise<{ success: boolean; error?: string }>;
+  setCertifiedStatus: (trackId: string, certified: boolean) => void;
+  setTrackChartRank: (trackId: string, rank?: number) => void;
+
+  // Library & Social
+  toggleSaveTrack: (trackId: string) => void;
+  addReaction: (trackId: string, emoji: string) => void;
+  addEvent: (evt: Omit<ArtistEvent, 'id'>) => ArtistEvent;
+  submitClaim: (claim: Omit<ArtistClaim, 'id' | 'status' | 'submittedAt'>) => ArtistClaim;
+  approveClaim: (claimId: string, adminReason?: string) => void;
+  rejectClaim: (claimId: string, adminReason: string) => void;
+  setFeaturedVibeTrack: (trackId: string, curatorNote: string, quote: string) => void;
+  toggleDerankTrack: (trackId: string) => void;
+  toggleDraftTrack: (trackId: string) => Promise<{ success: boolean; error?: string }>;
+  scheduleRelease: (trackId: string, scheduledDate: string) => void;
+  addAuditLog: (action: string, targetType: AuditLogEntry['targetType'], targetId: string, details: string) => void;
+
+  // Location & Region
+  selectedCountry: string;
+  setSelectedCountry: (country: string) => void;
+  upsertGenre: (name: string, options?: { description?: string; region?: string }) => Promise<FirestoreGenre>;
+
+  // Playlists
+  createPublicPlaylist: (input: {
+    name: string;
+    description?: string;
+    coverArt?: string;
+    country?: string;
+    genre?: string;
+    trackIds?: string[];
+    isPublic?: boolean;
+  }) => Promise<Playlist>;
+  updatePublicPlaylist: (playlistId: string, updates: Partial<Playlist>) => Promise<void>;
+  deletePublicPlaylist: (playlistId: string) => Promise<void>;
+  reorderPlaylistTracks: (playlistId: string, fromIndex: number, toIndex: number) => Promise<void>;
+  removeTrackFromPlaylist: (playlistId: string, trackId: string) => Promise<void>;
+  toggleLikePlaylist: (playlistId: string) => void;
+  recordPlaylistPlay: (playlistId: string) => void;
+
+  // Monetization, Payouts, Reports & Support Tickets
+  monetizationConfig: MonetizationConfig;
+  updateMonetizationConfig: (updates: Partial<MonetizationConfig>) => Promise<void>;
+  payoutMethods: PayoutMethod[];
+  payoutRequests: PayoutRequest[];
+  supportTickets: SupportTicket[];
+  requestArtistMonetization: (
+    artistId: string,
+    termsAccepted: boolean
+  ) => Promise<{ success: boolean; autoApproved?: boolean; error?: string }>;
+  approveArtistMonetization: (artistId: string, approverOverride?: string) => void;
+  rejectArtistMonetization: (artistId: string, reason: string) => Promise<void>;
+  suspendArtistMonetization: (artistId: string, reason: string) => Promise<void>;
+  revokeArtistMonetization: (artistId: string, reason?: string) => void;
+  addPayoutMethod: (input: {
+    type: PayoutProviderType;
+    identifier: string;
+    accountHolderName: string;
+    artistId?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  removePayoutMethod: (methodId: string) => Promise<{ success: boolean; error?: string }>;
+  setDefaultPayoutMethod: (methodId: string) => Promise<{ success: boolean; error?: string }>;
+  submitPayoutRequest: (input: {
+    artistId: string;
+    artistName: string;
+    payoutMethodId: string;
+    grossAmountMwk: number;
+  }) => Promise<{ success: boolean; error?: string; request?: PayoutRequest }>;
+  updatePayoutRequestStatus: (
+    requestId: string,
+    status: PayoutRequest['status'],
+    failureReason?: string
+  ) => Promise<void>;
+  submitContentReportRecord: (input: {
+    type: ReportRecord['type'];
+    trackId?: string;
+    trackTitle?: string;
+    artistId?: string;
+    artistName?: string;
+    reason: string;
+    details?: string;
+    evidenceUrl?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  submitSupportTicket: (input: {
+    subject: string;
+    category: SupportTicket['category'];
+    message: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  boostArtistFollowers: (artistId: string, amount?: number) => void;
+
+  // Analytics Modal
+  isAnalyticsModalOpen: boolean;
+  analyticsArtist: Artist | null;
+  openAnalyticsModal: (artist?: Artist | null) => void;
+  closeAnalyticsModal: () => void;
+
+  // UI state setters
+  setIsFullscreenPlayerOpen: (open: boolean) => void;
+  setActiveShareTrack: (track: Track | null) => void;
+  setActiveDetailTrack: (track: Track | null) => void;
+  setSelectedArtistModal: (artist: Artist | null) => void;
+  setIsArtistSubmitModalOpen: (open: boolean) => void;
+  openAuthModal: (tab?: 'login' | 'register') => void;
+  closeAuthModal: () => void;
+  openPlaylistModal: (track: Track) => void;
+  closePlaylistModal: () => void;
+  isLegalModalOpen: boolean;
+  legalModalType: 'terms' | 'privacy' | null;
+  openLegalModal: (type: 'terms' | 'privacy') => void;
+  closeLegalModal: () => void;
+
+  activeDownload: {
+    trackId: string;
+    trackTitle: string;
+    artistName: string;
+    progress: number;
+    isComplete: boolean;
+  } | null;
+
+  dismissAllModals: () => void;
+}
+
+const AudioContext = createContext<AudioContextType | undefined>(undefined);
+
+const TRACKS_STORAGE_KEY = 'lowervibe_tracks_v3';
+const ARTISTS_STORAGE_KEY = 'lowervibe_artists_v3';
+const EVENTS_STORAGE_KEY = 'lowervibe_events_v3';
+const AUDIT_STORAGE_KEY = 'lowervibe_audit_v3';
+const FEATURED_VIBE_KEY = 'lowervibe_featured_vibe_v3';
+const HISTORY_STORAGE_KEY = 'lowervibe_history_v3';
+const RESUME_PLAYBACK_KEY = 'lowervibe_resume_playback_v1';
+const QUALITY_PREF_KEY = 'lowervibe_audio_quality_v1';
+const PLAY_DEDUPE_KEY = 'lowervibe_play_dedupe_v1';
+
+function dedupeTracksById(items: Track[]): Track[] {
+  const seen = new Map<string, Track>();
+  for (const item of items) {
+    if (item && item.id && !seen.has(item.id)) {
+      seen.set(item.id, item);
+    }
+  }
+  return Array.from(seen.values());
+}
+
+/**
+ * Clean artist display name (never contain raw slashes like "THALIBANI/victolpee")
+ * and canonicalize matching key for deduplicating artist records on startup.
+ */
+function cleanArtistDisplayName(rawName: string): string {
+  const trimmed = (rawName || 'Artist').trim();
+  if (!trimmed.includes('/')) return trimmed;
+  const parts = trimmed
+    .split('/')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return 'Artist';
+  if (parts.length === 1) return parts[0];
+  // Prefer the second collaborator or clean joined form; if one is an alias of a single artist, keep clean title case
+  const last = parts[parts.length - 1];
+  return last.charAt(0).toUpperCase() + last.slice(1);
+}
+
+function artistMatchKeys(rawName: string): string[] {
+  const parts = (rawName || '')
+    .split(/[/,&]+/)
+    .map((p) => p.trim().toLowerCase().replace(/[^a-z0-9]/g, ''))
+    .filter((k) => k.length >= 3);
+  const fullKey = (rawName || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  return Array.from(new Set([fullKey, ...parts].filter(Boolean)));
+}
+
+function dedupeArtistsCatalog(rawArtists: Artist[]): {
+  artists: Artist[];
+  idRemap: Map<string, Artist>;
+} {
+  const canonicalByKey = new Map<string, Artist>();
+  const idRemap = new Map<string, Artist>();
+
+  // Sort verified or higher follower artists first so they win canonical identity
+  const sorted = [...rawArtists].sort((a, b) => {
+    const aHasSlash = (a.name || '').includes('/') ? 1 : 0;
+    const bHasSlash = (b.name || '').includes('/') ? 1 : 0;
+    if (aHasSlash !== bHasSlash) return aHasSlash - bHasSlash;
+    if (Boolean(a.verified) !== Boolean(b.verified)) return a.verified ? -1 : 1;
+    return (b.followersCount || 0) - (a.followersCount || 0);
+  });
+
+  for (const candidate of sorted) {
+    const cleanName = cleanArtistDisplayName(candidate.name);
+    const keys = artistMatchKeys(candidate.name);
+    let existing: Artist | undefined;
+    for (const key of keys) {
+      if (canonicalByKey.has(key)) {
+        existing = canonicalByKey.get(key);
+        break;
+      }
+    }
+
+    if (existing) {
+      existing.followersCount = Math.max(existing.followersCount || 0, candidate.followersCount || 0);
+      existing.monthlyListeners = Math.max(existing.monthlyListeners || 0, candidate.monthlyListeners || 0);
+      existing.totalStreams = (existing.totalStreams || 0) + (candidate.totalStreams || 0);
+      existing.verified = Boolean(existing.verified || candidate.verified);
+      existing.likedByUserIds = Array.from(
+        new Set([...(existing.likedByUserIds || []), ...(candidate.likedByUserIds || [])])
+      );
+      existing.likesCount = existing.likedByUserIds.length;
+      idRemap.set(candidate.id, existing);
+      for (const key of keys) {
+        canonicalByKey.set(key, existing);
+      }
+    } else {
+      const normalized: Artist = {
+        ...candidate,
+        name: cleanName,
+      };
+      idRemap.set(candidate.id, normalized);
+      for (const key of keys) {
+        canonicalByKey.set(key, normalized);
+      }
+    }
+  }
+
+  const uniqueMap = new Map<string, Artist>();
+  canonicalByKey.forEach((a) => uniqueMap.set(a.id, a));
+  return {
+    artists: Array.from(uniqueMap.values()),
+    idRemap,
+  };
+}
+
+function getEffectiveConnectionQuality(): 'high' | 'saver' {
+  if (typeof navigator === 'undefined') return 'high';
+  const nav = navigator as Navigator & {
+    connection?: { effectiveType?: string; saveData?: boolean };
+  };
+  if (nav.connection?.saveData) return 'saver';
+  const eff = nav.connection?.effectiveType;
+  if (eff === 'slow-2g' || eff === '2g') return 'saver';
+  return 'high';
+}
+
+export function isTrackLosslessSource(track?: Track | null): boolean {
+  if (!track) return false;
+  const fmt = `${track.audioFormat || ''} ${track.metadata?.audioFormat || ''} ${track.audioQuality || ''}`.toLowerCase();
+  return fmt.includes('flac') || fmt.includes('wav') || fmt.includes('aiff') || fmt.includes('alac');
+}
+
+export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { currentUser, authReady, emailVerified, requireAuth, userSettings, updateUserSettings, updateCurrentUser } = useAuth();
+  const { navigate } = useRouter();
+
+  const [isCatalogLoaded, setIsCatalogLoaded] = useState<boolean>(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogReloadNonce, setCatalogReloadNonce] = useState<number>(0);
+
+  const [tracks, setTracks] = useState<Track[]>(() => {
+    try {
+      const saved = localStorage.getItem(TRACKS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return dedupeTracksById(parsed);
+      }
+    } catch {}
+    return [];
+  });
+
+  const [artists, setArtists] = useState<Artist[]>(() => {
+    try {
+      const saved = localStorage.getItem(ARTISTS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return dedupeArtistsCatalog(parsed).artists;
+      }
+    } catch {}
+    return [];
+  });
+
+  const [playlists, setPlaylists] = useState<Playlist[]>(() => {
+    try {
+      const saved = localStorage.getItem('lowervibe_playlists_v3');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+
+  const [events, setEvents] = useState<ArtistEvent[]>(() => {
+    try {
+      const saved = localStorage.getItem(EVENTS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
+
+  const [claims, setClaims] = useState<ArtistClaim[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem(AUDIT_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
+
+  const [monetizationConfig, setMonetizationConfig] = useState<MonetizationConfig>(DEFAULT_MONETIZATION_CONFIG);
+  const [payoutMethods, setPayoutMethods] = useState<PayoutMethod[]>([]);
+  const [payoutRequests, setPayoutRequests] = useState<PayoutRequest[]>([]);
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
+
+  const [featuredVibe, setFeaturedVibe] = useState<FeaturedVibe>(() => {
+    try {
+      const saved = localStorage.getItem(FEATURED_VIBE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch {}
+    return {
+      trackId: '',
+      date: new Date().toISOString().split('T')[0],
+      curatorName: 'LOWERVIBE',
+      curatorRole: 'Featured',
+      curatorNote: '',
+      quoteSnippet: '',
+    };
+  });
+
+  const [savedTrackIds, setSavedTrackIds] = useState<string[]>(() => {
+    try {
+      const s = localStorage.getItem('lowervibe_saved_tracks');
+      if (s) {
+        const parsed = JSON.parse(s);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+
+  const [playHistory, setPlayHistory] = useState<PlayHistoryItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(HISTORY_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          // Always ensure deduplicated by trackId, newest first
+          const seen = new Set<string>();
+          return parsed.filter((item: PlayHistoryItem) => {
+            if (!item?.trackId || seen.has(item.trackId)) return false;
+            seen.add(item.trackId);
+            return true;
+          });
+        }
+      }
+    } catch {}
+    return [];
+  });
+
+  const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [hasPlayedInSession, setHasPlayedInSession] = useState<boolean>(false);
+  const [resumedFromStorage, setResumedFromStorage] = useState<boolean>(false);
+  const [pendingResumeSeekSeconds, setPendingResumeSeekSeconds] = useState<number>(0);
+
+  const [currentTime, setCurrentTime] = useState<number>(0);
+  const [duration, setDuration] = useState<number>(0);
+  const [volume, setVolumeState] = useState<number>(0.85);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [repeatMode, setRepeatMode] = useState<RepeatMode>('off');
+  const [isShuffling, setIsShuffling] = useState<boolean>(false);
+  const [queue, setQueue] = useState<Track[]>([]);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+
+  const [crossfadeSeconds, setCrossfadeSecondsState] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('lowervibe_crossfade_v2');
+      return saved !== null ? Math.max(0, Math.min(12, Number(saved))) : 0;
+    } catch {
+      return 0;
+    }
+  });
+
+  const [playbackRate, setPlaybackRateState] = useState<number>(1);
+  const [audioQuality, setAudioQualityState] = useState<AudioQualityPreference>(() => {
+    try {
+      const saved = localStorage.getItem(QUALITY_PREF_KEY);
+      if (saved === 'auto' || saved === 'high' || saved === 'saver' || saved === 'lossless') {
+        return saved;
+      }
+    } catch {}
+    return 'auto';
+  });
+
+  // Sync user settings playback options to AudioEngine
+  useEffect(() => {
+    const p = userSettings.playback;
+    if (typeof p.crossfadeSeconds === 'number') {
+      setCrossfadeSecondsState(Math.max(0, Math.min(12, p.crossfadeSeconds)));
+    }
+    if (p.streamingQuality) {
+      setAudioQualityState(userSettings.dataSaver.enabled ? 'saver' : p.streamingQuality);
+    }
+    if (p.eqPreset) {
+      setEqPresetState(p.eqPreset);
+      audioEngine.setEqPreset(p.eqPreset);
+    }
+    audioEngine.setNormalizeVolume(Boolean(p.normalizeVolume));
+    audioEngine.setMonoAudio(Boolean(p.monoAudio));
+  }, [userSettings.playback, userSettings.dataSaver.enabled]);
+
+  const setCrossfadeSeconds = (sec: number) => {
+    const clamped = Math.max(0, Math.min(12, Math.round(sec)));
+    setCrossfadeSecondsState(clamped);
+    try {
+      localStorage.setItem('lowervibe_crossfade_v2', String(clamped));
+    } catch {}
+    updateUserSettings({ playback: { crossfadeSeconds: clamped } });
+  };
+
+  const setPlaybackRate = (rate: number) => {
+    const clamped = Math.max(0.5, Math.min(2, rate));
+    setPlaybackRateState(clamped);
+    audioEngine.setPlaybackRate(clamped);
+  };
+
+  const setAudioQuality = (q: AudioQualityPreference) => {
+    setAudioQualityState(q);
+    try {
+      localStorage.setItem(QUALITY_PREF_KEY, q);
+    } catch {}
+    if (q === 'auto' || q === 'high' || q === 'saver') {
+      updateUserSettings({ playback: { streamingQuality: q } });
+    }
+  };
+
+  const [networkEffectiveQuality, setNetworkEffectiveQuality] = useState<'high' | 'saver'>(
+    getEffectiveConnectionQuality
+  );
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined') return;
+    const nav = navigator as Navigator & {
+      connection?: { addEventListener?: (e: string, fn: () => void) => void; removeEventListener?: (e: string, fn: () => void) => void };
+    };
+    const update = () => setNetworkEffectiveQuality(getEffectiveConnectionQuality());
+    nav.connection?.addEventListener?.('change', update);
+    return () => nav.connection?.removeEventListener?.('change', update);
+  }, []);
+
+  const effectiveAudioQuality: 'high' | 'saver' | 'lossless' = (() => {
+    if (userSettings.dataSaver.enabled) return 'saver';
+    if (audioQuality === 'lossless') {
+      return isTrackLosslessSource(currentTrack) ? 'lossless' : 'high';
+    }
+    if (audioQuality === 'saver') return 'saver';
+    if (audioQuality === 'high') return 'high';
+    return networkEffectiveQuality;
+  })();
+
+  const estimatedMbPerMinute =
+    effectiveAudioQuality === 'lossless' ? 6.5 : effectiveAudioQuality === 'high' ? 1.8 : 0.6;
+
+  // Sleep Timer state
+  const [sleepTimerMinutes, setSleepTimerMinutesState] = useState<number | null>(null);
+  const [sleepAtEndOfTrack, setSleepAtEndOfTrackState] = useState<boolean>(false);
+  const [sleepTimerEndsAt, setSleepTimerEndsAt] = useState<number | null>(null);
+  const [sleepTimerRemainingSeconds, setSleepTimerRemainingSeconds] = useState<number | null>(null);
+  const isFadingOutSleepRef = useRef<boolean>(false);
+
+  const setSleepTimer = (minutes: number | null) => {
+    isFadingOutSleepRef.current = false;
+    setSleepAtEndOfTrackState(false);
+    if (minutes === null || minutes <= 0) {
+      setSleepTimerMinutesState(null);
+      setSleepTimerEndsAt(null);
+      setSleepTimerRemainingSeconds(null);
+    } else {
+      setSleepTimerMinutesState(minutes);
+      const endsAt = Date.now() + minutes * 60 * 1000;
+      setSleepTimerEndsAt(endsAt);
+      setSleepTimerRemainingSeconds(minutes * 60);
+    }
+  };
+
+  const setSleepAtEndOfTrack = (enabled: boolean) => {
+    if (enabled) {
+      setSleepTimerMinutesState(null);
+      setSleepTimerEndsAt(null);
+      setSleepTimerRemainingSeconds(null);
+    }
+    setSleepAtEndOfTrackState(enabled);
+  };
+
+  const cancelSleepTimer = () => {
+    setSleepAtEndOfTrackState(false);
+    setSleepTimer(null);
+  };
+
+  useEffect(() => {
+    if (!sleepTimerEndsAt) {
+      setSleepTimerRemainingSeconds(null);
+      isFadingOutSleepRef.current = false;
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      const now = Date.now();
+      const remaining = Math.max(0, Math.ceil((sleepTimerEndsAt - now) / 1000));
+      setSleepTimerRemainingSeconds(remaining);
+
+      if (remaining <= 0 && !isFadingOutSleepRef.current) {
+        isFadingOutSleepRef.current = true;
+        clearInterval(interval);
+        setSleepTimerMinutesState(null);
+        setSleepTimerEndsAt(null);
+        setSleepTimerRemainingSeconds(null);
+        audioEngine.fadeOutAndPause(3, () => {
+          setIsPlaying(false);
+          isFadingOutSleepRef.current = false;
+        });
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [sleepTimerEndsAt]);
+
+  // Location / Country selector state
+  const [selectedCountry, setSelectedCountryState] = useState<string>(() => detectDefaultCountry());
+
+  useEffect(() => {
+    if (currentUser?.country && currentUser.country.trim()) {
+      setSelectedCountryState(currentUser.country);
+      try {
+        localStorage.setItem('lowervibe_user_country', currentUser.country);
+      } catch {}
+    }
+  }, [currentUser?.country]);
+
+  const setSelectedCountry = (country: string) => {
+    const clean = country.trim() || 'Malawi';
+    setSelectedCountryState(clean);
+    try {
+      localStorage.setItem('lowervibe_user_country', clean);
+    } catch {}
+    if (currentUser) {
+      updateDoc(doc(db, 'users', currentUser.id), { country: clean }).catch(() => {});
+    }
+  };
+
+  // Modals & Drawers
+  const [isFullscreenPlayerOpen, setIsFullscreenPlayerOpen] = useState<boolean>(false);
+  const [activeShareTrack, setActiveShareTrack] = useState<Track | null>(null);
+  const [activeDetailTrack, setActiveDetailTrack] = useState<Track | null>(null);
+  const [selectedArtistModal, setSelectedArtistModal] = useState<Artist | null>(null);
+  const [isArtistSubmitModalOpen, setIsArtistSubmitModalOpen] = useState<boolean>(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('login');
+  const [isPlaylistModalOpen, setIsPlaylistModalOpen] = useState<boolean>(false);
+  const [playlistModalTrack, setPlaylistModalTrack] = useState<Track | null>(null);
+  const [isAnalyticsModalOpen, setIsAnalyticsModalOpen] = useState<boolean>(false);
+  const [analyticsArtist, setAnalyticsArtist] = useState<Artist | null>(null);
+
+  const [isVisualizerActive, setIsVisualizerActive] = useState<boolean>(true);
+  const [visualizerStyle, setVisualizerStyleState] = useState<'bars' | 'wave' | 'pulse'>('bars');
+  const [eqPreset, setEqPresetState] = useState<EqPreset>('flat');
+
+  const [isLegalModalOpen, setIsLegalModalOpen] = useState<boolean>(false);
+  const [legalModalType, setLegalModalType] = useState<'terms' | 'privacy' | null>(null);
+
+  const [activeDownload, setActiveDownload] = useState<{
+    trackId: string;
+    trackTitle: string;
+    artistName: string;
+    progress: number;
+    isComplete: boolean;
+  } | null>(null);
+
+  const sessionListenedSeconds = useRef<number>(0);
+  const hasStreamBeenValidated = useRef<boolean>(false);
+  const hasAttemptedResumeRestoreRef = useRef<boolean>(false);
+  const artistRemapRef = useRef<Map<string, Artist>>(new Map());
+  const migrationRanRef = useRef<boolean>(false);
+
+  // Local cache persistence
+  useEffect(() => {
+    try { localStorage.setItem(TRACKS_STORAGE_KEY, JSON.stringify(tracks)); } catch {}
+  }, [tracks]);
+
+  useEffect(() => {
+    try { localStorage.setItem(ARTISTS_STORAGE_KEY, JSON.stringify(artists)); } catch {}
+  }, [artists]);
+
+  useEffect(() => {
+    try { localStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(events)); } catch {}
+  }, [events]);
+
+  useEffect(() => {
+    try { localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(auditLogs)); } catch {}
+  }, [auditLogs]);
+
+  useEffect(() => {
+    try { localStorage.setItem(FEATURED_VIBE_KEY, JSON.stringify(featuredVibe)); } catch {}
+  }, [featuredVibe]);
+
+  useEffect(() => {
+    try { localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(playHistory)); } catch {}
+  }, [playHistory]);
+
+  useEffect(() => {
+    try { localStorage.setItem('lowervibe_playlists_v3', JSON.stringify(playlists)); } catch {}
+  }, [playlists]);
+
+  // Save exact playback track + position so reopen restores cleanly (only while active)
+  useEffect(() => {
+    if (!currentTrack) {
+      return;
+    }
+    try {
+      const state: ResumePlaybackState = {
+        trackId: currentTrack.id,
+        positionSeconds: Math.floor(currentTime),
+        playbackRate,
+        updatedAt: Date.now(),
+      };
+      localStorage.setItem(RESUME_PLAYBACK_KEY, JSON.stringify(state));
+    } catch {}
+  }, [currentTrack?.id, Math.floor(currentTime / 2), playbackRate]);
+
+  // Update playHistory listened progress periodically for "Continue listening" bar
+  useEffect(() => {
+    if (!currentTrack || currentTime <= 1) return;
+    const roundedPos = Math.floor(currentTime);
+    setPlayHistory((prev) =>
+      prev.map((item) =>
+        item.trackId === currentTrack.id
+          ? {
+              ...item,
+              listenedDurationSeconds: roundedPos,
+              completed: duration > 0 && roundedPos >= Math.max(0, duration - 5),
+            }
+          : item
+      )
+    );
+  }, [currentTrack?.id, Math.floor(currentTime / 5), duration]);
+
+  // Restore saved track + position once catalog loads (ONLY if it wasn't finished / dismissed)
+  useEffect(() => {
+    if (hasAttemptedResumeRestoreRef.current || tracks.length === 0) return;
+    hasAttemptedResumeRestoreRef.current = true;
+    try {
+      const raw = localStorage.getItem(RESUME_PLAYBACK_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as ResumePlaybackState;
+      if (!saved?.trackId) return;
+      const found = tracks.find((t) => t.id === saved.trackId && !t.isDraft && !t.isDeranked);
+      if (!found) return;
+      const maxPos = Math.max(
+        0,
+        Math.min(saved.positionSeconds || 0, Math.max(0, (found.durationSeconds || 0) - 2))
+      );
+      setCurrentTrack(found);
+      setDuration(found.durationSeconds || 0);
+      setCurrentTime(maxPos);
+      setPendingResumeSeekSeconds(maxPos);
+      if (saved.playbackRate) {
+        setPlaybackRateState(saved.playbackRate);
+        audioEngine.setPlaybackRate(saved.playbackRate);
+      }
+      setResumedFromStorage(true);
+    } catch {}
+  }, [tracks]);
+
+  const didRunConnectionCheckRef = useRef(false);
+
+  // Firestore Real-time Catalog Synchronizers + Startup Artist Dedupe Migration
+  useEffect(() => {
+    setCatalogError(null);
+    if (!didRunConnectionCheckRef.current) {
+      didRunConnectionCheckRef.current = true;
+      testFirestoreConnection().catch(() => {});
+    }
+
+    const unsubTracks = onSnapshot(
+      collection(db, 'tracks'),
+      (snap) => {
+        const mapped = snap.docs.map((d) => {
+          const raw = d.data() as Track;
+          const resolvedDuration = Math.max(
+            0,
+            Math.round(raw.metadata?.Duration ?? raw.metadata?.duration ?? raw.durationSeconds ?? 0)
+          );
+          const likedBy = Array.isArray(raw.likedByUserIds)
+            ? Array.from(new Set(raw.likedByUserIds.filter(Boolean)))
+            : undefined;
+          const remappedArtist = artistRemapRef.current.get(raw.artistId);
+          return {
+            ...raw,
+            id: d.id,
+            artistId: remappedArtist ? remappedArtist.id : raw.artistId,
+            artistName: remappedArtist ? remappedArtist.name : cleanArtistDisplayName(raw.artistName),
+            coverArt: raw.coverArt || DEFAULT_ARTWORK_SVG,
+            artistAvatar: raw.artistAvatar || DEFAULT_AVATAR_SVG,
+            durationSeconds: resolvedDuration,
+            metadata: {
+              ...(raw.metadata || {}),
+              Duration: resolvedDuration,
+              duration: resolvedDuration,
+              durationFormatted: raw.metadata?.durationFormatted || formatTime(resolvedDuration),
+              bitrate: raw.metadata?.bitrate || raw.bitrate,
+              sampleRate: raw.metadata?.sampleRate || raw.sampleRate,
+              bitDepth: raw.metadata?.bitDepth || raw.bitDepth,
+              fileSize: raw.metadata?.fileSize || raw.fileSize,
+              audioFormat: raw.metadata?.audioFormat || raw.audioFormat || raw.audioQuality,
+              isrcCode: raw.metadata?.isrcCode || raw.isrcCode,
+              bpm: raw.metadata?.bpm ?? raw.bpm,
+              keySignature: raw.metadata?.keySignature || raw.keySignature,
+              composer: raw.metadata?.composer || raw.composer,
+              recordLabel: raw.metadata?.recordLabel || raw.recordLabel,
+            },
+            likedByUserIds: likedBy,
+            likes: likedBy ? likedBy.length : Math.max(0, raw.likes || 0),
+          } as Track;
+        });
+
+        const loadedTracks = dedupeTracksById(mapped);
+        setTracks(loadedTracks);
+        setIsCatalogLoaded(true);
+        setCatalogError(null);
+        setCurrentTrack((prev) => {
+          if (!prev) return null;
+          return loadedTracks.find((t) => t.id === prev.id) || prev;
+        });
+        setActiveDetailTrack((prev) => {
+          if (!prev) return null;
+          return loadedTracks.find((t) => t.id === prev.id) || prev;
+        });
+      },
+      (err) => {
+        setIsCatalogLoaded(true);
+        setCatalogError(formatFirebaseError(err, 'Could not load music catalog'));
+        try {
+          handleFirestoreError(err, OperationType.LIST, 'tracks');
+        } catch {}
+      }
+    );
+
+    const unsubArtists = onSnapshot(
+      collection(db, 'artists'),
+      (snap) => {
+        const rawArtists = snap.docs.map((d) => {
+          const raw = d.data() as Partial<Artist> & { headerImage?: string; genre?: string; region?: string };
+          const safeName = raw.name || 'Artist';
+          const cleanName = cleanArtistDisplayName(safeName);
+          const safeHandle = raw.handle || `@${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'artist'}`;
+          const likedBy = Array.isArray(raw.likedByUserIds)
+            ? Array.from(new Set(raw.likedByUserIds.filter(Boolean)))
+            : undefined;
+          return {
+            ...raw,
+            id: d.id,
+            name: safeName,
+            handle: safeHandle,
+            avatar: raw.avatar || DEFAULT_AVATAR_SVG,
+            banner: raw.banner || raw.headerImage || DEFAULT_BANNER_SVG,
+            bio: raw.bio || '',
+            location: raw.location || raw.region || raw.country || 'Malawi',
+            country: raw.country || raw.location || raw.region || '',
+            followersCount: typeof raw.followersCount === 'number' ? raw.followersCount : 0,
+            likedByUserIds: likedBy,
+            likesCount: likedBy ? likedBy.length : Math.max(0, raw.likesCount || 0),
+            monthlyListeners: typeof raw.monthlyListeners === 'number' ? raw.monthlyListeners : 0,
+            verified: Boolean(raw.verified),
+            joinedDate: raw.joinedDate || new Date().toISOString(),
+            genres: Array.isArray(raw.genres) ? raw.genres : raw.genre ? [raw.genre] : ['Afro-Fusion'],
+            socials: raw.socials && typeof raw.socials === 'object' ? raw.socials : {},
+            gearAndSetup: Array.isArray(raw.gearAndSetup) ? raw.gearAndSetup : [],
+            endorsedBy: Array.isArray(raw.endorsedBy) ? raw.endorsedBy : [],
+          } as Artist;
+        });
+
+        const { artists: dedupedArtists, idRemap } = dedupeArtistsCatalog(rawArtists);
+        artistRemapRef.current = idRemap;
+        setArtists(dedupedArtists);
+
+        // Apply artist name/ID deduplication to loaded tracks immediately
+        setTracks((prevTracks) =>
+          prevTracks.map((t) => {
+            const canonical = idRemap.get(t.artistId);
+            if (!canonical) return t;
+            if (canonical.id !== t.artistId || canonical.name !== t.artistName) {
+              return { ...t, artistId: canonical.id, artistName: canonical.name };
+            }
+            return t;
+          })
+        );
+
+        // Run one-time persistent cleanup in Firestore when owner admin signs in
+        if (!migrationRanRef.current && currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL) {
+          migrationRanRef.current = true;
+          rawArtists.forEach((rawA) => {
+            const canonical = idRemap.get(rawA.id);
+            if (!canonical) return;
+            if (canonical.id !== rawA.id) {
+              deleteDoc(doc(db, 'artists', rawA.id)).catch(() => {});
+            } else if (rawA.name.includes('/') && canonical.name !== rawA.name) {
+              updateDoc(doc(db, 'artists', canonical.id), { name: canonical.name }).catch(() => {});
+            }
+          });
+        }
+      },
+      (err) => {
+        console.error('Artists listener error:', formatFirebaseError(err));
+      }
+    );
+
+    const fbUser = auth.currentUser;
+    const isAuthenticatedSession = Boolean(
+      authReady && currentUser && fbUser && fbUser.uid === currentUser.id
+    );
+    const activeUid = isAuthenticatedSession && fbUser ? fbUser.uid : null;
+    const isVerifiedAdminUser = Boolean(
+      isAuthenticatedSession &&
+        fbUser &&
+        fbUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL &&
+        fbUser.emailVerified
+    );
+
+    let publicPlaylistsCache: Playlist[] = [];
+    let ownPlaylistsCache: Playlist[] = [];
+    const syncMergedPlaylists = () => {
+      const merged = new Map<string, Playlist>();
+      publicPlaylistsCache.forEach((p) => merged.set(p.id, p));
+      ownPlaylistsCache.forEach((p) => merged.set(p.id, p));
+      setPlaylists(Array.from(merged.values()));
+    };
+
+    const unsubPlaylists = isVerifiedAdminUser
+      ? onSnapshot(
+          collection(db, 'playlists'),
+          (snap) => {
+            setPlaylists(snap.docs.map((d) => ({ ...d.data(), id: d.id } as Playlist)));
+          },
+          () => {}
+        )
+      : onSnapshot(
+          query(collection(db, 'playlists'), where('isPublic', '==', true)),
+          (snap) => {
+            publicPlaylistsCache = snap.docs.map((d) => ({ ...d.data(), id: d.id } as Playlist));
+            syncMergedPlaylists();
+          },
+          () => {}
+        );
+
+    let unsubOwnPlaylists = () => {};
+    if (activeUid && !isVerifiedAdminUser) {
+      unsubOwnPlaylists = onSnapshot(
+        query(collection(db, 'playlists'), where('createdBy', '==', activeUid)),
+        (snap) => {
+          ownPlaylistsCache = snap.docs.map((d) => ({ ...d.data(), id: d.id } as Playlist));
+          syncMergedPlaylists();
+        },
+        () => {}
+      );
+    }
+
+    const unsubEvents = onSnapshot(
+      collection(db, 'events'),
+      (snap) => {
+        const loadedEvents = snap.docs.map((d) => ({ ...d.data(), id: d.id } as ArtistEvent));
+        setEvents(loadedEvents);
+      },
+      () => {}
+    );
+
+    const unsubPlatformConfig = onSnapshot(
+      doc(db, 'config', 'platform'),
+      (snap) => {
+        if (snap.exists()) {
+          setMonetizationConfig({ ...DEFAULT_MONETIZATION_CONFIG, ...(snap.data() as Partial<MonetizationConfig>) });
+        }
+      },
+      () => {}
+    );
+
+    let unsubPayoutMethods = () => {};
+    let unsubPayoutRequests = () => {};
+    let unsubTickets = () => {};
+
+    if (activeUid) {
+      unsubPayoutMethods = onSnapshot(
+        query(collection(db, 'payoutMethods'), where('userId', '==', activeUid)),
+        (snap) => {
+          setPayoutMethods(snap.docs.map((d) => ({ ...d.data(), id: d.id } as PayoutMethod)));
+        },
+        (err) => {
+          console.error('Payout methods listener error:', formatFirebaseError(err));
+        }
+      );
+
+      unsubPayoutRequests = onSnapshot(
+        isVerifiedAdminUser
+          ? collection(db, 'payoutRequests')
+          : query(collection(db, 'payoutRequests'), where('userId', '==', activeUid)),
+        (snap) => {
+          setPayoutRequests(
+            snap.docs
+              .map((d) => ({ ...d.data(), id: d.id } as PayoutRequest))
+              .sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime())
+          );
+        },
+        (err) => {
+          console.error('Payout requests listener error:', formatFirebaseError(err));
+        }
+      );
+
+      unsubTickets = onSnapshot(
+        isVerifiedAdminUser
+          ? collection(db, 'tickets')
+          : query(collection(db, 'tickets'), where('userId', '==', activeUid)),
+        (snap) => {
+          setSupportTickets(
+            snap.docs
+              .map((d) => ({ ...d.data(), id: d.id } as SupportTicket))
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          );
+        },
+        () => {}
+      );
+    } else {
+      setPayoutMethods([]);
+      setPayoutRequests([]);
+      setSupportTickets([]);
+    }
+
+    let unsubAudit = () => {};
+    if (isVerifiedAdminUser) {
+      unsubAudit = onSnapshot(
+        collection(db, 'audit_logs'),
+        (snap) => {
+          setAuditLogs(snap.docs.map((d) => ({ ...d.data(), id: d.id } as AuditLogEntry)));
+        },
+        () => {}
+      );
+    }
+
+    return () => {
+      unsubTracks();
+      unsubArtists();
+      unsubPlaylists();
+      unsubOwnPlaylists();
+      unsubEvents();
+      unsubPlatformConfig();
+      unsubPayoutMethods();
+      unsubPayoutRequests();
+      unsubTickets();
+      unsubAudit();
+    };
+  }, [authReady, currentUser?.id, currentUser?.email, emailVerified, catalogReloadNonce]);
+
+  const retryCatalogLoad = () => {
+    setIsCatalogLoaded(false);
+    setCatalogError(null);
+    setCatalogReloadNonce((n) => n + 1);
+  };
+
+  // Preload next track for gapless handoff
+  useEffect(() => {
+    const nextCandidate =
+      queue[0] ||
+      tracks.find((t, idx, arr) => {
+        if (!currentTrack) return false;
+        const curIdx = arr.findIndex((x) => x.id === currentTrack.id);
+        return curIdx >= 0 && idx === (curIdx + 1) % arr.length && t.id !== currentTrack.id;
+      });
+
+    if (nextCandidate?.audioUrl) {
+      audioEngine.preloadNext(nextCandidate.audioUrl, effectiveAudioQuality === 'saver');
+    }
+  }, [currentTrack?.id, queue, tracks, effectiveAudioQuality]);
+
+  /**
+   * Append-only real play event recording (30s minimum listen, 30-min dedupe window per user+track,
+   * anti-self-play flag for payout calculations).
+   */
+  const recordValidatedPlay = (playedTrack: Track, listenedSeconds: number) => {
+    const userId = currentUser?.id || 'guest';
+    const windowKey = Math.floor(Date.now() / (30 * 60 * 1000));
+    const dedupeToken = `${userId}_${playedTrack.id}_${windowKey}`;
+
+    try {
+      const raw = sessionStorage.getItem(PLAY_DEDUPE_KEY);
+      const seen: string[] = raw ? JSON.parse(raw) : [];
+      if (seen.includes(dedupeToken)) {
+        return; // Deduplicate inside same 30-minute window
+      }
+      const nextSeen = [...seen.slice(-50), dedupeToken];
+      sessionStorage.setItem(PLAY_DEDUPE_KEY, JSON.stringify(nextSeen));
+    } catch {}
+
+    const regionKey =
+      selectedCountry && selectedCountry !== 'Global'
+        ? selectedCountry
+        : playedTrack.region || 'Malawi';
+    const safeRegionField = regionKey.replace(/[.$/[\]#]/g, '_');
+
+    const isArtistSelfPlay = Boolean(
+      currentUser &&
+        (currentUser.id === playedTrack.uploadedByUserId ||
+          (currentUser.artistId && currentUser.artistId === playedTrack.artistId))
+    );
+
+    // Update UI count immediately
+    setTracks((all) =>
+      all.map((t) => {
+        if (t.id !== playedTrack.id) return t;
+        const nextRegionStats = { ...(t.regionStats || {}) };
+        nextRegionStats[regionKey] = (nextRegionStats[regionKey] || 0) + 1;
+        return { ...t, plays: (t.plays || 0) + 1, regionStats: nextRegionStats };
+      })
+    );
+
+    // Track real estimated data used this month
+    const usedBytes = Math.round(
+      ((playedTrack.durationSeconds || 180) / 60) * estimatedMbPerMinute * 1024 * 1024
+    );
+    const curMonth = new Date().toISOString().slice(0, 7);
+    const prevBytes =
+      userSettings.dataSaver.dataUsageMonthKey === curMonth
+        ? userSettings.dataSaver.estimatedDataUsedBytesThisMonth
+        : 0;
+    updateUserSettings({
+      dataSaver: {
+        dataUsageMonthKey: curMonth,
+        estimatedDataUsedBytesThisMonth: prevBytes + usedBytes,
+      },
+    });
+
+    const playId = `play-${dedupeToken}-${Date.now()}`;
+    const playRecord: PlayRecord = {
+      id: playId,
+      trackId: playedTrack.id,
+      artistId: playedTrack.artistId,
+      userId,
+      country: regionKey,
+      listenedSeconds: Math.max(30, Math.round(listenedSeconds)),
+      windowKey,
+      isArtistSelfPlay,
+      qualifiesForPayout: !isArtistSelfPlay,
+      playedAt: new Date().toISOString(),
+    };
+
+    try {
+      // Write append-only play doc reliably via durable outbox + increment counters
+      void durableSetDoc('plays', playId, playRecord as unknown as Record<string, unknown>, {
+        mirrorBackup: true,
+      });
+
+      void durableUpdateDoc(
+        'tracks',
+        playedTrack.id,
+        {},
+        {
+          increments: {
+            plays: 1,
+            [`regionStats.${safeRegionField}`]: 1,
+          },
+        }
+      );
+
+      const matchedArtist = artists.find((a) => a.id === playedTrack.artistId);
+      if (matchedArtist) {
+        void durableUpdateDoc(
+          'artists',
+          matchedArtist.id,
+          {},
+          {
+            increments: {
+              totalStreams: 1,
+              [`regionStats.${safeRegionField}`]: 1,
+            },
+          }
+        );
+      }
+    } catch {}
+  };
+
+  // Hook AudioEngine events
+  useEffect(() => {
+    audioEngine.onTimeUpdate = (curr, dur) => {
+      setCurrentTime(curr);
+      if (dur > 0 && Math.round(dur) !== duration) {
+        setDuration(Math.round(dur));
+      }
+      sessionListenedSeconds.current = Math.floor(curr);
+      if (sessionListenedSeconds.current >= 30 && !hasStreamBeenValidated.current && currentTrack) {
+        hasStreamBeenValidated.current = true;
+        recordValidatedPlay(currentTrack, sessionListenedSeconds.current);
+      }
+
+      if (typeof navigator !== 'undefined' && 'mediaSession' in navigator && dur > 0) {
+        try {
+          navigator.mediaSession.setPositionState({
+            duration: dur,
+            playbackRate,
+            position: Math.min(curr, dur),
+          });
+        } catch {}
+      }
+    };
+
+    audioEngine.onEnded = () => {
+      if (sleepAtEndOfTrack) {
+        setSleepAtEndOfTrackState(false);
+        setIsPlaying(false);
+        return;
+      }
+      if (repeatMode === 'one') {
+        seekTo(0);
+        audioEngine.resume();
+        return;
+      }
+      if (repeatMode === 'off' && queue.length === 0) {
+        const available = tracks.filter((t) => !t.isDraft && !t.isDeranked);
+        const curIdx = available.findIndex((t) => t.id === currentTrack?.id);
+        if (curIdx >= 0 && curIdx === available.length - 1) {
+          setIsPlaying(false);
+          return;
+        }
+      }
+      playNextTrack();
+    };
+
+    audioEngine.onError = (message: string) => {
+      setPlaybackError(message);
+      setIsPlaying(false);
+    };
+
+    return () => {
+      audioEngine.onTimeUpdate = null;
+      audioEngine.onEnded = null;
+      audioEngine.onError = null;
+    };
+  }, [repeatMode, sleepAtEndOfTrack, currentTrack, duration, selectedCountry, playbackRate, queue, tracks]);
+
+  const logTrackToHistory = (trackToLog: Track, startSeconds: number = 0) => {
+    const newEntry: PlayHistoryItem = {
+      id: 'hist-' + Date.now(),
+      trackId: trackToLog.id,
+      track: trackToLog,
+      playedAt: new Date().toISOString(),
+      listenedDurationSeconds: Math.max(0, Math.floor(startSeconds)),
+      completed: false,
+    };
+
+    setPlayHistory((prev) => {
+      const filtered = prev.filter((item) => item.trackId !== trackToLog.id);
+      return [newEntry, ...filtered].slice(0, 50);
+    });
+  };
+
+  const playTrack = async (
+    track: Track,
+    options?: { crossfade?: boolean; startAtSeconds?: number; expandFullscreen?: boolean }
+  ) => {
+    if (!currentUser) {
+      requireAuth(() => playTrack(track, options), `Sign in to play "${track.title}"`);
+      return;
+    }
+
+    // Check Wi-Fi-only streaming setting if offline blob isn't cached
+    const offlineBlobUrl = await getAudioBlobUrl(track.id);
+    if (!offlineBlobUrl && userSettings.dataSaver.streamWifiOnly) {
+      const conn = (navigator as Navigator & { connection?: { type?: string } }).connection;
+      if (conn?.type && conn.type === 'cellular') {
+        setPlaybackError('Stream on Wi-Fi only is turned on in Settings > Data & Storage.');
+        return;
+      }
+    }
+
+    audioEngine.init();
+    setPlaybackError(null);
+
+    const sameAlbum = Boolean(
+      currentTrack &&
+        currentTrack.id !== track.id &&
+        currentTrack.artistId === track.artistId &&
+        currentTrack.recordLabel &&
+        track.recordLabel &&
+        currentTrack.recordLabel === track.recordLabel
+    );
+
+    const isSwitchingActive = Boolean(isPlaying && currentTrack && currentTrack.id !== track.id);
+    const fadeDuration =
+      sameAlbum && userSettings.playback.gapless
+        ? 0
+        : options?.crossfade && crossfadeSeconds > 0
+        ? crossfadeSeconds
+        : isSwitchingActive
+        ? crossfadeSeconds
+        : 0;
+
+    sessionListenedSeconds.current = 0;
+    hasStreamBeenValidated.current = false;
+
+    if (currentTrack?.id === track.id && isPlaying && options?.startAtSeconds === undefined) {
+      if (options?.expandFullscreen) setIsFullscreenPlayerOpen(true);
+      return;
+    }
+
+    const startPos = options?.startAtSeconds ?? 0;
+    setCurrentTrack(track);
+    setDuration(track.metadata?.Duration ?? track.metadata?.duration ?? track.durationSeconds);
+    setCurrentTime(startPos);
+    setPendingResumeSeekSeconds(0);
+    setHasPlayedInSession(true);
+    setIsPlaying(true);
+    if (options?.expandFullscreen) {
+      setIsFullscreenPlayerOpen(true);
+    }
+
+    setQueue((prev) => {
+      if (prev.length > 0) return prev;
+      const available = tracks.filter((t) => !t.isDraft && !t.isDeranked && t.id !== track.id);
+      const curIdx = tracks.findIndex((t) => t.id === track.id);
+      if (curIdx >= 0) {
+        const after = tracks.slice(curIdx + 1).filter((t) => !t.isDraft && !t.isDeranked);
+        const before = tracks.slice(0, curIdx).filter((t) => !t.isDraft && !t.isDeranked);
+        return [...after, ...before];
+      }
+      return available;
+    });
+
+    const resolvedAudioUrl = offlineBlobUrl || track.audioUrl;
+
+    if (!resolvedAudioUrl) {
+      setIsPlaying(false);
+      setPlaybackError('This track does not have an audio file uploaded yet.');
+      return;
+    }
+
+    audioEngine.setPlaybackRate(playbackRate);
+    audioEngine.playCustomAudio(resolvedAudioUrl, fadeDuration, startPos);
+    logTrackToHistory(track, startPos);
+  };
+
+  const playTrackList = (items: Track[], startIndex: number = 0) => {
+    const playable = items.filter((t) => !t.isDraft && !t.isDeranked);
+    if (playable.length === 0) return;
+    const safeIdx = Math.max(0, Math.min(playable.length - 1, startIndex));
+    const head = playable[safeIdx];
+    const upcoming = [...playable.slice(safeIdx + 1), ...playable.slice(0, safeIdx)];
+    setQueue(upcoming);
+    playTrack(head);
+  };
+
+  const clearActiveTrack = () => {
+    audioEngine.stop();
+    setIsPlaying(false);
+    setCurrentTrack(null);
+    setHasPlayedInSession(false);
+    setResumedFromStorage(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setPlaybackError(null);
+    setIsFullscreenPlayerOpen(false);
+    try {
+      localStorage.removeItem(RESUME_PLAYBACK_KEY);
+    } catch {}
+  };
+
+  const isMiniPlayerVisible = Boolean(
+    currentTrack && (isPlaying || hasPlayedInSession || resumedFromStorage)
+  );
+  const playbackState: PlaybackState = !isMiniPlayerVisible
+    ? 'idle'
+    : playbackError
+    ? 'error'
+    : isPlaying
+    ? 'playing'
+    : 'paused';
+
+  const togglePlayPause = async () => {
+    audioEngine.init();
+    setPlaybackError(null);
+    if (!currentTrack) {
+      const firstPlayable = tracks.find((t) => !t.isDraft && !t.isDeranked && Boolean(t.audioUrl));
+      if (firstPlayable) playTrack(firstPlayable);
+      return;
+    }
+
+    if (isPlaying) {
+      audioEngine.pause();
+      setIsPlaying(false);
+    } else {
+      setHasPlayedInSession(true);
+      if (!audioEngine.getIsActive()) {
+        const offlineBlobUrl = await getAudioBlobUrl(currentTrack.id);
+        const resolvedAudioUrl = offlineBlobUrl || currentTrack.audioUrl;
+
+        if (!resolvedAudioUrl) {
+          setIsPlaying(false);
+          setPlaybackError('This track does not have an audio file available.');
+          return;
+        }
+
+        const seekStart = pendingResumeSeekSeconds > 0 ? pendingResumeSeekSeconds : currentTime;
+        setPendingResumeSeekSeconds(0);
+        audioEngine.setPlaybackRate(playbackRate);
+        audioEngine.playCustomAudio(resolvedAudioUrl, 0, seekStart);
+        setIsPlaying(true);
+      } else {
+        audioEngine.resume();
+        setIsPlaying(true);
+      }
+    }
+  };
+
+  const retryPlayback = () => {
+    if (currentTrack) {
+      playTrack(currentTrack, { startAtSeconds: currentTime });
+    }
+  };
+
+  const clearPlaybackError = () => setPlaybackError(null);
+
+  const seekTo = (timeInSeconds: number) => {
+    const clamped = Math.max(0, Math.min(duration || 0, timeInSeconds));
+    setCurrentTime(clamped);
+    setPendingResumeSeekSeconds(0);
+    audioEngine.seek(clamped);
+  };
+
+  const setVolume = (val: number) => {
+    setVolumeState(val);
+    audioEngine.setVolume(val);
+    if (val > 0 && isMuted) {
+      setIsMuted(false);
+      audioEngine.setMute(false);
+    }
+  };
+
+  const toggleMute = () => {
+    const next = !isMuted;
+    setIsMuted(next);
+    audioEngine.setMute(next);
+  };
+
+  const cycleRepeatMode = () => {
+    setRepeatMode((prev) => (prev === 'off' ? 'all' : prev === 'all' ? 'one' : 'off'));
+  };
+
+  const toggleLoop = cycleRepeatMode;
+  const toggleShuffle = () => setIsShuffling((prev) => !prev);
+
+  const playNextTrack = () => {
+    const available = tracks.filter((t) => !t.isDraft && !t.isDeranked);
+    if (queue.length > 0) {
+      const next = queue[0];
+      setQueue((prev) => prev.slice(1));
+      playTrack(next, { crossfade: true });
+      return;
+    }
+
+    if (available.length === 0) return;
+
+    if (isShuffling) {
+      const others = available.length > 1 ? available.filter((t) => t.id !== currentTrack?.id) : available;
+      const rand = others[Math.floor(Math.random() * others.length)];
+      playTrack(rand, { crossfade: true });
+      return;
+    }
+
+    const currentIndex = available.findIndex((t) => t.id === currentTrack?.id);
+    const nextIndex = (currentIndex + 1) % available.length;
+    playTrack(available[nextIndex], { crossfade: true });
+  };
+
+  const playPrevTrack = () => {
+    if (currentTime > 3) {
+      seekTo(0);
+      return;
+    }
+    const available = tracks.filter((t) => !t.isDraft && !t.isDeranked);
+    if (available.length === 0) return;
+    const currentIndex = available.findIndex((t) => t.id === currentTrack?.id);
+    const prevIndex = (currentIndex - 1 + available.length) % available.length;
+    playTrack(available[prevIndex], { crossfade: true });
+  };
+
+  const addToQueue = (track: Track) => {
+    setQueue((prev) => [...prev.filter((t) => t.id !== track.id), track]);
+  };
+
+  const playNextInQueue = (track: Track) => {
+    setQueue((prev) => [track, ...prev.filter((t) => t.id !== track.id)]);
+  };
+
+  const reorderQueue = (startIndex: number, endIndex: number) => {
+    setQueue((prev) => {
+      const result = Array.from(prev);
+      if (startIndex < 0 || startIndex >= result.length || endIndex < 0 || endIndex >= result.length) {
+        return prev;
+      }
+      const [removed] = result.splice(startIndex, 1);
+      result.splice(endIndex, 0, removed);
+      return result;
+    });
+  };
+
+  const removeFromQueue = (index: number) => {
+    setQueue((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const clearQueue = () => setQueue([]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('mediaSession' in navigator) || !currentTrack) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentTrack.title,
+        artist: currentTrack.artistName,
+        album: currentTrack.recordLabel || currentTrack.genre || 'LOWERVIBE',
+        artwork: currentTrack.coverArt
+          ? [
+              { src: currentTrack.coverArt, sizes: '256x256', type: 'image/jpeg' },
+              { src: currentTrack.coverArt, sizes: '512x512', type: 'image/jpeg' },
+            ]
+          : [],
+      });
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+
+      navigator.mediaSession.setActionHandler('play', () => {
+        if (!isPlaying) togglePlayPause();
+      });
+      navigator.mediaSession.setActionHandler('pause', () => {
+        if (isPlaying) togglePlayPause();
+      });
+      navigator.mediaSession.setActionHandler('previoustrack', () => playPrevTrack());
+      navigator.mediaSession.setActionHandler('nexttrack', () => playNextTrack());
+      navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+        seekTo(Math.max(0, currentTime - (details.seekOffset || 10)));
+      });
+      navigator.mediaSession.setActionHandler('seekforward', (details) => {
+        seekTo(Math.min(duration || 0, currentTime + (details.seekOffset || 10)));
+      });
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime !== undefined) seekTo(details.seekTime);
+      });
+    } catch {}
+  }, [currentTrack, isPlaying, currentTime, duration]);
+
+  // Synchronize 1-person-per-like optimistic counts
+  const prevLikedIds = useRef<string[]>(currentUser?.likedTrackIds || []);
+  useEffect(() => {
+    const prev = prevLikedIds.current;
+    const curr = currentUser?.likedTrackIds || [];
+    prevLikedIds.current = curr;
+
+    if (!currentUser) return;
+    const added = curr.filter((id) => !prev.includes(id));
+    const removed = prev.filter((id) => !curr.includes(id));
+
+    if (added.length > 0 || removed.length > 0) {
+      const applyUserLikeDelta = (t: Track): Track => {
+        const baseSet = new Set(Array.isArray(t.likedByUserIds) ? t.likedByUserIds.filter(Boolean) : []);
+        if (added.includes(t.id)) {
+          baseSet.add(currentUser.id);
+          const nextIds = Array.from(baseSet);
+          return { ...t, likedByUserIds: nextIds, likes: nextIds.length };
+        }
+        if (removed.includes(t.id)) {
+          baseSet.delete(currentUser.id);
+          const nextIds = Array.from(baseSet);
+          return { ...t, likedByUserIds: nextIds, likes: nextIds.length };
+        }
+        return t;
+      };
+
+      setTracks((all) => all.map(applyUserLikeDelta));
+      setCurrentTrack((t) => (t ? applyUserLikeDelta(t) : null));
+      setActiveDetailTrack((t) => (t ? applyUserLikeDelta(t) : null));
+    }
+  }, [currentUser?.likedTrackIds, currentUser?.id]);
+
+  const prevLikedArtistIds = useRef<string[]>(currentUser?.likedArtistIds || []);
+  useEffect(() => {
+    const prev = prevLikedArtistIds.current;
+    const curr = currentUser?.likedArtistIds || [];
+    prevLikedArtistIds.current = curr;
+
+    if (!currentUser) return;
+    const added = curr.filter((id) => !prev.includes(id));
+    const removed = prev.filter((id) => !curr.includes(id));
+
+    if (added.length > 0 || removed.length > 0) {
+      setArtists((all) =>
+        all.map((a) => {
+          const baseSet = new Set(Array.isArray(a.likedByUserIds) ? a.likedByUserIds.filter(Boolean) : []);
+          if (added.includes(a.id)) {
+            baseSet.add(currentUser.id);
+            const nextIds = Array.from(baseSet);
+            return { ...a, likedByUserIds: nextIds, likesCount: nextIds.length };
+          }
+          if (removed.includes(a.id)) {
+            baseSet.delete(currentUser.id);
+            const nextIds = Array.from(baseSet);
+            return { ...a, likedByUserIds: nextIds, likesCount: nextIds.length };
+          }
+          return a;
+        })
+      );
+    }
+  }, [currentUser?.likedArtistIds, currentUser?.id]);
+
+  const toggleSaveTrack = (trackId: string) => {
+    setSavedTrackIds((prev) => {
+      const next = prev.includes(trackId) ? prev.filter((id) => id !== trackId) : [...prev, trackId];
+      try { localStorage.setItem('lowervibe_saved_tracks', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  const addReaction = (trackId: string, emoji: string) => {
+    setTracks((prev) =>
+      prev.map((t) => {
+        if (t.id === trackId) {
+          const reactions = { ...(t.reactions || {}) };
+          reactions[emoji] = (reactions[emoji] || 0) + 1;
+          void durableUpdateDoc('tracks', trackId, { reactions });
+          return { ...t, reactions };
+        }
+        return t;
+      })
+    );
+    setCurrentTrack((prev) => {
+      if (prev && prev.id === trackId) {
+        const reactions = { ...(prev.reactions || {}) };
+        reactions[emoji] = (reactions[emoji] || 0) + 1;
+        return { ...prev, reactions };
+      }
+      return prev;
+    });
+  };
+
+  const addEvent = (evt: Omit<ArtistEvent, 'id'>): ArtistEvent => {
+    const newEvent: ArtistEvent = { ...evt, id: `evt-${Date.now()}` };
+    setEvents((prev) => [newEvent, ...prev]);
+    return newEvent;
+  };
+
+  const submitClaim = (claim: Omit<ArtistClaim, 'id' | 'status' | 'submittedAt'>): ArtistClaim => ({
+    ...claim,
+    id: `claim-${Date.now()}`,
+    status: 'pending',
+    submittedAt: new Date().toISOString(),
+  });
+  const approveClaim = () => {};
+  const rejectClaim = () => {};
+
+  const setFeaturedVibeTrack = (trackId: string, curatorNote: string, quote: string) => {
+    const updated: FeaturedVibe = {
+      trackId,
+      date: new Date().toISOString().split('T')[0],
+      curatorName: currentUser?.name || currentUser?.email || 'Curator',
+      curatorRole: 'Featured',
+      curatorNote,
+      quoteSnippet: quote,
+    };
+    setFeaturedVibe(updated);
+    addAuditLog('SET_FEATURED_VIBE', 'track', trackId, `Set featured track: "${quote}"`);
+  };
+
+  const toggleDerankTrack = (trackId: string) => {
+    setTracks((prev) =>
+      prev.map((t) => {
+        if (t.id === trackId) {
+          const next = !t.isDeranked;
+          addAuditLog(next ? 'DERANK_TRACK' : 'FEATURE_TRACK', 'track', trackId, `${next ? 'Hidden' : 'Restored'} ${t.title}`);
+          void durableUpdateDoc('tracks', trackId, { isDeranked: next });
+          return { ...t, isDeranked: next };
+        }
+        return t;
+      })
+    );
+  };
+
+  const isUserOwnerOfArtist = (artistId?: string): boolean => {
+    if (!currentUser || !auth.currentUser || auth.currentUser.uid !== currentUser.id || !artistId) return false;
+    const target = artists.find((a) => a.id === artistId);
+    if (!target) return false;
+    if (target.ownerUserId || target.claimedByUserId) {
+      return target.ownerUserId === currentUser.id || target.claimedByUserId === currentUser.id;
+    }
+    return currentUser.artistId === artistId;
+  };
+
+  const isUserOwnerOfTrack = (track: Track): boolean => {
+    if (!currentUser || !auth.currentUser || auth.currentUser.uid !== currentUser.id) return false;
+    if (track.uploadedByUserId) return track.uploadedByUserId === currentUser.id;
+    return isUserOwnerOfArtist(track.artistId);
+  };
+
+  const toggleDraftTrack = async (trackId: string): Promise<{ success: boolean; error?: string }> => {
+    const target = tracks.find((t) => t.id === trackId);
+    if (!target) return { success: false, error: 'Track not found.' };
+    const isAdminUser = currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
+    if (!isUserOwnerOfTrack(target) && !isAdminUser) {
+      return { success: false, error: 'Permission denied: only the track owner can publish or unpublish this song.' };
+    }
+    const previousDraft = Boolean(target.isDraft);
+    const nextDraft = !previousDraft;
+    setTracks((prev) => prev.map((t) => (t.id === trackId ? { ...t, isDraft: nextDraft } : t)));
+    try {
+      await updateDoc(doc(db, 'tracks', trackId), {
+        isDraft: nextDraft,
+        updatedAt: new Date().toISOString(),
+      });
+      return { success: true };
+    } catch (err) {
+      setTracks((prev) => prev.map((t) => (t.id === trackId ? { ...t, isDraft: previousDraft } : t)));
+      return { success: false, error: formatFirebaseError(err, 'Could not update publish status') };
+    }
+  };
+
+  const scheduleRelease = (trackId: string, scheduledDate: string) => {
+    const target = tracks.find((t) => t.id === trackId);
+    if (!target || !isUserOwnerOfTrack(target)) {
+      console.warn('Blocked unauthorized release schedule update.');
+      return;
+    }
+    setTracks((prev) =>
+      prev.map((t) => {
+        if (t.id === trackId) {
+          void durableUpdateDoc('tracks', trackId, {
+            scheduledPublishDate: scheduledDate,
+            isDraft: true,
+          });
+          return { ...t, scheduledPublishDate: scheduledDate, isDraft: true };
+        }
+        return t;
+      })
+    );
+    addAuditLog('SCHEDULE_RELEASE', 'track', trackId, `Scheduled release for ${scheduledDate}`);
+  };
+
+  const addAuditLog = (action: string, targetType: AuditLogEntry['targetType'], targetId: string, details: string) => {
+    const log: AuditLogEntry = {
+      id: `log-${Date.now()}`,
+      adminEmail: currentUser?.email || PRIMARY_ADMIN_EMAIL,
+      action,
+      targetType,
+      targetId,
+      details,
+      timestamp: new Date().toISOString(),
+    };
+    setAuditLogs((prev) => [log, ...prev].slice(0, 100));
+    void durableSetDoc('audit_logs', log.id, log as unknown as Record<string, unknown>, {
+      mirrorBackup: true,
+    });
+  };
+
+  const downloadTrack = async (track: Track) => {
+    if (!currentUser) {
+      requireAuth(() => downloadTrack(track), `Sign in to save "${track.title}" offline`);
+      return;
+    }
+
+    if (userSettings.dataSaver.downloadWifiOnly) {
+      const conn = (navigator as Navigator & { connection?: { type?: string } }).connection;
+      if (conn?.type && conn.type === 'cellular') {
+        setPlaybackError('Download on Wi-Fi only is enabled in Settings > Data & Storage.');
+        return;
+      }
+    }
+
+    setActiveDownload({
+      trackId: track.id,
+      trackTitle: track.title,
+      artistName: track.artistName,
+      progress: 20,
+      isComplete: false,
+    });
+
+    try {
+      if (track.audioUrl) {
+        const res = await fetch(track.audioUrl);
+        if (res.ok) {
+          const blob = await res.blob();
+          setActiveDownload((prev) => (prev ? { ...prev, progress: 80 } : prev));
+          await saveAudioBlob(track.id, blob);
+        }
+      }
+      const nextDownloads = (track.downloads || 0) + 1;
+      setTracks((prev) => prev.map((t) => (t.id === track.id ? { ...t, downloads: nextDownloads } : t)));
+      void durableUpdateDoc('tracks', track.id, {}, { increments: { downloads: 1 } });
+
+      setActiveDownload((prev) => (prev ? { ...prev, progress: 100, isComplete: true } : prev));
+      window.setTimeout(() => setActiveDownload(null), 2600);
+    } catch {
+      setActiveDownload(null);
+      setPlaybackError('Could not save this song offline. Try again on a stronger connection.');
+    }
+  };
+
+  const buildNewTrackRecord = (
+    trackData: Omit<Track, 'id' | 'plays' | 'likes' | 'reposts' | 'releaseDate' | 'comments'> &
+      Partial<Pick<Track, 'id' | 'plays' | 'likes' | 'reposts' | 'releaseDate' | 'comments'>>
+  ): Track => ({
+    ...trackData,
+    uploadedByUserId: trackData.uploadedByUserId || currentUser?.id,
+    artistName: cleanArtistDisplayName(trackData.artistName),
+    id: trackData.id || `track-${Date.now()}`,
+    plays: trackData.plays ?? 0,
+    likes: trackData.likes ?? 0,
+    reposts: trackData.reposts ?? 0,
+    downloads: trackData.downloads ?? 0,
+    releaseDate: trackData.releaseDate || new Date().toISOString().split('T')[0],
+    comments: trackData.comments || [],
+  });
+
+  const addNewTrack = (
+    trackData: Omit<Track, 'id' | 'plays' | 'likes' | 'reposts' | 'releaseDate' | 'comments'> &
+      Partial<Pick<Track, 'id' | 'plays' | 'likes' | 'reposts' | 'releaseDate' | 'comments'>>
+  ): Track => {
+    const newTrack = buildNewTrackRecord(trackData);
+    setTracks((prev) => dedupeTracksById([newTrack, ...prev]));
+    addAuditLog('UPLOAD_TRACK', 'track', newTrack.id, `Uploaded ${newTrack.title} by ${newTrack.artistName}`);
+    setDoc(doc(db, 'tracks', newTrack.id), newTrack, { merge: true }).catch((err) => {
+      console.error('Track save error:', formatFirebaseError(err));
+    });
+    return newTrack;
+  };
+
+  const saveNewTrack = async (
+    trackData: Omit<Track, 'id' | 'plays' | 'likes' | 'reposts' | 'releaseDate' | 'comments'> &
+      Partial<Pick<Track, 'id' | 'plays' | 'likes' | 'reposts' | 'releaseDate' | 'comments'>>
+  ): Promise<Track> => {
+    if (!currentUser || !auth.currentUser || auth.currentUser.uid !== currentUser.id) {
+      throw new Error('Authentication required: sign in to publish tracks.');
+    }
+    const newTrack = buildNewTrackRecord({
+      ...trackData,
+      uploadedByUserId: currentUser.id,
+    });
+    try {
+      await setDoc(doc(db, 'tracks', newTrack.id), newTrack, { merge: true });
+      setTracks((prev) => dedupeTracksById([newTrack, ...prev]));
+      addAuditLog('UPLOAD_TRACK', 'track', newTrack.id, `Uploaded ${newTrack.title} by ${newTrack.artistName}`);
+      return newTrack;
+    } catch (err) {
+      throw new Error(formatFirebaseError(err, 'Could not save track'));
+    }
+  };
+
+  const addNewArtist = (
+    artistData: Omit<Artist, 'id' | 'followersCount' | 'monthlyListeners' | 'joinedDate' | 'verified'>
+  ): Artist => {
+    const newArtist: Artist = {
+      ...artistData,
+      ownerUserId: artistData.ownerUserId || currentUser?.id,
+      claimedByUserId: artistData.claimedByUserId || currentUser?.id,
+      name: cleanArtistDisplayName(artistData.name),
+      id: `artist-${Date.now()}`,
+      followersCount: 0,
+      monthlyListeners: 0,
+      joinedDate: new Date().toISOString(),
+      verified: false,
+    };
+    setArtists((prev) => [newArtist, ...prev]);
+    setDoc(doc(db, 'artists', newArtist.id), newArtist).catch((err) => {
+      console.error('Artist save error:', formatFirebaseError(err));
+    });
+    return newArtist;
+  };
+
+  const updateArtistProfile = async (
+    artistId: string,
+    updates: Partial<Artist>
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!isUserOwnerOfArtist(artistId)) {
+      return {
+        success: false,
+        error: 'Permission denied: only the verified owner of this artist profile can edit its details.',
+      };
+    }
+    const previous = artists.find((a) => a.id === artistId);
+    const {
+      id: _ignoreId,
+      ownerUserId: _ignoreOwner,
+      claimedByUserId: _ignoreClaimed,
+      verified: _ignoreVerified,
+      isVerified: _ignoreIsVerified,
+      isMonetized: _ignoreMonetized,
+      monetizationStatus: _ignoreMonStatus,
+      earningsBalanceMwk: _ignoreBalance,
+      followersCount: _ignoreFollowers,
+      monthlyListeners: _ignoreListeners,
+      ...safeUpdates
+    } = updates;
+    const cleanUpdates = {
+      ...(safeUpdates.name ? { ...safeUpdates, name: cleanArtistDisplayName(safeUpdates.name) } : safeUpdates),
+      updatedAt: new Date().toISOString(),
+    };
+    setArtists((prev) => prev.map((a) => (a.id === artistId ? { ...a, ...cleanUpdates } : a)));
+    try {
+      await updateDoc(doc(db, 'artists', artistId), cleanUpdates);
+      return { success: true };
+    } catch (err) {
+      if (previous) {
+        setArtists((prev) => prev.map((a) => (a.id === artistId ? previous : a)));
+      }
+      return { success: false, error: formatFirebaseError(err, 'Could not update artist profile') };
+    }
+  };
+
+  const updateTrack = async (trackId: string, updates: Partial<Track>) => {
+    const target = tracks.find((t) => t.id === trackId);
+    if (!target || !isUserOwnerOfTrack(target)) {
+      throw new Error('Permission denied: only the track owner can edit this song.');
+    }
+    const {
+      id: _ignoreId,
+      uploadedByUserId: _ignoreUploader,
+      artistId: _ignoreArtistId,
+      plays: _ignorePlays,
+      likes: _ignoreLikes,
+      likedByUserIds: _ignoreLikedBy,
+      isCertified: _ignoreCertified,
+      chartRank: _ignoreChart,
+      isDeranked: _ignoreDeranked,
+      ...safeUpdates
+    } = updates;
+    const payload = { ...safeUpdates, updatedAt: new Date().toISOString() };
+
+    try {
+      await updateDoc(doc(db, 'tracks', trackId), payload);
+      setTracks((prev) => prev.map((t) => (t.id === trackId ? { ...t, ...payload } : t)));
+      setCurrentTrack((prev) => (prev && prev.id === trackId ? { ...prev, ...payload } : prev));
+      setActiveDetailTrack((prev) => (prev && prev.id === trackId ? { ...prev, ...payload } : prev));
+      setQueue((prev) => prev.map((t) => (t.id === trackId ? { ...t, ...payload } : t)));
+      addAuditLog('UPDATE_METADATA', 'track', trackId, `Updated fields: ${Object.keys(safeUpdates).join(', ')}`);
+    } catch (err) {
+      throw new Error(formatFirebaseError(err, 'Could not save track updates'));
+    }
+  };
+
+  const deleteTrack = async (trackId: string): Promise<{ success: boolean; error?: string }> => {
+    const target = tracks.find((t) => t.id === trackId);
+    const isAdminUser = currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
+    if (target && !isUserOwnerOfTrack(target) && !isAdminUser) {
+      return {
+        success: false,
+        error: 'Permission denied: only the track owner or platform admin can delete this song.',
+      };
+    }
+    try {
+      await deleteDoc(doc(db, 'tracks', trackId));
+      setTracks((prev) => prev.filter((t) => t.id !== trackId));
+      if (currentTrack?.id === trackId) clearActiveTrack();
+      addAuditLog('DELETE_TRACK', 'track', trackId, `Deleted track ${trackId}`);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: formatFirebaseError(err, 'Could not delete track') };
+    }
+  };
+
+  const setCertifiedStatus = (trackId: string, certified: boolean) => {
+    setTracks((prev) => prev.map((t) => (t.id === trackId ? { ...t, isCertified: certified } : t)));
+    void durableUpdateDoc('tracks', trackId, { isCertified: certified });
+  };
+
+  const setTrackChartRank = (trackId: string, rank?: number) => {
+    setTracks((prev) => prev.map((t) => (t.id === trackId ? { ...t, chartRank: rank } : t)));
+    void durableUpdateDoc('tracks', trackId, { chartRank: rank || null });
+  };
+
+  const upsertGenre = async (
+    name: string,
+    options?: { description?: string; region?: string }
+  ): Promise<FirestoreGenre> => {
+    return await upsertCustomGenre(name, {
+      ...options,
+      createdBy: currentUser?.id || currentUser?.email || 'creator',
+    });
+  };
+
+  const createPublicPlaylist = async (input: {
+    name: string;
+    description?: string;
+    coverArt?: string;
+    country?: string;
+    genre?: string;
+    trackIds?: string[];
+    isPublic?: boolean;
+  }): Promise<Playlist> => {
+    const nowIso = new Date().toISOString();
+    const resolvedCountry = input.country || selectedCountry || currentUser?.country || 'Malawi';
+    const firstTrack = input.trackIds?.[0] ? tracks.find((t) => t.id === input.trackIds?.[0]) : undefined;
+    const newPlaylist: Playlist = {
+      id: `pl-${Date.now()}`,
+      name: input.name.trim(),
+      description: input.description?.trim() || '',
+      coverArt: input.coverArt || firstTrack?.coverArt || DEFAULT_ARTWORK_SVG,
+      trackIds: input.trackIds || [],
+      createdBy: currentUser?.id || 'community',
+      creatorName: currentUser?.name || 'Listener',
+      isPublic: input.isPublic ?? true,
+      followers: 1,
+      country: resolvedCountry,
+      region: resolvedCountry,
+      genre: input.genre?.trim() || firstTrack?.genre || 'Mixed',
+      plays: 0,
+      likes: 0,
+      likedByUserIds: [],
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    setPlaylists((prev) => [newPlaylist, ...prev.filter((p) => p.id !== newPlaylist.id)]);
+    if (currentUser) {
+      updateCurrentUser({ playlists: [newPlaylist, ...(currentUser.playlists || [])] });
+    }
+    await durableSetDoc('playlists', newPlaylist.id, newPlaylist as unknown as Record<string, unknown>, {
+      merge: true,
+      mirrorBackup: true,
+    });
+    return newPlaylist;
+  };
+
+  const updatePublicPlaylist = async (playlistId: string, updates: Partial<Playlist>) => {
+    const target = playlists.find((p) => p.id === playlistId) || currentUser?.playlists?.find((p) => p.id === playlistId);
+    if (!currentUser || (target && target.createdBy !== currentUser.id)) {
+      console.warn('Blocked unauthorized playlist edit attempt.');
+      return;
+    }
+    const nextUpdates = { ...updates, updatedAt: new Date().toISOString() };
+    setPlaylists((prev) => prev.map((p) => (p.id === playlistId ? { ...p, ...nextUpdates } : p)));
+    updateCurrentUser({
+      playlists: (currentUser.playlists || []).map((p) =>
+        p.id === playlistId ? { ...p, ...nextUpdates } : p
+      ),
+    });
+    await durableSetDoc('playlists', playlistId, nextUpdates as Record<string, unknown>, { merge: true });
+  };
+
+  const deletePublicPlaylist = async (playlistId: string) => {
+    const target = playlists.find((p) => p.id === playlistId) || currentUser?.playlists?.find((p) => p.id === playlistId);
+    const isAdminUser = currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
+    if (!currentUser || (target && target.createdBy !== currentUser.id && !isAdminUser)) {
+      console.warn('Blocked unauthorized playlist delete attempt.');
+      return;
+    }
+    setPlaylists((prev) => prev.filter((p) => p.id !== playlistId));
+    updateCurrentUser({
+      playlists: (currentUser.playlists || []).filter((p) => p.id !== playlistId),
+    });
+    await durableDeleteDoc('playlists', playlistId);
+  };
+
+  const reorderPlaylistTracks = async (playlistId: string, fromIndex: number, toIndex: number) => {
+    const target =
+      playlists.find((p) => p.id === playlistId) ||
+      currentUser?.playlists?.find((p) => p.id === playlistId);
+    if (!target) return;
+    const list = [...target.trackIds];
+    if (fromIndex < 0 || fromIndex >= list.length || toIndex < 0 || toIndex >= list.length) return;
+    const [moved] = list.splice(fromIndex, 1);
+    list.splice(toIndex, 0, moved);
+    await updatePublicPlaylist(playlistId, { trackIds: list });
+  };
+
+  const removeTrackFromPlaylist = async (playlistId: string, trackId: string) => {
+    const target =
+      playlists.find((p) => p.id === playlistId) ||
+      currentUser?.playlists?.find((p) => p.id === playlistId);
+    if (!target) return;
+    await updatePublicPlaylist(playlistId, {
+      trackIds: target.trackIds.filter((id) => id !== trackId),
+    });
+  };
+
+  const playlistLikeInFlightRef = useRef<Set<string>>(new Set());
+
+  const toggleLikePlaylist = (playlistId: string) => {
+    if (!currentUser) {
+      requireAuth(() => toggleLikePlaylist(playlistId), 'Sign in to like this playlist');
+      return;
+    }
+    if (playlistLikeInFlightRef.current.has(playlistId)) return;
+
+    const target = playlists.find((p) => p.id === playlistId);
+    const existing = Array.isArray(target?.likedByUserIds) ? target.likedByUserIds : [];
+    const alreadyLiked = existing.includes(currentUser.id);
+    const optimisticIds = alreadyLiked
+      ? existing.filter((id) => id !== currentUser.id)
+      : Array.from(new Set([...existing, currentUser.id]));
+
+    setPlaylists((prev) =>
+      prev.map((p) =>
+        p.id === playlistId
+          ? { ...p, likedByUserIds: optimisticIds, likes: optimisticIds.length }
+          : p
+      )
+    );
+
+    playlistLikeInFlightRef.current.add(playlistId);
+    const plRef = doc(db, 'playlists', playlistId);
+    runTransaction(db, async (tx) => {
+      const snap = await tx.get(plRef);
+      if (!snap.exists()) return;
+      const data = snap.data() as { likedByUserIds?: string[] };
+      const ids = Array.isArray(data.likedByUserIds) ? data.likedByUserIds.filter(Boolean) : [];
+      const nextSet = new Set(ids);
+      if (alreadyLiked) nextSet.delete(currentUser.id);
+      else nextSet.add(currentUser.id);
+      const nextLikedBy = Array.from(nextSet);
+      tx.update(plRef, {
+        likedByUserIds: nextLikedBy,
+        likes: nextLikedBy.length,
+      });
+    })
+      .catch(() => {})
+      .finally(() => {
+        playlistLikeInFlightRef.current.delete(playlistId);
+      });
+  };
+
+  const recordPlaylistPlay = (playlistId: string) => {
+    setPlaylists((prev) =>
+      prev.map((p) => (p.id === playlistId ? { ...p, plays: (p.plays || 0) + 1 } : p))
+    );
+    void durableUpdateDoc('playlists', playlistId, {}, { increments: { plays: 1 } });
+  };
+
+  // Monetization & Payouts
+  const updateMonetizationConfig = async (updates: Partial<MonetizationConfig>) => {
+    const next = {
+      ...monetizationConfig,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+    setMonetizationConfig(next);
+    await setDoc(doc(db, 'config', 'platform'), next, { merge: true });
+    addAuditLog('UPDATE_MONETIZATION_CONFIG', 'system', 'platform', 'Updated monetization thresholds & rate');
+  };
+
+  const isArtistEligibleForMonetization = (artist: Artist): boolean => {
+    const artistTracks = tracks.filter(
+      (t) =>
+        !t.isDraft &&
+        !t.isDeranked &&
+        (t.artistId === artist.id ||
+          (artist.ownerUserId && t.uploadedByUserId === artist.ownerUserId))
+    );
+    const artistPlays = artistTracks.reduce((sum, t) => sum + (t.plays || 0), 0);
+    const activeStrikes = artist.copyrightStrikes || 0;
+    const followers = artist.followersCount || 0;
+
+    return (
+      artistTracks.length >= monetizationConfig.requiredPublishedTracks &&
+      artistPlays >= monetizationConfig.requiredPlays30d &&
+      followers >= monetizationConfig.requiredFollowers &&
+      activeStrikes <= monetizationConfig.maxActiveStrikes
+    );
+  };
+
+  const approveArtistMonetization = (artistId: string, approverOverride?: string) => {
+    const nowIso = new Date().toISOString();
+    const approver = approverOverride || currentUser?.email || PRIMARY_ADMIN_EMAIL;
+    const targetArtist = artists.find((a) => a.id === artistId);
+
+    void (async () => {
+      const tokenRes = await requestServerApprovalToken(artistId);
+      const approvalToken = tokenRes.ok ? tokenRes.approvalToken : undefined;
+      const tokenSignature = tokenRes.ok ? tokenRes.tokenSignature : undefined;
+
+      setArtists((prev) =>
+        prev.map((a) =>
+          a.id === artistId
+            ? {
+                ...a,
+                isMonetized: true,
+                monetizationStatus: 'approved',
+                monetizationApprovedAt: tokenRes.issuedAt || nowIso,
+                monetizationApprovedBy: tokenRes.approvedBy || approver,
+                ...(approvalToken ? { monetizationApprovalToken: approvalToken } : {}),
+                ...(tokenSignature ? { monetizationTokenSignature: tokenSignature } : {}),
+                monetizationRejectionReason: undefined,
+                monetizationRevokedReason: undefined,
+              }
+            : a
+        )
+      );
+
+      await durableSetDoc(
+        'artists',
+        artistId,
+        {
+          isMonetized: true,
+          monetizationStatus: 'approved',
+          monetizationApprovedAt: tokenRes.issuedAt || nowIso,
+          monetizationApprovedBy: tokenRes.approvedBy || approver,
+          ...(approvalToken ? { monetizationApprovalToken: approvalToken } : {}),
+          ...(tokenSignature ? { monetizationTokenSignature: tokenSignature } : {}),
+          monetizationRejectionReason: null,
+          monetizationRevokedReason: null,
+          updatedAt: nowIso,
+        },
+        { merge: true, mirrorBackup: true }
+      );
+
+      const recipientUid =
+        targetArtist?.ownerUserId ||
+        targetArtist?.claimedByUserId ||
+        targetArtist?.contactEmail ||
+        artistId;
+      const notifId = `notif-mon-ok-${artistId}-${Date.now()}`;
+      await durableSetDoc(
+        'notifications',
+        notifId,
+        {
+          id: notifId,
+          userId: recipientUid,
+          ...(targetArtist?.contactEmail ? { userEmail: targetArtist.contactEmail.toLowerCase() } : {}),
+          type: 'artist_approved',
+          title: 'Monetization approved',
+          message: `Your Creator Studio monetization is now approved for ${
+            targetArtist?.name || 'your profile'
+          }${approvalToken ? ` (Token ${approvalToken})` : ''}. Add a payout method to receive withdrawals.`,
+          readBy: [],
+          createdAt: nowIso,
+          createdBy: approver,
+          actionRoute: '/studio',
+        },
+        { mirrorBackup: true }
+      );
+
+      addAuditLog(
+        'APPROVE_MONETIZATION',
+        'monetization',
+        artistId,
+        `Approved monetization for ${artistId} (${approver})${approvalToken ? ` [${approvalToken}]` : ''}`
+      );
+    })();
+  };
+
+  const requestArtistMonetization = async (
+    artistId: string,
+    termsAccepted: boolean
+  ): Promise<{ success: boolean; autoApproved?: boolean; error?: string }> => {
+    if (!termsAccepted) {
+      return { success: false, error: 'You must accept the Creator Monetization Terms first.' };
+    }
+    if (!isUserOwnerOfArtist(artistId)) {
+      return {
+        success: false,
+        error: 'Permission denied: only the artist owner can request monetization for this profile.',
+      };
+    }
+    const nowIso = new Date().toISOString();
+    const targetArtist = artists.find((a) => a.id === artistId);
+    const eligibleNow = targetArtist ? isArtistEligibleForMonetization(targetArtist) : false;
+
+    if (targetArtist?.monetizationStatus === 'suspended') {
+      return {
+        success: false,
+        error: targetArtist.monetizationRevokedReason || 'Monetization is currently paused.',
+      };
+    }
+
+    try {
+      if (eligibleNow) {
+        const tokenRes = await requestServerApprovalToken(artistId);
+        if (!tokenRes.ok || !tokenRes.approvalToken || !tokenRes.tokenSignature) {
+          return {
+            success: false,
+            error: tokenRes.error || 'Server eligibility token check failed. Ensure your stats are synced and retry.',
+          };
+        }
+
+        await updateDoc(doc(db, 'artists', artistId), {
+          isMonetized: true,
+          monetizationStatus: 'approved',
+          monetizationTermsAcceptedAt: nowIso,
+          monetizationRequestedAt: nowIso,
+          monetizationApprovedAt: tokenRes.issuedAt || nowIso,
+          monetizationApprovedBy: 'auto-eligibility',
+          monetizationApprovalToken: tokenRes.approvalToken,
+          monetizationTokenSignature: tokenRes.tokenSignature,
+          monetizationRejectionReason: null,
+          updatedAt: nowIso,
+        });
+
+        setArtists((prev) =>
+          prev.map((a) =>
+            a.id === artistId
+              ? {
+                  ...a,
+                  isMonetized: true,
+                  monetizationStatus: 'approved',
+                  monetizationTermsAcceptedAt: nowIso,
+                  monetizationRequestedAt: nowIso,
+                  monetizationApprovedAt: tokenRes.issuedAt || nowIso,
+                  monetizationApprovedBy: 'auto-eligibility',
+                  monetizationApprovalToken: tokenRes.approvalToken,
+                  monetizationTokenSignature: tokenRes.tokenSignature,
+                  monetizationRejectionReason: undefined,
+                }
+              : a
+          )
+        );
+
+        const notifId = `notif-mon-auto-${artistId}-${Date.now()}`;
+        void durableSetDoc(
+          'notifications',
+          notifId,
+          {
+            id: notifId,
+            userId: currentUser?.id || artistId,
+            ...(currentUser?.email ? { userEmail: currentUser.email.toLowerCase() } : {}),
+            type: 'artist_approved',
+            title: 'Monetization automatically approved',
+            message: `${targetArtist?.name || 'Your artist profile'} received verified approval token ${tokenRes.approvalToken}. Revenue & withdrawals are now active.`,
+            readBy: [],
+            createdAt: nowIso,
+            createdBy: 'auto-eligibility',
+            actionRoute: '/studio',
+          },
+          { mirrorBackup: true }
+        );
+
+        addAuditLog(
+          'AUTO_APPROVE_MONETIZATION',
+          'monetization',
+          artistId,
+          `${targetArtist?.name || artistId} automatically approved with token ${tokenRes.approvalToken}`
+        );
+        return { success: true, autoApproved: true };
+      }
+
+      await durableUpdateDoc('artists', artistId, {
+        monetizationStatus: 'pending',
+        monetizationTermsAcceptedAt: nowIso,
+        monetizationRequestedAt: nowIso,
+        updatedAt: nowIso,
+      }, { mirrorBackup: true });
+
+      setArtists((prev) =>
+        prev.map((a) =>
+          a.id === artistId
+            ? {
+                ...a,
+                isMonetized: false,
+                monetizationStatus: 'pending',
+                monetizationTermsAcceptedAt: nowIso,
+                monetizationRequestedAt: nowIso,
+                monetizationRejectionReason: undefined,
+              }
+            : a
+        )
+      );
+
+      const notifId = `notif-mon-req-${artistId}-${Date.now()}`;
+      void durableSetDoc('notifications', notifId, {
+        id: notifId,
+        userId: PRIMARY_ADMIN_EMAIL,
+        userEmail: PRIMARY_ADMIN_EMAIL,
+        type: 'system',
+        title: 'Monetization review requested',
+        message: `${targetArtist?.name || artistId} requested monetization review.`,
+        readBy: [],
+        createdAt: nowIso,
+        createdBy: currentUser?.email || 'creator',
+        actionRoute: '/administration',
+      });
+
+      addAuditLog('REQUEST_MONETIZATION', 'monetization', artistId, `${targetArtist?.name || artistId} requested monetization review`);
+      return { success: true, autoApproved: false };
+    } catch (err) {
+      return { success: false, error: formatFirebaseError(err, 'Could not submit monetization request') };
+    }
+  };
+
+  // Automatically approve eligible artists with real server-issued approval tokens
+  const autoApprovedArtistsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentUser || !auth.currentUser || artists.length === 0) return;
+    const isAdminSession =
+      currentUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL &&
+      Boolean(auth.currentUser.emailVerified);
+
+    void flushPendingSyncOperations();
+
+    artists.forEach((artist) => {
+      if (autoApprovedArtistsRef.current.has(artist.id)) return;
+      if (artist.monetizationStatus === 'approved' || artist.monetizationStatus === 'suspended') {
+        return;
+      }
+      const canProcess = isAdminSession || isUserOwnerOfArtist(artist.id);
+      if (!canProcess) return;
+      if (!isArtistEligibleForMonetization(artist)) return;
+
+      autoApprovedArtistsRef.current.add(artist.id);
+      const nowIso = new Date().toISOString();
+      const approver = isAdminSession ? PRIMARY_ADMIN_EMAIL : 'auto-eligibility';
+
+      void (async () => {
+        const tokenRes = await requestServerApprovalToken(artist.id);
+        if (!tokenRes.ok || !tokenRes.approvalToken || !tokenRes.tokenSignature) {
+          autoApprovedArtistsRef.current.delete(artist.id);
+          return;
+        }
+
+        try {
+          await updateDoc(doc(db, 'artists', artist.id), {
+            isMonetized: true,
+            monetizationStatus: 'approved',
+            monetizationApprovedAt: tokenRes.issuedAt || nowIso,
+            monetizationApprovedBy: approver,
+            monetizationApprovalToken: tokenRes.approvalToken,
+            monetizationTokenSignature: tokenRes.tokenSignature,
+            monetizationRejectionReason: null,
+            updatedAt: nowIso,
+          });
+          setArtists((prev) =>
+            prev.map((a) =>
+              a.id === artist.id
+                ? {
+                    ...a,
+                    isMonetized: true,
+                    monetizationStatus: 'approved',
+                    monetizationApprovedAt: tokenRes.issuedAt || nowIso,
+                    monetizationApprovedBy: approver,
+                    monetizationApprovalToken: tokenRes.approvalToken,
+                    monetizationTokenSignature: tokenRes.tokenSignature,
+                    monetizationRejectionReason: undefined,
+                  }
+                : a
+            )
+          );
+        } catch {
+          autoApprovedArtistsRef.current.delete(artist.id);
+        }
+      })();
+    });
+  }, [artists, tracks, monetizationConfig, currentUser?.id, currentUser?.email]);
+
+  const rejectArtistMonetization = async (artistId: string, reason: string) => {
+    const nowIso = new Date().toISOString();
+    const cooldownDays = monetizationConfig.reapplyCooldownDays || 14;
+    const reapplyIso = new Date(Date.now() + cooldownDays * 24 * 60 * 60 * 1000).toISOString();
+    const targetArtist = artists.find((a) => a.id === artistId);
+
+    setArtists((prev) =>
+      prev.map((a) =>
+        a.id === artistId
+          ? {
+              ...a,
+              isMonetized: false,
+              monetizationStatus: 'rejected',
+              monetizationRejectedAt: nowIso,
+              monetizationRejectionReason: reason,
+              monetizationReapplyAvailableAt: reapplyIso,
+            }
+          : a
+      )
+    );
+
+    await durableSetDoc(
+      'artists',
+      artistId,
+      {
+        isMonetized: false,
+        monetizationStatus: 'rejected',
+        monetizationRejectedAt: nowIso,
+        monetizationRejectionReason: reason,
+        monetizationReapplyAvailableAt: reapplyIso,
+      },
+      { merge: true, mirrorBackup: true }
+    );
+
+    const recipientUid = targetArtist?.ownerUserId || targetArtist?.claimedByUserId || targetArtist?.contactEmail || artistId;
+    const notifId = `notif-mon-rej-${artistId}-${Date.now()}`;
+    void durableSetDoc('notifications', notifId, {
+      id: notifId,
+      userId: recipientUid,
+      ...(targetArtist?.contactEmail ? { userEmail: targetArtist.contactEmail.toLowerCase() } : {}),
+      type: 'artist_rejected',
+      title: 'Monetization request not approved',
+      message: `${reason}. You can re-apply after ${cooldownDays} days.`,
+      readBy: [],
+      createdAt: nowIso,
+      createdBy: currentUser?.email || PRIMARY_ADMIN_EMAIL,
+      actionRoute: '/studio',
+    });
+
+    addAuditLog('REJECT_MONETIZATION', 'monetization', artistId, `Rejected monetization: ${reason}`);
+  };
+
+  const suspendArtistMonetization = async (artistId: string, reason: string) => {
+    const nowIso = new Date().toISOString();
+    const targetArtist = artists.find((a) => a.id === artistId);
+    setArtists((prev) =>
+      prev.map((a) =>
+        a.id === artistId
+          ? {
+              ...a,
+              isMonetized: false,
+              monetizationStatus: 'suspended',
+              monetizationRevokedReason: reason,
+            }
+          : a
+      )
+    );
+    await durableSetDoc(
+      'artists',
+      artistId,
+      {
+        isMonetized: false,
+        monetizationStatus: 'suspended',
+        monetizationRevokedReason: reason,
+      },
+      { merge: true, mirrorBackup: true }
+    );
+
+    const recipientUid = targetArtist?.ownerUserId || targetArtist?.claimedByUserId || targetArtist?.contactEmail || artistId;
+    const notifId = `notif-mon-susp-${artistId}-${Date.now()}`;
+    void durableSetDoc('notifications', notifId, {
+      id: notifId,
+      userId: recipientUid,
+      type: 'artist_rejected',
+      title: 'Monetization suspended',
+      message: reason,
+      readBy: [],
+      createdAt: nowIso,
+      createdBy: currentUser?.email || PRIMARY_ADMIN_EMAIL,
+      actionRoute: '/studio',
+    });
+  };
+
+  const revokeArtistMonetization = (artistId: string, reason?: string) => {
+    suspendArtistMonetization(artistId, reason || 'Monetization paused pending review.');
+  };
+
+  const addPayoutMethod = async (input: {
+    type: PayoutProviderType;
+    identifier: string;
+    accountHolderName: string;
+    artistId?: string;
+  }): Promise<{ success: boolean; error?: string }> => {
+    if (!currentUser) return { success: false, error: 'Please sign in first.' };
+
+    const cleanId = input.identifier.trim().replace(/\s+/g, '');
+    const cleanName = input.accountHolderName.trim();
+    if (cleanName.length < 2) {
+      return { success: false, error: 'Enter the full account holder name.' };
+    }
+
+    let label = '';
+    let masked = '';
+    let network: 'TRC-20' | 'BEP-20' | undefined;
+
+    if (input.type === 'airtel_money') {
+      const normalized = cleanId.startsWith('+265')
+        ? cleanId
+        : cleanId.startsWith('265')
+        ? `+${cleanId}`
+        : cleanId.startsWith('0')
+        ? `+265${cleanId.slice(1)}`
+        : `+265${cleanId}`;
+      if (!/^\+2659[89]\d{7}$/.test(normalized)) {
+        return {
+          success: false,
+          error: 'Enter a valid Malawi Airtel Money number starting with +265 99 or +265 98.',
+        };
+      }
+      label = 'Airtel Money (Malawi)';
+      masked = `+265 •••• ${normalized.slice(-4)}`;
+    } else if (input.type === 'tnm_mpamba') {
+      const normalized = cleanId.startsWith('+265')
+        ? cleanId
+        : cleanId.startsWith('265')
+        ? `+${cleanId}`
+        : cleanId.startsWith('0')
+        ? `+265${cleanId.slice(1)}`
+        : `+265${cleanId}`;
+      if (!/^\+2658[89]\d{7}$/.test(normalized)) {
+        return {
+          success: false,
+          error: 'Enter a valid Malawi TNM Mpamba number starting with +265 88 or +265 89.',
+        };
+      }
+      label = 'TNM Mpamba (Malawi)';
+      masked = `+265 •••• ${normalized.slice(-4)}`;
+    } else if (input.type === 'usdt_trc20') {
+      if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(cleanId)) {
+        return {
+          success: false,
+          error: 'Invalid TRON (TRC-20) USDT address. It must start with "T" and be 34 characters.',
+        };
+      }
+      label = 'USDT (TRON / TRC-20)';
+      masked = `${cleanId.slice(0, 5)} •••• ${cleanId.slice(-4)}`;
+      network = 'TRC-20';
+    } else if (input.type === 'usdt_bep20') {
+      if (!/^0x[0-9a-fA-F]{40}$/.test(cleanId)) {
+        return {
+          success: false,
+          error: 'Invalid BNB Smart Chain (BEP-20) USDT address. It must start with "0x" and be 42 characters.',
+        };
+      }
+      label = 'USDT (BNB Smart Chain / BEP-20)';
+      masked = `${cleanId.slice(0, 6)} •••• ${cleanId.slice(-4)}`;
+      network = 'BEP-20';
+    }
+
+    if (!currentUser || !auth.currentUser || auth.currentUser.uid !== currentUser.id) {
+      return { success: false, error: 'Please sign in to manage your payout methods.' };
+    }
+    const targetArtistId = input.artistId || currentUser.artistId;
+    if (targetArtistId && !isUserOwnerOfArtist(targetArtistId)) {
+      return {
+        success: false,
+        error: 'Permission denied: only the artist owner can manage payout settings for this artist.',
+      };
+    }
+
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const targetArtistObj = targetArtistId ? artists.find((a) => a.id === targetArtistId) : undefined;
+    const isAutoAccepted = Boolean(
+      targetArtistObj &&
+        (targetArtistObj.monetizationStatus === 'approved' ||
+          isArtistEligibleForMonetization(targetArtistObj))
+    );
+    const holdUntilIso = isAutoAccepted
+      ? nowIso
+      : new Date(now + 24 * 60 * 60 * 1000).toISOString();
+
+    const method: PayoutMethod = {
+      id: `pm-${now}`,
+      userId: currentUser.id,
+      ...(targetArtistId ? { artistId: targetArtistId } : {}),
+      type: input.type,
+      label,
+      maskedIdentifier: masked,
+      rawDestination: cleanId,
+      accountHolderName: cleanName,
+      ...(network ? { network } : {}),
+      isDefault: payoutMethods.length === 0,
+      status: isAutoAccepted ? 'accepted' : 'pending',
+      ...(isAutoAccepted ? { acceptedAt: nowIso } : {}),
+      addedAt: nowIso,
+      payoutHoldUntil: holdUntilIso,
+    };
+
+    try {
+      await setDoc(doc(db, 'payoutMethods', method.id), method);
+      const notifId = `notif-pm-${now}`;
+      void durableSetDoc('notifications', notifId, {
+        id: notifId,
+        userId: currentUser.id,
+        userEmail: currentUser.email,
+        type: 'system',
+        title: isAutoAccepted ? 'Payout method accepted' : 'Payout method added',
+        message: isAutoAccepted
+          ? `${label} (${masked}) was automatically accepted in administration for your eligible account.`
+          : `${label} (${masked}) was saved to your account.`,
+        readBy: [],
+        createdAt: nowIso,
+        actionRoute: '/studio',
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: formatFirebaseError(err, 'Could not save payout method') };
+    }
+  };
+
+  const removePayoutMethod = async (methodId: string): Promise<{ success: boolean; error?: string }> => {
+    if (!currentUser || !auth.currentUser || auth.currentUser.uid !== currentUser.id) {
+      return { success: false, error: 'Authentication required.' };
+    }
+    const existing = payoutMethods.find((m) => m.id === methodId);
+    if (!existing || existing.userId !== currentUser.id) {
+      return { success: false, error: 'Permission denied: only the account owner can remove this payout method.' };
+    }
+    try {
+      await deleteDoc(doc(db, 'payoutMethods', methodId));
+      setPayoutMethods((prev) => prev.filter((m) => m.id !== methodId));
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: formatFirebaseError(err, 'Could not remove payout method') };
+    }
+  };
+
+  const setDefaultPayoutMethod = async (methodId: string): Promise<{ success: boolean; error?: string }> => {
+    if (!currentUser || !auth.currentUser || auth.currentUser.uid !== currentUser.id) {
+      return { success: false, error: 'Authentication required.' };
+    }
+    const owned = payoutMethods.filter((m) => m.userId === currentUser.id);
+    if (!owned.some((m) => m.id === methodId)) {
+      return { success: false, error: 'Permission denied: only the account owner can update payout settings.' };
+    }
+    try {
+      await Promise.all(
+        owned.map((m) => updateDoc(doc(db, 'payoutMethods', m.id), { isDefault: m.id === methodId }))
+      );
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: formatFirebaseError(err, 'Could not update default payout method') };
+    }
+  };
+
+  const submitPayoutRequest = async (input: {
+    artistId: string;
+    artistName: string;
+    payoutMethodId: string;
+    grossAmountMwk: number;
+  }): Promise<{ success: boolean; error?: string; request?: PayoutRequest }> => {
+    if (!currentUser || !auth.currentUser || auth.currentUser.uid !== currentUser.id) {
+      return { success: false, error: 'Please sign in first.' };
+    }
+    if (!isUserOwnerOfArtist(input.artistId)) {
+      return {
+        success: false,
+        error: 'Permission denied: only the artist owner can request withdrawals for this profile.',
+      };
+    }
+
+    const method = payoutMethods.find((m) => m.id === input.payoutMethodId);
+    if (!method || method.userId !== currentUser.id) {
+      return { success: false, error: 'Select one of your verified payout methods.' };
+    }
+
+    if (new Date(method.payoutHoldUntil).getTime() > Date.now()) {
+      const hoursLeft = Math.ceil((new Date(method.payoutHoldUntil).getTime() - Date.now()) / (1000 * 60 * 60));
+      return {
+        success: false,
+        error: `New payout methods have a 24-hour security hold (${hoursLeft}h remaining).`,
+      };
+    }
+
+    if (input.grossAmountMwk < monetizationConfig.minWithdrawalMwk) {
+      return {
+        success: false,
+        error: `Minimum withdrawal is ${monetizationConfig.minWithdrawalMwk.toLocaleString()} MWK.`,
+      };
+    }
+
+    // Generate server-verified cryptographic payout settlement token from backend ledger
+    const tokenRes = await requestServerPayoutToken({
+      artistId: input.artistId,
+      payoutMethodId: method.id,
+      grossAmountMwk: input.grossAmountMwk,
+    });
+
+    if (!tokenRes.ok || !tokenRes.payoutToken || !tokenRes.tokenSignature) {
+      return {
+        success: false,
+        error: tokenRes.error || 'Server could not verify your balance and issue a payout token.',
+      };
+    }
+
+    const nowIso = tokenRes.issuedAt || new Date().toISOString();
+    const feeMwk = tokenRes.feeMwk ?? Math.round((input.grossAmountMwk * (monetizationConfig.payoutFeePercent || 0)) / 100);
+    const netAmountMwk = tokenRes.netAmountMwk ?? Math.max(0, input.grossAmountMwk - feeMwk);
+
+    const reqObj: PayoutRequest = {
+      id: tokenRes.requestId || `po-${Date.now()}`,
+      artistId: input.artistId,
+      artistName: input.artistName,
+      userId: currentUser.id,
+      userEmail: currentUser.email,
+      payoutMethodId: method.id,
+      payoutMethodLabel: method.label,
+      payoutDestinationMasked: method.maskedIdentifier,
+      grossAmountMwk: tokenRes.grossAmountMwk ?? Math.round(input.grossAmountMwk),
+      feeMwk,
+      netAmountMwk,
+      status: tokenRes.status || (monetizationConfig.payoutProviderConfigured ? 'processing' : 'awaiting_review'),
+      providerConfigured: Boolean(tokenRes.providerConfigured ?? monetizationConfig.payoutProviderConfigured),
+      requestedAt: nowIso,
+      txRef: tokenRes.txRef,
+      payoutToken: tokenRes.payoutToken,
+      payoutTokenSignature: tokenRes.tokenSignature,
+      settlementVerified: true,
+    };
+
+    try {
+      await durableSetDoc('payoutRequests', reqObj.id, reqObj as unknown as Record<string, unknown>, {
+        mirrorBackup: true,
+      });
+      const notifId = `notif-po-req-${Date.now()}`;
+      void durableSetDoc('notifications', notifId, {
+        id: notifId,
+        userId: PRIMARY_ADMIN_EMAIL,
+        userEmail: PRIMARY_ADMIN_EMAIL,
+        type: 'system',
+        title: 'Verified withdrawal request',
+        message: `${input.artistName} requested ${netAmountMwk.toLocaleString()} MWK via ${method.label} (Token ${tokenRes.payoutToken}).`,
+        readBy: [],
+        createdAt: nowIso,
+        actionRoute: '/administration',
+      });
+      addAuditLog('GENERATE_PAYOUT_TOKEN', 'payout', reqObj.id, `Issued ${tokenRes.payoutToken} (${tokenRes.txRef}) for ${netAmountMwk} MWK`);
+      return { success: true, request: reqObj };
+    } catch (err) {
+      return { success: false, error: formatFirebaseError(err, 'Withdrawal request failed') };
+    }
+  };
+
+  const updatePayoutRequestStatus = async (
+    requestId: string,
+    status: PayoutRequest['status'],
+    failureReason?: string
+  ) => {
+    const existingReq = payoutRequests.find((r) => r.id === requestId);
+    const prevStatus = existingReq?.status;
+    const nowIso = new Date().toISOString();
+    const updates: Partial<PayoutRequest> = {
+      status,
+      processedAt: nowIso,
+      ...(failureReason ? { failureReason } : {}),
+      ...(status === 'paid' ? { txRef: existingReq?.txRef || `TXN-LV-${Date.now().toString().slice(-8)}` } : {}),
+    };
+    await durableUpdateDoc('payoutRequests', requestId, updates as Record<string, unknown>, {
+      mirrorBackup: true,
+    });
+
+    if (existingReq?.userId && prevStatus !== status) {
+      const statusLabel = (s?: PayoutRequest['status']) => {
+        switch (s) {
+          case 'paid':
+            return 'Paid';
+          case 'processing':
+            return 'Processing';
+          case 'failed':
+            return 'Failed';
+          case 'awaiting_review':
+            return 'Awaiting Review';
+          default:
+            return 'Pending';
+        }
+      };
+      const titleMap: Record<PayoutRequest['status'], string> = {
+        paid: 'Withdrawal Paid',
+        processing: 'Withdrawal Processing',
+        failed: 'Withdrawal Failed',
+        awaiting_review: 'Withdrawal Under Review',
+      };
+      const notifId = `notif-payout-${requestId}-${status}-${Date.now()}`;
+      const amountLabel = `${(existingReq.netAmountMwk || existingReq.grossAmountMwk || 0).toLocaleString()} MWK`;
+      const tokenRef = existingReq.payoutToken ? ` (${existingReq.payoutToken})` : '';
+      const transitionText = prevStatus
+        ? `changed from ${statusLabel(prevStatus)} to ${statusLabel(status)}`
+        : `is now ${statusLabel(status)}`;
+      void durableSetDoc('notifications', notifId, {
+        id: notifId,
+        userId: existingReq.userId,
+        type: 'withdrawal_status',
+        title: titleMap[status] || 'Withdrawal Status Updated',
+        message:
+          status === 'failed' && failureReason
+            ? `${amountLabel} payout${tokenRef} ${transitionText}: ${failureReason}`
+            : `${amountLabel} payout${tokenRef} ${transitionText}.`,
+        readBy: [],
+        createdAt: nowIso,
+        createdBy: currentUser?.email || PRIMARY_ADMIN_EMAIL,
+        actionRoute: '/studio?tab=withdrawals',
+        payoutRequestId: requestId,
+        payoutStatus: status,
+      });
+    }
+
+    addAuditLog('UPDATE_PAYOUT_STATUS', 'payout', requestId, `Payout ${requestId} set to ${status}`);
+  };
+
+  const submitContentReportRecord = async (input: {
+    type: ReportRecord['type'];
+    trackId?: string;
+    trackTitle?: string;
+    artistId?: string;
+    artistName?: string;
+    reason: string;
+    details?: string;
+    evidenceUrl?: string;
+  }): Promise<{ success: boolean; error?: string }> => {
+    const reportId = `rep-${Date.now()}`;
+    const record: ReportRecord = {
+      id: reportId,
+      type: input.type || 'track_report',
+      trackId: input.trackId || '',
+      trackTitle: input.trackTitle || input.artistName || 'Platform Report',
+      ...(input.artistId ? { artistId: input.artistId } : {}),
+      ...(input.artistName ? { artistName: input.artistName } : {}),
+      reporterEmail: currentUser?.email || 'anonymous@lowervibe.mw',
+      reporterName: currentUser?.name || 'User',
+      reporterUserId: currentUser?.id,
+      reason: input.reason,
+      details: input.details,
+      evidenceUrl: input.evidenceUrl,
+      deviceInfo: {
+        os: typeof navigator !== 'undefined' ? navigator.platform || 'Unknown' : 'Unknown',
+        browser: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 80) : 'Unknown',
+        appVersion: '2.0.0',
+      },
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      await setDoc(doc(db, 'reports', reportId), record);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: formatFirebaseError(err, 'Could not submit report') };
+    }
+  };
+
+  const submitSupportTicket = async (input: {
+    subject: string;
+    category: SupportTicket['category'];
+    message: string;
+  }): Promise<{ success: boolean; error?: string }> => {
+    if (!currentUser) {
+      return { success: false, error: 'Authentication required: sign in to contact support.' };
+    }
+    const ticket: SupportTicket = {
+      id: `tkt-${Date.now()}`,
+      userId: currentUser.id,
+      userEmail: currentUser.email,
+      userName: currentUser.name,
+      subject: input.subject.trim(),
+      category: input.category,
+      message: input.message.trim(),
+      status: 'open',
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      await setDoc(doc(db, 'tickets', ticket.id), ticket);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: formatFirebaseError(err, 'Could not send support ticket') };
+    }
+  };
+
+  const boostArtistFollowers = (artistId: string, amount: number = 1) => {
+    setArtists((prev) =>
+      prev.map((a) => {
+        if (a.id === artistId) {
+          const nextCount = Math.max(0, a.followersCount + amount);
+          void durableUpdateDoc('artists', artistId, { followersCount: nextCount });
+          return { ...a, followersCount: nextCount };
+        }
+        return a;
+      })
+    );
+  };
+
+  const clearHistory = () => {
+    setPlayHistory([]);
+    try {
+      localStorage.removeItem(HISTORY_STORAGE_KEY);
+    } catch {}
+  };
+
+  const addCommentToTrack = (trackId: string, comment: Omit<TrackComment, 'id' | 'createdAt' | 'likes'>) => {
+    const newComment: TrackComment = {
+      ...comment,
+      id: `comment-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      likes: 0,
+    };
+    setTracks((prev) =>
+      prev.map((t) => {
+        if (t.id === trackId) {
+          const nextComments = [newComment, ...(t.comments || [])];
+          void durableUpdateDoc('tracks', trackId, { comments: nextComments });
+          return { ...t, comments: nextComments };
+        }
+        return t;
+      })
+    );
+    setActiveDetailTrack((prev) =>
+      prev && prev.id === trackId ? { ...prev, comments: [newComment, ...(prev.comments || [])] } : prev
+    );
+    setCurrentTrack((prev) =>
+      prev && prev.id === trackId ? { ...prev, comments: [newComment, ...(prev.comments || [])] } : prev
+    );
+  };
+
+  const likeComment = (trackId: string, commentId: string) => {
+    setTracks((prev) =>
+      prev.map((t) => {
+        if (t.id === trackId) {
+          const nextComments = (t.comments || []).map((c) =>
+            c.id === commentId ? { ...c, likes: c.likes + 1 } : c
+          );
+          void durableUpdateDoc('tracks', trackId, { comments: nextComments });
+          return { ...t, comments: nextComments };
+        }
+        return t;
+      })
+    );
+  };
+
+  const toggleVisualizer = () => setIsVisualizerActive((prev) => !prev);
+  const setVisualizerStyle = (style: 'bars' | 'wave' | 'pulse') => setVisualizerStyleState(style);
+  const setEqPreset = (preset: EqPreset) => {
+    setEqPresetState(preset);
+    audioEngine.setEqPreset(preset);
+    if (preset === 'flat' || preset === 'bass_boost' || preset === 'vocal' || preset === 'treble') {
+      updateUserSettings({ playback: { eqPreset: preset } });
+    }
+  };
+
+  const openAnalyticsModal = (artist?: Artist | null) => {
+    setAnalyticsArtist(artist || null);
+    setIsAnalyticsModalOpen(true);
+  };
+  const closeAnalyticsModal = () => setIsAnalyticsModalOpen(false);
+  const openAuthModal = (tab: 'login' | 'register' = 'login') => {
+    setAuthModalTab(tab);
+    setIsAuthModalOpen(true);
+  };
+  const closeAuthModal = () => setIsAuthModalOpen(false);
+  const openPlaylistModal = (track: Track) => {
+    setPlaylistModalTrack(track);
+    setIsPlaylistModalOpen(true);
+  };
+  const closePlaylistModal = () => {
+    setIsPlaylistModalOpen(false);
+    setPlaylistModalTrack(null);
+  };
+
+  // Navigate to full-screen legal pages instead of cramped modal
+  const openLegalModal = (type: 'terms' | 'privacy') => {
+    navigate(type === 'terms' ? '/terms' : '/privacy');
+  };
+  const closeLegalModal = () => {
+    setIsLegalModalOpen(false);
+    setLegalModalType(null);
+  };
+
+  const dismissAllModals = () => {
+    setActiveShareTrack(null);
+    setActiveDetailTrack(null);
+    setSelectedArtistModal(null);
+    setIsArtistSubmitModalOpen(false);
+    setIsAuthModalOpen(false);
+    setIsPlaylistModalOpen(false);
+    setPlaylistModalTrack(null);
+    setIsAnalyticsModalOpen(false);
+    setIsLegalModalOpen(false);
+  };
+
+  return (
+    <AudioContext.Provider
+      value={{
+        tracks,
+        artists,
+        playlists,
+        events,
+        claims,
+        auditLogs,
+        featuredVibe,
+        savedTrackIds,
+        currentTrack,
+        isPlaying,
+        playbackState,
+        isMiniPlayerVisible,
+        hasPlayedInSession,
+        resumedFromStorage,
+        currentTime,
+        duration,
+        volume,
+        isMuted,
+        repeatMode,
+        isLooping: repeatMode === 'one',
+        isShuffling,
+        queue,
+        crossfadeSeconds,
+        playbackRate,
+        audioQuality,
+        effectiveAudioQuality,
+        estimatedMbPerMinute,
+        playbackError,
+        catalogError,
+        playHistory,
+        isFullscreenPlayerOpen,
+        activeShareTrack,
+        activeDetailTrack,
+        selectedArtistModal,
+        isArtistSubmitModalOpen,
+        isAuthModalOpen,
+        authModalTab,
+        isPlaylistModalOpen,
+        playlistModalTrack,
+        isCatalogLoaded,
+        isVisualizerActive,
+        visualizerStyle,
+        toggleVisualizer,
+        setVisualizerStyle,
+        eqPreset,
+        setEqPreset,
+        playTrack,
+        playTrackList,
+        togglePlayPause,
+        clearActiveTrack,
+        seekTo,
+        setVolume,
+        toggleMute,
+        cycleRepeatMode,
+        toggleLoop,
+        toggleShuffle,
+        playNextTrack,
+        playPrevTrack,
+        addToQueue,
+        playNextInQueue,
+        reorderQueue,
+        removeFromQueue,
+        clearQueue,
+        setCrossfadeSeconds,
+        setPlaybackRate,
+        setAudioQuality,
+        clearPlaybackError,
+        retryPlayback,
+        retryCatalogLoad,
+        sleepTimerMinutes,
+        sleepAtEndOfTrack,
+        sleepTimerRemainingSeconds,
+        setSleepTimer,
+        setSleepAtEndOfTrack,
+        cancelSleepTimer,
+        clearHistory,
+        addCommentToTrack,
+        likeComment,
+        addNewArtist,
+        addNewTrack,
+        saveNewTrack,
+        updateArtistProfile,
+        updateTrack,
+        downloadTrack,
+        deleteTrack,
+        setCertifiedStatus,
+        setTrackChartRank,
+        toggleSaveTrack,
+        addReaction,
+        addEvent,
+        submitClaim,
+        approveClaim,
+        rejectClaim,
+        setFeaturedVibeTrack,
+        toggleDerankTrack,
+        toggleDraftTrack,
+        scheduleRelease,
+        addAuditLog,
+        selectedCountry,
+        setSelectedCountry,
+        upsertGenre,
+        createPublicPlaylist,
+        updatePublicPlaylist,
+        deletePublicPlaylist,
+        reorderPlaylistTracks,
+        removeTrackFromPlaylist,
+        toggleLikePlaylist,
+        recordPlaylistPlay,
+        monetizationConfig,
+        updateMonetizationConfig,
+        payoutMethods,
+        payoutRequests,
+        supportTickets,
+        requestArtistMonetization,
+        approveArtistMonetization,
+        rejectArtistMonetization,
+        suspendArtistMonetization,
+        revokeArtistMonetization,
+        addPayoutMethod,
+        removePayoutMethod,
+        setDefaultPayoutMethod,
+        submitPayoutRequest,
+        updatePayoutRequestStatus,
+        submitContentReportRecord,
+        submitSupportTicket,
+        boostArtistFollowers,
+        isAnalyticsModalOpen,
+        analyticsArtist,
+        openAnalyticsModal,
+        closeAnalyticsModal,
+        setIsFullscreenPlayerOpen,
+        setActiveShareTrack,
+        setActiveDetailTrack,
+        setSelectedArtistModal,
+        setIsArtistSubmitModalOpen,
+        openAuthModal,
+        closeAuthModal,
+        openPlaylistModal,
+        closePlaylistModal,
+        isLegalModalOpen,
+        legalModalType,
+        openLegalModal,
+        closeLegalModal,
+        activeDownload,
+        dismissAllModals,
+      }}
+    >
+      {children}
+    </AudioContext.Provider>
+  );
+};
+
+export const useAudio = () => {
+  const context = useContext(AudioContext);
+  if (!context) throw new Error('useAudio must be used within an AudioProvider');
+  return context;
+};
