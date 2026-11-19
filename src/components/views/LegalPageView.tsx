@@ -84,14 +84,19 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
       id: 'who-we-are',
       title: '1. Who runs LOWERVIBE',
       body: (
-        <p>
-          LOWERVIBE is an independent music streaming platform connecting listeners and creators across Malawi,
-          Nigeria, and wider Africa. Questions about these terms can be sent to{' '}
-          <a href={`mailto:${LEGAL_CONFIG.legalEmail}`} className="underline text-[var(--accent-text)]">
-            {LEGAL_CONFIG.legalEmail}
-          </a>
-          .
-        </p>
+        <div className="space-y-2">
+          <p>
+            LOWERVIBE is an independent music streaming platform connecting listeners and creators across Malawi,
+            Nigeria, and wider Africa. Questions about these terms can be sent to{' '}
+            <a href={`mailto:${LEGAL_CONFIG.legalEmail}`} className="underline text-[var(--accent-text)]">
+              {LEGAL_CONFIG.legalEmail}
+            </a>
+            .
+          </p>
+          <p className="text-sm text-[var(--text-muted)]">
+            <strong className="text-[var(--text)]">Registered Office:</strong> {LEGAL_CONFIG.physicalAddress}
+          </p>
+        </div>
       ),
     },
     {
@@ -556,17 +561,22 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
         </div>
 
         {/* Contact Footer */}
-        <div className="pt-4 border-t border-[var(--border)] flex flex-wrap items-center justify-between gap-3 text-sm text-[var(--text-muted)]">
-          <div className="flex items-center gap-2">
-            <Mail className="w-4 h-4" />
-            <span>
-              Questions? Contact{' '}
-              <a href={`mailto:${LEGAL_CONFIG.supportEmail}`} className="underline text-[var(--text)]">
-                {LEGAL_CONFIG.supportEmail}
-              </a>
-            </span>
+        <div className="pt-4 border-t border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm text-[var(--text-muted)]">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Mail className="w-4 h-4 shrink-0" />
+              <span>
+                Questions? Contact{' '}
+                <a href={`mailto:${LEGAL_CONFIG.supportEmail}`} className="underline text-[var(--text)]">
+                  {LEGAL_CONFIG.supportEmail}
+                </a>
+              </span>
+            </div>
+            <div className="text-xs text-[var(--text-muted)] pl-6">
+              {LEGAL_CONFIG.physicalAddress}
+            </div>
           </div>
-          <span>Version {LEGAL_CONFIG.currentTermsVersion}</span>
+          <span className="shrink-0">Version {LEGAL_CONFIG.currentTermsVersion}</span>
         </div>
       </div>
     </div>

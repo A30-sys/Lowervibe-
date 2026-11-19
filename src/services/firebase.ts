@@ -57,6 +57,11 @@ export const db = createFirestoreInstance();
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 export const googleAuthProvider = new GoogleAuthProvider();
+export const adminGoogleAuthProvider = new GoogleAuthProvider();
+adminGoogleAuthProvider.setCustomParameters({
+  prompt: 'select_account',
+  login_hint: 'odulamw@gmail.com',
+});
 
 export enum OperationType {
   CREATE = 'create',

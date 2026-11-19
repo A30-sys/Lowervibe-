@@ -11,7 +11,7 @@ import {
   Send,
   Share2,
 } from 'lucide-react';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
 import { useRouter } from '../../context/RouterContext';
@@ -23,6 +23,7 @@ import {
   getTrackLikeCount,
   isTrackLikedByUser,
 } from '../../utils/formatters';
+import { applyTrackSeoMeta, resetDefaultSeoMeta } from '../../utils/seoMeta';
 import { SafeImage } from '../SafeImage';
 
 export const TrackPublicPageView: React.FC = () => {
@@ -31,6 +32,7 @@ export const TrackPublicPageView: React.FC = () => {
 
   const {
     tracks,
+    artists,
     currentTrack,
     isPlaying,
     playTrack,
@@ -52,6 +54,17 @@ export const TrackPublicPageView: React.FC = () => {
   const [audioError, setAudioError] = useState(false);
 
   const track = tracks.find((t) => t.id === trackId);
+
+  useEffect(() => {
+    if (!track) return;
+    applyTrackSeoMeta(track);
+  }, [track]);
+
+  useEffect(() => {
+    return () => {
+      resetDefaultSeoMeta();
+    };
+  }, []);
 
   if (!track) {
     return (
@@ -85,15 +98,19 @@ export const TrackPublicPageView: React.FC = () => {
   const trackMetaDuration = getTrackDurationSeconds(track);
   const activeDuration = isCurrent && duration > 0 ? duration : trackMetaDuration;
   const activeProgress = isCurrent && activeDuration > 0 ? (currentTime / activeDuration) * 100 : 0;
+  const artistForTrack = artists.find((a) => a.id === track.artistId);
   const canEditMetadata = Boolean(
     currentUser &&
-      (currentUser.email?.toLowerCase() === 'odulamw@gmail.com' ||
-        currentUser.role === 'admin' ||
-        (currentUser.artistId && currentUser.artistId === track.artistId) ||
-        currentUser.id === track.artistId ||
-        (currentUser.name &&
-          track.artistName &&
-          currentUser.name.trim().toLowerCase() === track.artistName.trim().toLowerCase()))
+      (track.uploadedByUserId
+        ? track.uploadedByUserId === currentUser.id
+        : Boolean(
+            artistForTrack &&
+              (artistForTrack.ownerUserId === currentUser.id ||
+                artistForTrack.claimedByUserId === currentUser.id ||
+                (!artistForTrack.ownerUserId &&
+                  !artistForTrack.claimedByUserId &&
+                  currentUser.artistId === artistForTrack.id))
+          ))
   );
 
   const handlePlayToggle = () => {

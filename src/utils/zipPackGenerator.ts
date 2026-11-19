@@ -141,7 +141,7 @@ if (typeof firebase !== 'undefined' && firebase.initializeApp) {
   <!-- Sticky Bottom Audio Player Bar -->
   <div id="player-bar" class="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 p-3 px-4 sm:px-8 flex items-center justify-between shadow-2xl">
     <div class="flex items-center gap-3">
-      <img id="player-cover" src="${DEFAULT_ARTWORK_SVG}" class="w-12 h-12 rounded-xl object-cover shadow-sm">
+      <img id="player-cover" src="${DEFAULT_ARTWORK_SVG}" alt="Active track cover" class="w-12 h-12 rounded-xl object-cover shadow-sm">
       <div>
         <h4 id="player-title" class="text-xs sm:text-sm font-bold text-slate-900 truncate max-w-[150px] sm:max-w-xs">Select Track</h4>
         <p id="player-artist" class="text-[11px] text-slate-500 font-medium">Independent Artist</p>
@@ -182,7 +182,7 @@ if (typeof firebase !== 'undefined' && firebase.initializeApp) {
         return \`
           <div onclick="playSong('\${t.id}')" class="relative bg-white border border-slate-200 rounded-2xl p-3 min-w-[170px] max-w-[170px] sm:min-w-[190px] shadow-sm hover:shadow-md transition cursor-pointer shrink-0 snap-start">
             <span class="absolute top-2 left-2 z-10 \${badgeColor} font-black text-xs px-2 py-0.5 rounded-lg shadow-sm">#\${idx + 1}</span>
-            <img src="\${t.coverArt}" class="w-full h-36 object-cover rounded-xl mb-2.5 shadow-sm">
+            <img src="\${t.coverArt}" alt="\${t.title}" class="w-full h-36 object-cover rounded-xl mb-2.5 shadow-sm">
             <h4 class="font-bold text-sm text-slate-900 truncate leading-tight">\${t.title}</h4>
             <p class="text-xs text-slate-500 truncate mb-1">\${t.artistName}</p>
             <div class="text-[11px] text-emerald-600 font-bold flex items-center gap-1.5">
@@ -202,7 +202,7 @@ if (typeof firebase !== 'undefined' && firebase.initializeApp) {
         return \`
           <div class="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-sm hover:shadow-md transition flex items-center justify-between gap-3">
             <div class="flex items-center gap-3 cursor-pointer" onclick="playSong('\${t.id}')">
-              <img src="\${t.coverArt}" class="w-14 h-14 object-cover rounded-xl shadow-sm shrink-0">
+              <img src="\${t.coverArt}" alt="\${t.title}" class="w-14 h-14 object-cover rounded-xl shadow-sm shrink-0">
               <div>
                 <h4 class="font-bold text-sm text-slate-900 leading-tight">\${t.title}</h4>
                 <p class="text-xs text-slate-500">\${t.artistName}</p>

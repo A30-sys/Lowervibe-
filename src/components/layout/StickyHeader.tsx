@@ -49,7 +49,7 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
   const [isPwaInstalled, setIsPwaInstalled] = useState(false);
   const notifContainerRef = useRef<HTMLDivElement>(null);
 
-  const isOwnerAdmin = currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
+  const isOwnerAdmin = Boolean(isAdmin && currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL);
   const canInstallArtistApp = Boolean(
     currentUser &&
       (isArtist ||

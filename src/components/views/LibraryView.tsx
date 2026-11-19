@@ -1,12 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
   Check,
+  CheckCircle2,
   Clock,
   Download,
   Edit3,
   Globe,
+  HardDrive,
   Heart,
   ListMusic,
   Lock,
@@ -17,15 +19,20 @@ import {
   Share2,
   Trash2,
   UserCheck,
+  Wifi,
   X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useAudio } from '../../context/AudioContext';
 import { useRouter } from '../../context/RouterContext';
 import {
+  clearOfflineCache,
+  formatStorageBytes,
   getOfflineCacheStats,
+  getStorageQuotaEstimate,
   OfflineCacheStats,
   removeTrackOfflineCache,
+  StorageQuotaInfo,
 } from '../../services/audioStorage';
 import { Playlist, Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../../utils/artworkFallback';
@@ -36,7 +43,7 @@ type LibraryTab = 'saved' | 'liked' | 'playlists' | 'downloads' | 'following' | 
 export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void }> = ({
   onOpenTrackDetails,
 }) => {
-  const { currentUser, createPlaylist, toggleFollowArtist } = useAuth();
+  const { currentUser, userSettings, createPlaylist, toggleFollowArtist } = useAuth();
   const {
     tracks,
     artists,
@@ -45,18 +52,38 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
     playHistory,
     currentTrack,
     isPlaying,
+    activeDownload,
     playTrack,
     togglePlayPause,
+    downloadTrack,
     updatePublicPlaylist,
     deletePublicPlaylist,
     reorderPlaylistTracks,
     removeTrackFromPlaylist,
     setActiveDetailTrack,
   } = useAudio();
-  const { navigate } = useRouter();
+  const { navigate, searchParams } = useRouter();
 
-  const [activeTab, setActiveTab] = useState<LibraryTab>('saved');
+  const initialTabParam = searchParams.get('tab');
+  const resolvedInitialTab: LibraryTab =
+    initialTabParam === 'downloads' ||
+    initialTabParam === 'saved' ||
+    initialTabParam === 'liked' ||
+    initialTabParam === 'playlists' ||
+    initialTabParam === 'following' ||
+    initialTabParam === 'history'
+      ? initialTabParam
+      : 'saved';
+
+  const [activeTab, setActiveTab] = useState<LibraryTab>(resolvedInitialTab);
   const [offlineStats, setOfflineStats] = useState<OfflineCacheStats>({ totalBytes: 0, count: 0, entries: [] });
+  const [storageQuota, setStorageQuota] = useState<StorageQuotaInfo>({
+    supported: false,
+    usageBytes: 0,
+    quotaBytes: 0,
+  });
+  const [confirmClearDownloads, setConfirmClearDownloads] = useState(false);
+  const [isClearingDownloads, setIsClearingDownloads] = useState(false);
 
   // Playlist creation & editing
   const [isCreatingPl, setIsCreatingPl] = useState(false);
@@ -68,14 +95,37 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
   const [confirmDeletePlId, setConfirmDeletePlId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const loadOffline = async () => {
-    const s = await getOfflineCacheStats();
-    setOfflineStats(s);
-  };
+  const loadOffline = useCallback(async () => {
+    const [stats, quota] = await Promise.all([getOfflineCacheStats(), getStorageQuotaEstimate()]);
+    setOfflineStats(stats);
+    setStorageQuota(quota);
+  }, []);
 
   useEffect(() => {
-    loadOffline();
-  }, [savedTrackIds.length]);
+    void loadOffline();
+  }, [loadOffline, savedTrackIds.length]);
+
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    if (
+      tabParam === 'downloads' ||
+      tabParam === 'saved' ||
+      tabParam === 'liked' ||
+      tabParam === 'playlists' ||
+      tabParam === 'following' ||
+      tabParam === 'history'
+    ) {
+      setActiveTab(tabParam);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const handleCacheChange = () => {
+      void loadOffline();
+    };
+    window.addEventListener('lowervibe:offline-cache-changed', handleCacheChange);
+    return () => window.removeEventListener('lowervibe:offline-cache-changed', handleCacheChange);
+  }, [loadOffline]);
 
   const savedTracks = useMemo(
     () => tracks.filter((t) => savedTrackIds.includes(t.id) && !t.isDraft && !t.isDeranked),
@@ -115,6 +165,24 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
       track: tracks.find((t) => t.id === entry.trackId),
     }));
   }, [offlineStats, tracks]);
+
+  const downloadedIdSet = useMemo(
+    () => new Set(offlineStats.entries.map((e) => e.trackId)),
+    [offlineStats.entries]
+  );
+
+  const suggestedForOffline = useMemo(() => {
+    const seen = new Set<string>();
+    const combined: Track[] = [];
+    for (const tr of [...savedTracks, ...likedTracks]) {
+      if (!downloadedIdSet.has(tr.id) && !seen.has(tr.id) && tr.audioUrl) {
+        seen.add(tr.id);
+        combined.push(tr);
+      }
+      if (combined.length >= 6) break;
+    }
+    return combined;
+  }, [savedTracks, likedTracks, downloadedIdSet]);
 
   const handleCreatePlaylist = (e: React.FormEvent) => {
     e.preventDefault();
@@ -185,19 +253,37 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
             Your saved songs, likes, playlists, and offline downloads
           </p>
         </div>
-        {currentUser && (
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <button
             type="button"
             onClick={() => {
-              setActiveTab('playlists');
-              setIsCreatingPl(true);
+              setActiveTab('downloads');
+              setSelectedPlaylistId(null);
             }}
-            className="px-4 py-2 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+            className={`px-3.5 py-2 rounded-full text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition border ${
+              activeTab === 'downloads'
+                ? 'bg-[var(--surface-2)] border-[var(--accent)] text-[var(--accent-text)]'
+                : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text)] hover:border-[var(--border-strong)]'
+            }`}
           >
-            <Plus className="w-4 h-4" />
-            <span>New playlist</span>
+            <HardDrive className="w-3.5 h-3.5 text-[var(--accent-text)]" />
+            <span>Downloads · {formatStorageBytes(offlineStats.totalBytes)}</span>
           </button>
-        )}
+
+          {currentUser && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('playlists');
+                setIsCreatingPl(true);
+              }}
+              className="px-4 py-2 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>New playlist</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tabs */}
@@ -281,7 +367,26 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
               onCta={() => navigate('/discover')}
             />
           ) : (
-            savedTracks.map((t) => renderTrackRow(t))
+            savedTracks.map((t) =>
+              renderTrackRow(
+                t,
+                downloadedIdSet.has(t.id) ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--accent)]/15 text-[var(--accent-text)] text-[10px] font-bold">
+                    <CheckCircle2 className="w-3 h-3" />
+                    <span className="hidden sm:inline">Offline</span>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => downloadTrack(t)}
+                    title="Download for offline listening"
+                    className="p-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--accent-text)] cursor-pointer transition"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                  </button>
+                )
+              )
+            )
           )}
         </div>
       )}
@@ -306,7 +411,26 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
               onCta={() => navigate('/discover')}
             />
           ) : (
-            likedTracks.map((t) => renderTrackRow(t))
+            likedTracks.map((t) =>
+              renderTrackRow(
+                t,
+                downloadedIdSet.has(t.id) ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--accent)]/15 text-[var(--accent-text)] text-[10px] font-bold">
+                    <CheckCircle2 className="w-3 h-3" />
+                    <span className="hidden sm:inline">Offline</span>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => downloadTrack(t)}
+                    title="Download for offline listening"
+                    className="p-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--accent-text)] cursor-pointer transition"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                  </button>
+                )
+              )
+            )
           )}
         </div>
       )}
@@ -556,38 +680,243 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
         </div>
       )}
 
-      {/* DOWNLOADS */}
+      {/* DOWNLOADS: Dedicated Offline Manager & Device Storage Usage */}
       {activeTab === 'downloads' && (
-        <div className="rounded-[22px] bg-[var(--surface)] border border-[var(--border)] overflow-hidden divide-y divide-[var(--border)]">
-          {downloadedTracks.length === 0 ? (
-            <EmptyBox
-              icon={Download}
-              title="No offline downloads"
-              subtitle="Download songs when you have Wi-Fi to listen without bundles."
-              cta="Browse music"
-              onCta={() => navigate('/discover')}
-            />
-          ) : (
-            downloadedTracks.map(({ entry, track }) =>
-              track ? (
-                renderTrackRow(
+        <section className="space-y-4" aria-label="Offline downloads and storage usage">
+          {/* Storage Usage Overview Card */}
+          <div className="rounded-[22px] bg-[var(--surface)] border border-[var(--border)] p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-[var(--accent)]/15 border border-[var(--accent)]/30 text-[var(--accent-text)] flex items-center justify-center shrink-0">
+                  <HardDrive className="w-5 h-5" />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-base font-extrabold text-[var(--text)]">Offline Downloads</h2>
+                    {userSettings.dataSaver.downloadWifiOnly && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[10px] font-semibold text-[var(--text-muted)]">
+                        <Wifi className="w-3 h-3 text-[var(--accent-text)]" />
+                        <span>Wi-Fi only</span>
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {offlineStats.count === 0
+                      ? 'No tracks stored locally yet — download songs to play anytime without data.'
+                      : `${offlineStats.count} track${offlineStats.count === 1 ? '' : 's'} saved for offline playback · ${formatStorageBytes(offlineStats.totalBytes)} used`}
+                  </p>
+                </div>
+              </div>
+
+              {offlineStats.count > 0 && (
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  {downloadedTracks.some((d) => Boolean(d.track)) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const first = downloadedTracks.find((d) => d.track)?.track;
+                        if (first) playTrack(first);
+                      }}
+                      className="px-4 py-2 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>Play offline</span>
+                    </button>
+                  )}
+
+                  {!confirmClearDownloads ? (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmClearDownloads(true)}
+                      className="px-3.5 py-2 rounded-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--danger)] text-xs font-semibold text-[var(--danger)] cursor-pointer transition"
+                    >
+                      Clear all
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmClearDownloads(false)}
+                        className="px-3 py-1.5 rounded-full text-xs text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isClearingDownloads}
+                        onClick={async () => {
+                          setIsClearingDownloads(true);
+                          await clearOfflineCache();
+                          await loadOffline();
+                          setIsClearingDownloads(false);
+                          setConfirmClearDownloads(false);
+                        }}
+                        className="px-3.5 py-1.5 rounded-full bg-[var(--danger)] text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+                      >
+                        {isClearingDownloads ? 'Clearing...' : 'Confirm clear'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Storage Progress Bar */}
+            {(() => {
+              const quotaMax =
+                storageQuota.supported && storageQuota.quotaBytes > 0
+                  ? storageQuota.quotaBytes
+                  : 512 * 1024 * 1024;
+              const offlinePct = Math.min(
+                100,
+                offlineStats.totalBytes > 0
+                  ? Math.max(2, Math.round((offlineStats.totalBytes / quotaMax) * 100))
+                  : 0
+              );
+              const totalAppUsed =
+                storageQuota.supported && storageQuota.usageBytes > 0
+                  ? Math.max(storageQuota.usageBytes, offlineStats.totalBytes)
+                  : offlineStats.totalBytes;
+              const freeBytes =
+                storageQuota.supported && storageQuota.quotaBytes > 0
+                  ? Math.max(0, storageQuota.quotaBytes - totalAppUsed)
+                  : null;
+
+              return (
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between text-[11px] font-mono">
+                    <span className="text-[var(--text)] font-bold">
+                      Music Cache: {formatStorageBytes(offlineStats.totalBytes)}
+                    </span>
+                    <span className="text-[var(--text-muted)]">
+                      {freeBytes !== null
+                        ? `${formatStorageBytes(freeBytes)} available of ${formatStorageBytes(quotaMax)}`
+                        : 'Local IndexedDB offline storage'}
+                    </span>
+                  </div>
+                  <div className="w-full h-2.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-[var(--violet)] to-[var(--accent)] transition-all duration-300"
+                      style={{ width: `${offlinePct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Downloaded Tracks List */}
+          <div className="rounded-[22px] bg-[var(--surface)] border border-[var(--border)] overflow-hidden divide-y divide-[var(--border)]">
+            {downloadedTracks.length === 0 ? (
+              <EmptyBox
+                icon={Download}
+                title="No offline downloads yet"
+                subtitle="Download tracks over Wi-Fi to listen smoothly on the road without using mobile data."
+                cta="Browse music"
+                onCta={() => navigate('/discover')}
+              />
+            ) : (
+              downloadedTracks.map(({ entry, track }) => {
+                if (!track) {
+                  return (
+                    <div
+                      key={entry.trackId}
+                      className="p-3.5 flex items-center justify-between gap-3"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-11 h-11 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center text-[var(--text-muted)] shrink-0">
+                          <Music className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-[var(--text)] truncate">
+                            Cached Track ({entry.trackId})
+                          </div>
+                          <div className="text-xs text-[var(--text-muted)] font-mono">
+                            {formatStorageBytes(entry.sizeBytes)} · Cached locally
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await removeTrackOfflineCache(entry.trackId);
+                          await loadOffline();
+                        }}
+                        className="p-2 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--danger)] cursor-pointer"
+                        title="Remove cached file"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                }
+
+                const cachedDate = entry.timestamp
+                  ? new Date(entry.timestamp).toLocaleDateString(undefined, {
+                      month: 'short',
+                      day: 'numeric',
+                    })
+                  : '';
+
+                return renderTrackRow(
                   track,
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await removeTrackOfflineCache(entry.trackId);
-                      await loadOffline();
-                    }}
-                    className="p-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--danger)] cursor-pointer"
-                    title="Delete download"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                )
-              ) : null
-            )
+                  <div className="flex items-center gap-2">
+                    <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--accent)]/15 text-[var(--accent-text)] text-[10px] font-bold">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>Offline</span>
+                    </span>
+                    <span className="text-[11px] font-mono text-[var(--text-muted)] tabular-nums">
+                      {formatStorageBytes(entry.sizeBytes)}
+                      {cachedDate ? ` · ${cachedDate}` : ''}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await removeTrackOfflineCache(entry.trackId);
+                        await loadOffline();
+                      }}
+                      className="p-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--danger)] cursor-pointer"
+                      title="Delete download"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Quick Download Suggestions from Saved / Liked Songs */}
+          {suggestedForOffline.length > 0 && (
+            <div className="rounded-[22px] bg-[var(--surface)] border border-[var(--border)] p-4 sm:p-5 space-y-3">
+              <div>
+                <h3 className="text-sm font-bold text-[var(--text)]">Ready to Save Offline</h3>
+                <p className="text-xs text-[var(--text-muted)]">
+                  From your saved and liked songs not yet stored on this device
+                </p>
+              </div>
+              <div className="divide-y divide-[var(--border)] rounded-2xl border border-[var(--border)] overflow-hidden">
+                {suggestedForOffline.map((track) => {
+                  const isDownloadingThis = activeDownload?.trackId === track.id;
+                  return renderTrackRow(
+                    track,
+                    <button
+                      type="button"
+                      disabled={isDownloadingThis}
+                      onClick={() => downloadTrack(track)}
+                      className="px-3 py-1.5 rounded-xl bg-[var(--accent)]/15 hover:bg-[var(--accent)]/25 border border-[var(--accent)]/30 text-[var(--accent-text)] text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition disabled:opacity-60"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>
+                        {isDownloadingThis ? `${activeDownload?.progress || 0}%` : 'Download'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           )}
-        </div>
+        </section>
       )}
 
       {/* ARTISTS I FOLLOW */}

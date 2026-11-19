@@ -19,7 +19,13 @@ import {
   where,
 } from 'firebase/firestore';
 import { LEGAL_CONFIG } from '../config/legalConfig';
-import { auth, db, formatFirebaseError, googleAuthProvider } from '../services/firebase';
+import {
+  adminGoogleAuthProvider,
+  auth,
+  db,
+  formatFirebaseError,
+  googleAuthProvider,
+} from '../services/firebase';
 import { durableSetDoc, durableUpdateDoc, flushPendingSyncOperations } from '../services/reliableSync';
 import {
   changeUserPassword,
@@ -29,7 +35,7 @@ import {
   deleteCurrentUserAccount,
   detectCurrentSessionRecord,
   extractAuthErrorCode,
-  initializeAdminAccount as initializeAdminService,
+  isVerifiedAdminGoogleSession,
   linkGoogleAccount,
   loginUserAccount,
   mapFirebaseAuthError,
@@ -42,7 +48,6 @@ import {
   syncUserRecord,
   unlinkSignInProvider,
   updateUserProfileFields,
-  verifyAdminCredentials,
 } from '../services/authService';
 import {
   ArtistApplication,
@@ -134,7 +139,8 @@ interface AuthContextType {
   submitReauth: (opts: { password?: string; useGoogle?: boolean }) => Promise<{ success: boolean; error?: string }>;
   cancelReauth: () => void;
 
-  // Dedicated Admin Auth
+  // Dedicated Admin Auth (Google Login Auth strictly for odulamw@gmail.com)
+  signInAdminWithGoogle: () => Promise<{ success: boolean; error?: string; errorCode?: string }>;
   adminLogin: (password: string) => Promise<{ success: boolean; error?: string; errorCode?: string }>;
   adminInitialize: (password: string) => Promise<{ success: boolean; error?: string; errorCode?: string }>;
 
@@ -258,9 +264,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setApplications([]);
       return;
     }
-    const isVerifiedAdmin = Boolean(
-      fbUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL && fbUser.emailVerified
-    );
+    const isVerifiedAdmin = isVerifiedAdminGoogleSession(fbUser);
     try {
       const appsTarget = isVerifiedAdmin
         ? collection(db, 'applications')
@@ -305,7 +309,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setEmailVerified(Boolean(fbUser.emailVerified || fbUser.providerData.some((p) => p.providerId === 'phone')));
 
         const cleanEmail = (fbUser.email || '').toLowerCase();
-        const isPlatformAdmin = cleanEmail === PRIMARY_ADMIN_EMAIL;
+        const isPlatformAdmin = isVerifiedAdminGoogleSession(fbUser);
         const userRef = doc(db, 'users', fbUser.uid);
         const settingsRef = doc(db, 'users', fbUser.uid, 'settings', 'preferences');
 
@@ -480,7 +484,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!fbUser) return { success: false, error: 'Google sign-in returned no user.' };
 
       const cleanEmail = (fbUser.email || '').toLowerCase();
-      const isPlatformAdmin = cleanEmail === PRIMARY_ADMIN_EMAIL;
+      const isPlatformAdmin = isVerifiedAdminGoogleSession(fbUser);
       const userRef = doc(db, 'users', fbUser.uid);
       const snap = await getDoc(userRef);
       const session = detectCurrentSessionRecord();
@@ -823,7 +827,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const owned =
           existingData.ownerUserId === currentUser.id ||
           existingData.claimedByUserId === currentUser.id;
-        if (!owned && !currentUser.isAdmin) {
+        if (!owned) {
           return {
             success: false,
             error: 'Permission denied: that artist profile belongs to another account.',
@@ -1326,30 +1330,102 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { success: true };
   };
 
-  const adminLogin = async (
-    password: string
-  ): Promise<{ success: boolean; error?: string; errorCode?: string }> => {
-    const res = await verifyAdminCredentials(PRIMARY_ADMIN_EMAIL, password);
-    if (res.success && res.user) {
-      setCurrentUser(res.user);
+  const signInAdminWithGoogle = async (): Promise<{
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+  }> => {
+    try {
+      await setPersistence(auth, browserLocalPersistence);
+      const cred = await signInWithPopup(auth, adminGoogleAuthProvider);
+      const fbUser = cred.user;
+      if (!fbUser || !isVerifiedAdminGoogleSession(fbUser)) {
+        const attemptedEmail = fbUser?.email || 'another account';
+        await signOut(auth).catch(() => {});
+        setCurrentUser(null);
+        return {
+          success: false,
+          error: `Access Denied: Signed in as ${attemptedEmail}, but Administration requires Google Sign-In with ${PRIMARY_ADMIN_EMAIL}.`,
+        };
+      }
+
+      const cleanEmail = (fbUser.email || '').toLowerCase();
+      const userRef = doc(db, 'users', fbUser.uid);
+      const snap = await getDoc(userRef);
+      const session = detectCurrentSessionRecord();
+
+      let userToSet: User;
+      if (snap.exists()) {
+        const data = snap.data() as User;
+        const otherSessions = (data.sessions || []).filter((s) => s.id !== session.id).slice(0, 6);
+        userToSet = {
+          ...data,
+          id: fbUser.uid,
+          email: cleanEmail,
+          emailVerified: true,
+          isAdmin: true,
+          role: 'admin',
+          sessions: [session, ...otherSessions],
+          ...(!data.termsVersion
+            ? { termsAcceptedAt: new Date().toISOString(), termsVersion: LEGAL_CONFIG.currentTermsVersion }
+            : {}),
+        };
+        await updateUserProfileFields(fbUser.uid, {
+          emailVerified: true,
+          sessions: userToSet.sessions,
+        });
+      } else {
+        const name = fbUser.displayName || 'Platform Administrator';
+        userToSet = {
+          id: fbUser.uid,
+          name,
+          username: 'odula_admin',
+          email: cleanEmail,
+          emailVerified: true,
+          role: 'admin',
+          isAdmin: true,
+          avatar: fbUser.photoURL || DEFAULT_AVATAR_SVG,
+          bio: 'Platform owner & administrator.',
+          country: 'Malawi',
+          likedTrackIds: [],
+          likedArtistIds: [],
+          followingArtistIds: [],
+          playlists: [],
+          applicationStatus: 'none',
+          termsAcceptedAt: new Date().toISOString(),
+          termsVersion: LEGAL_CONFIG.currentTermsVersion,
+          sessions: [session],
+        };
+        await syncUserRecord(userToSet);
+      }
+
+      setCurrentUser(userToSet);
+      exitGuestMode();
       return { success: true };
+    } catch (err) {
+      return {
+        success: false,
+        error: mapFirebaseAuthError(err),
+        errorCode: extractAuthErrorCode(err),
+      };
     }
+  };
+
+  const adminLogin = async (
+    _password: string
+  ): Promise<{ success: boolean; error?: string; errorCode?: string }> => {
     return {
       success: false,
-      error: res.error || 'Incorrect administrator password.',
-      errorCode: res.errorCode,
+      error: `Administration sign-in requires Google Login Auth with ${PRIMARY_ADMIN_EMAIL}.`,
     };
   };
 
   const adminInitialize = async (
-    password: string
+    _password: string
   ): Promise<{ success: boolean; error?: string; errorCode?: string }> => {
-    const res = await initializeAdminService(password);
-    if (res.success) return await adminLogin(password);
     return {
       success: false,
-      error: res.error || 'Could not configure admin credentials.',
-      errorCode: res.errorCode,
+      error: `Administration uses Google Login Auth only (${PRIMARY_ADMIN_EMAIL}).`,
     };
   };
 
@@ -1362,7 +1438,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isGuestMode,
         isAuthenticated: Boolean(currentUser),
         isArtist: currentUser?.role === 'artist',
-        isAdmin: currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL,
+        isAdmin: isVerifiedAdminGoogleSession() && currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL,
         authReady,
         userSettings,
         updateUserSettings,
@@ -1371,6 +1447,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginWithEmail,
         registerWithEmail,
         signInWithGoogle,
+        signInAdminWithGoogle,
         sendPhoneVerificationCode,
         verifyPhoneCode,
         resetPassword,

@@ -16,8 +16,8 @@ const SOCIAL_LINKS = [
 ];
 
 export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
-  const { currentUser } = useAuth();
-  const isOwnerAdmin = currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
+  const { currentUser, isAdmin } = useAuth();
+  const isOwnerAdmin = Boolean(isAdmin && currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL);
 
   return (
     <footer className="mt-16 pt-10 pb-4 border-t border-[var(--border)] text-[var(--text-muted)] transition-colors duration-200">
@@ -49,7 +49,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 pt-6 border-t border-[var(--border)] text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 pt-6 border-t border-[var(--border)] text-xs">
           <div className="space-y-2.5">
             <h4 className="font-semibold text-[var(--text)] text-xs">Explore</h4>
             <ul className="space-y-2">
@@ -160,6 +160,23 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               </li>
             </ul>
           </div>
+
+          <div className="space-y-2.5">
+            <h4 className="font-semibold text-[var(--text)] text-xs">Contact</h4>
+            <address className="not-italic space-y-1.5 leading-relaxed text-[var(--text-muted)]">
+              <div className="font-semibold text-[var(--text)]">LOWERVIBE Media House</div>
+              <div>Nsanje, M1 Road</div>
+              <div>Malawi</div>
+              <div>
+                <a
+                  href="mailto:odulamw@gmail.com"
+                  className="hover:text-[var(--accent-text)] underline"
+                >
+                  Support: odulamw@gmail.com
+                </a>
+              </div>
+            </address>
+          </div>
         </div>
 
         <div className="pt-5 border-t border-[var(--border)] flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-[var(--text-muted)]">
@@ -167,7 +184,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
             <Music2 className="w-3.5 h-3.5 text-[var(--violet)]" />
             <span>&copy; {new Date().getFullYear()} LOWERVIBE</span>
           </div>
-          <span>Malawi · Nigeria · Africa &amp; Diaspora</span>
+          <span>Built by brownjnr</span>
         </div>
       </div>
     </footer>

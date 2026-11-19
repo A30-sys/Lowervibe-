@@ -43,7 +43,7 @@ import { formatTime } from '../utils/formatters';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG, DEFAULT_BANNER_SVG } from '../utils/artworkFallback';
 import { useAuth } from './AuthContext';
 import { useRouter } from './RouterContext';
-import { PRIMARY_ADMIN_EMAIL } from '../services/authService';
+import { isVerifiedAdminGoogleSession, PRIMARY_ADMIN_EMAIL } from '../services/authService';
 
 export type RepeatMode = 'off' | 'all' | 'one';
 export type AudioQualityPreference = 'auto' | 'high' | 'saver' | 'lossless';
@@ -736,7 +736,6 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const hasStreamBeenValidated = useRef<boolean>(false);
   const hasAttemptedResumeRestoreRef = useRef<boolean>(false);
   const artistRemapRef = useRef<Map<string, Artist>>(new Map());
-  const migrationRanRef = useRef<boolean>(false);
 
   // Local cache persistence
   useEffect(() => {
@@ -951,19 +950,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           })
         );
 
-        // Run one-time persistent cleanup in Firestore when owner admin signs in
-        if (!migrationRanRef.current && currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL) {
-          migrationRanRef.current = true;
-          rawArtists.forEach((rawA) => {
-            const canonical = idRemap.get(rawA.id);
-            if (!canonical) return;
-            if (canonical.id !== rawA.id) {
-              deleteDoc(doc(db, 'artists', rawA.id)).catch(() => {});
-            } else if (rawA.name.includes('/') && canonical.name !== rawA.name) {
-              updateDoc(doc(db, 'artists', canonical.id), { name: canonical.name }).catch(() => {});
-            }
-          });
-        }
+        // Note: artist profile records are strictly editable only by their verified owners.
       },
       (err) => {
         console.error('Artists listener error:', formatFirebaseError(err));
@@ -976,10 +963,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
     const activeUid = isAuthenticatedSession && fbUser ? fbUser.uid : null;
     const isVerifiedAdminUser = Boolean(
-      isAuthenticatedSession &&
-        fbUser &&
-        fbUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL &&
-        fbUser.emailVerified
+      isAuthenticatedSession && fbUser && isVerifiedAdminGoogleSession(fbUser)
     );
 
     let publicPlaylistsCache: Playlist[] = [];
@@ -1760,8 +1744,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const toggleDraftTrack = async (trackId: string): Promise<{ success: boolean; error?: string }> => {
     const target = tracks.find((t) => t.id === trackId);
     if (!target) return { success: false, error: 'Track not found.' };
-    const isAdminUser = currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
-    if (!isUserOwnerOfTrack(target) && !isAdminUser) {
+    if (!isUserOwnerOfTrack(target)) {
       return { success: false, error: 'Permission denied: only the track owner can publish or unpublish this song.' };
     }
     const previousDraft = Boolean(target.isDraft);
@@ -2003,7 +1986,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const deleteTrack = async (trackId: string): Promise<{ success: boolean; error?: string }> => {
     const target = tracks.find((t) => t.id === trackId);
-    const isAdminUser = currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
+    const isAdminUser = isVerifiedAdminGoogleSession();
     if (target && !isUserOwnerOfTrack(target) && !isAdminUser) {
       return {
         success: false,
@@ -2102,7 +2085,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const deletePublicPlaylist = async (playlistId: string) => {
     const target = playlists.find((p) => p.id === playlistId) || currentUser?.playlists?.find((p) => p.id === playlistId);
-    const isAdminUser = currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
+    const isAdminUser = isVerifiedAdminGoogleSession();
     if (!currentUser || (target && target.createdBy !== currentUser.id && !isAdminUser)) {
       console.warn('Blocked unauthorized playlist delete attempt.');
       return;
@@ -2442,9 +2425,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const autoApprovedArtistsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!currentUser || !auth.currentUser || artists.length === 0) return;
-    const isAdminSession =
-      currentUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL &&
-      Boolean(auth.currentUser.emailVerified);
+    const isAdminSession = isVerifiedAdminGoogleSession(auth.currentUser);
 
     void flushPendingSyncOperations();
 

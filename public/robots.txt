@@ -1,0 +1,16 @@
+User-agent: *
+Allow: /
+Allow: /discover
+Allow: /artists
+Allow: /tracks
+Allow: /terms
+Allow: /privacy
+Allow: /copyright
+
+Disallow: /administration
+Disallow: /admin
+Disallow: /api/
+Disallow: /account
+Disallow: /studio
+
+Sitemap: /sitemap.xml

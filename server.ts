@@ -21,6 +21,7 @@ fs.mkdirSync(LEDGER_DIR, { recursive: true });
 const APPROVAL_LEDGER_PATH = path.join(LEDGER_DIR, 'approval_tokens.json');
 const PAYOUT_LEDGER_PATH = path.join(LEDGER_DIR, 'payout_tokens.json');
 const SYNC_LEDGER_PATH = path.join(LEDGER_DIR, 'sync_events.json');
+const ANALYTICS_LEDGER_PATH = path.join(LEDGER_DIR, 'analytics_events.json');
 const SIGNING_KEY_PATH = path.join(LEDGER_DIR, '.server_signing_key');
 
 const PRIMARY_ADMIN_EMAIL = 'odulamw@gmail.com';
@@ -80,7 +81,20 @@ interface VerifiedFirebaseUser {
   uid: string;
   email: string;
   emailVerified: boolean;
+  isGoogleProvider: boolean;
   idToken: string;
+}
+
+function decodeJwtSignInProvider(idToken: string): string {
+  try {
+    const parts = idToken.split('.');
+    if (parts.length < 2) return '';
+    const payloadJson = Buffer.from(parts[1], 'base64url').toString('utf8');
+    const parsed = JSON.parse(payloadJson) as { firebase?: { sign_in_provider?: string } };
+    return String(parsed.firebase?.sign_in_provider || '').toLowerCase();
+  } catch {
+    return '';
+  }
 }
 
 async function verifyFirebaseBearerToken(req: express.Request): Promise<VerifiedFirebaseUser | null> {
@@ -101,14 +115,24 @@ async function verifyFirebaseBearerToken(req: express.Request): Promise<Verified
     );
     if (!res.ok) return null;
     const json = (await res.json()) as {
-      users?: Array<{ localId?: string; email?: string; emailVerified?: boolean }>;
+      users?: Array<{
+        localId?: string;
+        email?: string;
+        emailVerified?: boolean;
+        providerUserInfo?: Array<{ providerId?: string }>;
+      }>;
     };
     const u = json.users?.[0];
     if (!u?.localId) return null;
+    const signInProvider = decodeJwtSignInProvider(idToken);
+    const hasGoogleProviderInfo = Boolean(
+      u.providerUserInfo?.some((p) => p.providerId === 'google.com')
+    );
     return {
       uid: u.localId,
       email: (u.email || '').toLowerCase(),
       emailVerified: Boolean(u.emailVerified),
+      isGoogleProvider: signInProvider === 'google.com' && hasGoogleProviderInfo,
       idToken,
     };
   } catch {
@@ -434,6 +458,178 @@ function injectArtistSeoHtml(
     .replace(/<script\s+id="lv-structured-data"[\s\S]*?<\/script>/gi, '');
 
   return stripped.replace('</head>', `    ${headInject}\n  </head>`);
+}
+
+const seoTrackCache = new Map<string, { expiresAt: number; track: Record<string, any> | null }>();
+
+async function lookupPublicTrackForSeo(trackId: string): Promise<Record<string, any> | null> {
+  const cleanId = trackId.trim();
+  const cached = seoTrackCache.get(cleanId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.track;
+  }
+
+  let track = await firestoreGetDocRest(`tracks/${encodeURIComponent(cleanId)}`);
+  if (track && (track.isDraft || track.isDeranked)) {
+    track = null;
+  }
+  seoTrackCache.set(cleanId, {
+    expiresAt: Date.now() + (track ? 30_000 : 5_000),
+    track,
+  });
+  return track;
+}
+
+function injectTrackSeoHtml(
+  html: string,
+  track: Record<string, any> | null,
+  req: express.Request
+): string {
+  const origin = resolveRequestOrigin(req);
+  const cleanPath = req.path || '/';
+  const canonicalUrl = `${origin}${cleanPath}`;
+
+  if (!track) {
+    return injectArtistSeoHtml(html, null, 0, req);
+  }
+
+  const safeTrack = String(track.title || 'Track').trim();
+  const safeArtist = String(track.artistName || 'Independent Artist').trim();
+  let title = `${safeTrack} by ${safeArtist} – LOWERVIBE`;
+  if (title.length > 60) {
+    title = `${truncateSeoText(safeTrack, 38)} – LOWERVIBE`;
+  }
+
+  const rawStory = typeof track.story === 'string' ? track.story.replace(/\s+/g, ' ').trim() : '';
+  const description = truncateSeoText(
+    rawStory ||
+      `Stream "${safeTrack}" by ${safeArtist} (${track.genre || 'Independent Music'}) on LOWERVIBE. Listen offline, share, and support creators directly.`,
+    160
+  );
+  const image = resolveSeoPublicImage(track.coverArt, origin);
+
+  const structuredData: Record<string, unknown> = {
+    '@context': 'https://schema.org',
+    '@type': 'MusicRecording',
+    name: safeTrack,
+    byArtist: {
+      '@type': 'MusicGroup',
+      name: safeArtist,
+    },
+    genre: track.genre || 'Independent',
+    url: canonicalUrl,
+    image,
+    description,
+  };
+
+  const headInject = [
+    `<title>${escapeHtmlAttr(title)}</title>`,
+    `<link rel="canonical" href="${escapeHtmlAttr(canonicalUrl)}" />`,
+    `<meta name="description" content="${escapeHtmlAttr(description)}" />`,
+    `<meta property="og:type" content="music.song" />`,
+    `<meta property="og:site_name" content="LOWERVIBE" />`,
+    `<meta property="og:title" content="${escapeHtmlAttr(title)}" />`,
+    `<meta property="og:description" content="${escapeHtmlAttr(description)}" />`,
+    `<meta property="og:image" content="${escapeHtmlAttr(image)}" />`,
+    `<meta property="og:image:alt" content="${escapeHtmlAttr(`${safeTrack} cover artwork`)}" />`,
+    `<meta property="og:url" content="${escapeHtmlAttr(canonicalUrl)}" />`,
+    `<meta name="twitter:card" content="summary_large_image" />`,
+    `<meta name="twitter:title" content="${escapeHtmlAttr(title)}" />`,
+    `<meta name="twitter:description" content="${escapeHtmlAttr(description)}" />`,
+    `<meta name="twitter:image" content="${escapeHtmlAttr(image)}" />`,
+    `<script id="lv-structured-data" type="application/ld+json">${escapeJsonLd(structuredData)}</script>`,
+  ].join('\n    ');
+
+  const stripped = html
+    .replace(/<title>[\s\S]*?<\/title>/i, '')
+    .replace(/<link\s+rel="canonical"[^>]*>/gi, '')
+    .replace(/<meta\s+name="description"[^>]*>/gi, '')
+    .replace(/<meta\s+property="og:[^"]+"[^>]*>/gi, '')
+    .replace(/<meta\s+property="profile:[^"]+"[^>]*>/gi, '')
+    .replace(/<meta\s+name="twitter:[^"]+"[^>]*>/gi, '')
+    .replace(/<script\s+id="lv-structured-data"[\s\S]*?<\/script>/gi, '');
+
+  return stripped.replace('</head>', `    ${headInject}\n  </head>`);
+}
+
+let sitemapCache: { expiresAt: number; xml: string; origin: string } | null = null;
+
+async function buildDynamicSitemapXml(origin: string): Promise<string> {
+  if (sitemapCache && sitemapCache.expiresAt > Date.now() && sitemapCache.origin === origin) {
+    return sitemapCache.xml;
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+  const urls: Array<{ loc: string; changefreq: string; priority: string; lastmod?: string }> = [
+    { loc: `${origin}/`, changefreq: 'daily', priority: '1.0', lastmod: today },
+    { loc: `${origin}/discover`, changefreq: 'daily', priority: '0.9', lastmod: today },
+    { loc: `${origin}/artists`, changefreq: 'daily', priority: '0.9', lastmod: today },
+    { loc: `${origin}/search`, changefreq: 'weekly', priority: '0.7', lastmod: today },
+    { loc: `${origin}/library`, changefreq: 'weekly', priority: '0.6', lastmod: today },
+    { loc: `${origin}/studio`, changefreq: 'weekly', priority: '0.7', lastmod: today },
+    { loc: `${origin}/terms`, changefreq: 'monthly', priority: '0.4', lastmod: today },
+    { loc: `${origin}/privacy`, changefreq: 'monthly', priority: '0.4', lastmod: today },
+    { loc: `${origin}/copyright`, changefreq: 'monthly', priority: '0.4', lastmod: today },
+    { loc: `${origin}/thank-you`, changefreq: 'monthly', priority: '0.3', lastmod: today },
+  ];
+
+  try {
+    const [artistsRes, tracksRes] = await Promise.all([
+      fetch(`${getFirestoreBaseUrl()}/artists?pageSize=150`, { signal: AbortSignal.timeout(2500) }).catch(() => null),
+      fetch(`${getFirestoreBaseUrl()}/tracks?pageSize=250`, { signal: AbortSignal.timeout(2500) }).catch(() => null),
+    ]);
+
+    if (artistsRes?.ok) {
+      const artistsJson = (await artistsRes.json()) as {
+        documents?: Array<{ name?: string; updateTime?: string; fields?: Record<string, FirestoreRestValue> }>;
+      };
+      for (const doc of artistsJson.documents || []) {
+        const data = decodeFirestoreFields(doc.fields);
+        const docId = doc.name?.split('/').pop() || '';
+        const slugOrId = String(data.slug || docId || '').trim();
+        if (!slugOrId) continue;
+        urls.push({
+          loc: `${origin}/artists/${encodeURIComponent(slugOrId)}`,
+          changefreq: 'weekly',
+          priority: '0.8',
+          lastmod: (doc.updateTime || today).slice(0, 10),
+        });
+      }
+    }
+
+    if (tracksRes?.ok) {
+      const tracksJson = (await tracksRes.json()) as {
+        documents?: Array<{ name?: string; updateTime?: string; fields?: Record<string, FirestoreRestValue> }>;
+      };
+      for (const doc of tracksJson.documents || []) {
+        const data = decodeFirestoreFields(doc.fields);
+        if (data.isDraft || data.isDeranked) continue;
+        const docId = doc.name?.split('/').pop() || '';
+        if (!docId) continue;
+        urls.push({
+          loc: `${origin}/tracks/${encodeURIComponent(docId)}`,
+          changefreq: 'weekly',
+          priority: '0.7',
+          lastmod: (doc.updateTime || today).slice(0, 10),
+        });
+      }
+    }
+  } catch {}
+
+  const entries = urls
+    .map(
+      (u) =>
+        `  <url>\n    <loc>${escapeHtmlAttr(u.loc)}</loc>\n${u.lastmod ? `    <lastmod>${u.lastmod}</lastmod>\n` : ''}    <changefreq>${u.changefreq}</changefreq>\n    <priority>${u.priority}</priority>\n  </url>`
+    )
+    .join('\n');
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries}\n</urlset>\n`;
+  sitemapCache = {
+    expiresAt: Date.now() + 60_000,
+    xml,
+    origin,
+  };
+  return xml;
 }
 
 function signTokenPayload(payload: Record<string, unknown>): string {
@@ -977,7 +1173,10 @@ async function startServer() {
         return;
       }
 
-      const isAdmin = authUser.email === PRIMARY_ADMIN_EMAIL && authUser.emailVerified;
+      const isAdmin =
+        authUser.email === PRIMARY_ADMIN_EMAIL &&
+        authUser.emailVerified &&
+        authUser.isGoogleProvider;
       const isArtistOwner =
         artistDoc.ownerUserId === authUser.uid || artistDoc.claimedByUserId === authUser.uid;
 
@@ -1111,7 +1310,10 @@ async function startServer() {
         return;
       }
 
-      const isAdmin = authUser.email === PRIMARY_ADMIN_EMAIL && authUser.emailVerified;
+      const isAdmin =
+        authUser.email === PRIMARY_ADMIN_EMAIL &&
+        authUser.emailVerified &&
+        authUser.isGoogleProvider;
       const isArtistOwner =
         artistDoc.ownerUserId === authUser.uid || artistDoc.claimedByUserId === authUser.uid;
       if ((!isArtistOwner && !isAdmin) || (methodDoc.userId !== authUser.uid && !isAdmin)) {
@@ -1308,6 +1510,87 @@ async function startServer() {
     }
   });
 
+  // 4f. First-Party Analytics Event Ingestion & Summary
+  app.post('/api/analytics/event', (req, res) => {
+    try {
+      const eventName = String(req.body?.event || '').trim().slice(0, 64);
+      if (!eventName) {
+        res.status(400).json({ ok: false, error: 'Missing event name' });
+        return;
+      }
+      const events = readJsonArray<Record<string, unknown>>(ANALYTICS_LEDGER_PATH);
+      events.unshift({
+        event: eventName,
+        path: String(req.body?.path || '/').slice(0, 160),
+        title: String(req.body?.title || '').slice(0, 140),
+        sessionId: String(req.body?.sessionId || 'anon').slice(0, 64),
+        params:
+          req.body?.params && typeof req.body.params === 'object' ? req.body.params : {},
+        timestamp: String(req.body?.timestamp || new Date().toISOString()).slice(0, 40),
+      });
+      writeJsonArray(ANALYTICS_LEDGER_PATH, events.slice(0, 2000));
+      res.status(200).json({ ok: true });
+    } catch {
+      res.status(200).json({ ok: true });
+    }
+  });
+
+  app.get('/api/analytics/summary', (_req, res) => {
+    const events = readJsonArray<{ event?: string; path?: string; sessionId?: string }>(
+      ANALYTICS_LEDGER_PATH
+    );
+    const sessions = new Set<string>();
+    const byEvent: Record<string, number> = {};
+    const byPath: Record<string, number> = {};
+    for (const row of events) {
+      if (row.sessionId) sessions.add(row.sessionId);
+      if (row.event) byEvent[row.event] = (byEvent[row.event] || 0) + 1;
+      if (row.path) byPath[row.path] = (byPath[row.path] || 0) + 1;
+    }
+    res.status(200).json({
+      ok: true,
+      totalEvents: events.length,
+      uniqueSessions: sessions.size,
+      byEvent,
+      topPaths: Object.entries(byPath)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 15),
+    });
+  });
+
+  // 4g. Dynamic robots.txt and sitemap.xml for Search Indexing
+  app.get('/robots.txt', (req, res) => {
+    const origin = resolveRequestOrigin(req);
+    const body = [
+      'User-agent: *',
+      'Allow: /',
+      'Disallow: /administration',
+      'Disallow: /administration/',
+      'Disallow: /admin',
+      'Disallow: /admin/',
+      'Disallow: /api/',
+      '',
+      `Sitemap: ${origin}/sitemap.xml`,
+      '',
+    ].join('\n');
+    res.status(200).set({ 'Content-Type': 'text/plain; charset=utf-8' }).send(body);
+  });
+
+  app.get('/sitemap.xml', async (req, res) => {
+    try {
+      const origin = resolveRequestOrigin(req);
+      const xml = await buildDynamicSitemapXml(origin);
+      res.status(200).set({ 'Content-Type': 'application/xml; charset=utf-8' }).send(xml);
+    } catch {
+      const fallbackPath = path.resolve(__dirname, 'public', 'sitemap.xml');
+      if (fs.existsSync(fallbackPath)) {
+        res.status(200).set({ 'Content-Type': 'application/xml; charset=utf-8' }).sendFile(fallbackPath);
+      } else {
+        res.status(500).send('Unable to generate sitemap');
+      }
+    }
+  });
+
   // 5. Dynamic SEO / OpenGraph SSR pre-injection for Artist Profile Pages + Vite / Production serving
   if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
@@ -1338,6 +1621,24 @@ async function startServer() {
       }
     });
 
+    app.get('/tracks/:id', async (req, res, next) => {
+      try {
+        const trackId = String(req.params.id || '').trim();
+        if (!trackId || trackId.includes('.')) {
+          return next();
+        }
+        const indexPath = path.resolve(__dirname, 'index.html');
+        const rawTemplate = fs.readFileSync(indexPath, 'utf8');
+        const transformed = await vite.transformIndexHtml(req.originalUrl, rawTemplate);
+        const track = await lookupPublicTrackForSeo(trackId);
+        const seoHtml = injectTrackSeoHtml(transformed, track, req);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(seoHtml);
+      } catch (err) {
+        vite.ssrFixStacktrace(err as Error);
+        next(err);
+      }
+    });
+
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
@@ -1351,6 +1652,18 @@ async function startServer() {
           const slug = String(req.params.slug || '').trim();
           const { artist, tracksCount } = await lookupPublicArtistForSeo(slug);
           const seoHtml = injectArtistSeoHtml(rawHtml, artist, tracksCount, req);
+          res.status(200).set({ 'Content-Type': 'text/html' }).end(seoHtml);
+        } catch {
+          res.sendFile(distIndexPath);
+        }
+      });
+
+      app.get('/tracks/:id', async (req, res) => {
+        try {
+          const rawHtml = fs.readFileSync(distIndexPath, 'utf8');
+          const trackId = String(req.params.id || '').trim();
+          const track = await lookupPublicTrackForSeo(trackId);
+          const seoHtml = injectTrackSeoHtml(rawHtml, track, req);
           res.status(200).set({ 'Content-Type': 'text/html' }).end(seoHtml);
         } catch {
           res.sendFile(distIndexPath);

@@ -21,6 +21,7 @@ export interface RouteMatch {
     | 'terms'
     | 'privacy'
     | 'copyright'
+    | 'thank_you'
     | 'not_found'
     | 'server_error';
   params: Record<string, string>;
@@ -56,6 +57,9 @@ export function parseRoute(pathname: string, search: string, hash: string = ''):
   }
   if (cleanPath === '/copyright') {
     return { route: 'copyright', params: {}, pathname: cleanPath, searchQuery, hash };
+  }
+  if (cleanPath === '/thank-you') {
+    return { route: 'thank_you', params: {}, pathname: cleanPath, searchQuery, hash };
   }
 
   // Public & Listener Auth Routes

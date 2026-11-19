@@ -6,9 +6,10 @@ export const LEGAL_CONFIG = {
   jurisdiction: 'Republic of Malawi',
   lastUpdated: '14 November 2026',
   currentTermsVersion: '2026-11-14',
-  supportEmail: 'support@lowervibe.mw',
+  supportEmail: 'odulamw@gmail.com',
   privacyEmail: 'privacy@lowervibe.mw',
   copyrightEmail: 'copyright@lowervibe.mw',
   legalEmail: 'legal@lowervibe.mw',
+  physicalAddress: 'LOWERVIBE Media House, Nsanje, M1 Road, Malawi',
   appVersion: '2.0.0',
 } as const;

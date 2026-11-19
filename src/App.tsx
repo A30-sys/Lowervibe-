@@ -7,6 +7,8 @@ import { ArtistProfileModal } from './components/ArtistProfileModal';
 import { ReauthModal } from './components/auth/ReauthModal';
 import { AuthModal } from './components/AuthModal';
 import { CelebrationModal } from './components/CelebrationModal';
+import { CookieBanner } from './components/common/CookieBanner';
+import { StickyMobileCta } from './components/common/StickyMobileCta';
 import { CrashRecoveryHandler } from './components/CrashRecoveryHandler';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { FirstTimeTourModal } from './components/FirstTimeTourModal';
@@ -35,6 +37,7 @@ import { NotFoundView } from './components/views/NotFoundView';
 import { SearchResultsView } from './components/views/SearchResultsView';
 import { ServerErrorView } from './components/views/ServerErrorView';
 import { StudioView } from './components/views/StudioView';
+import { ThankYouView } from './components/views/ThankYouView';
 import { TrackPublicPageView } from './components/views/TrackPublicPageView';
 import { AudioProvider, useAudio } from './context/AudioContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -44,8 +47,14 @@ import { OfflineQueueProvider } from './context/OfflineQueueContext';
 import { RouterProvider, useRouter } from './context/RouterContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider } from './context/ToastContext';
-import { PRIMARY_ADMIN_EMAIL } from './services/authService';
+import {
+  getCookieConsent,
+  initFirebaseAnalytics,
+  trackPageView,
+} from './services/analyticsService';
+import { isVerifiedAdminGoogleSession, PRIMARY_ADMIN_EMAIL } from './services/authService';
 import { Track } from './types';
+import { applyRouteSeoMeta } from './utils/seoMeta';
 
 function AppContent() {
   const { currentRoute, navigate, searchParams } = useRouter();
@@ -230,17 +239,42 @@ function AppContent() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Initialize analytics when cookie consent permits
+  useEffect(() => {
+    if (getCookieConsent() !== 'essential') {
+      void initFirebaseAnalytics();
+    }
+  }, []);
+
+  // Sync per-route <title>, <meta description>, canonical, OG tags, and analytics page_view
+  useEffect(() => {
+    applyRouteSeoMeta(currentRoute.route, currentRoute.searchQuery);
+    trackPageView(currentRoute.pathname, typeof document !== 'undefined' ? document.title : 'LOWERVIBE');
+  }, [currentRoute.route, currentRoute.pathname, currentRoute.searchQuery]);
+
   if (!authReady) {
     return <InitialLoader />;
   }
 
-  // Public Legal routes render cleanly even when signed out
+  // Public Legal & Thank-You routes render cleanly even when signed out
   if (currentRoute.route === 'terms' || currentRoute.route === 'privacy' || currentRoute.route === 'copyright') {
     return (
       <div className="min-h-screen bg-[var(--bg)] text-[var(--text)] flex flex-col font-sans transition-colors duration-200">
         <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 pt-6 pb-16">
           <LegalPageView docType={currentRoute.route} />
         </main>
+        <CookieBanner />
+      </div>
+    );
+  }
+
+  if (currentRoute.route === 'thank_you' && !currentUser && !isGuestMode) {
+    return (
+      <div className="min-h-screen bg-[var(--bg)] text-[var(--text)] flex flex-col font-sans transition-colors duration-200">
+        <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 pt-6 pb-16">
+          <ThankYouView />
+        </main>
+        <CookieBanner />
       </div>
     );
   }
@@ -253,12 +287,18 @@ function AppContent() {
     return <AdminAccessDeniedView />;
   }
   if (currentRoute.route === 'admin' || currentRoute.route === 'admin_dashboard') {
-    if (currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL) {
+    if (
+      currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL &&
+      isVerifiedAdminGoogleSession()
+    ) {
       return (
         <div className="min-h-screen bg-[var(--bg)] text-[var(--text)] p-4 sm:p-8 max-w-6xl mx-auto">
           <AdminPortal onBackToExplore={() => navigate('/')} />
         </div>
       );
+    }
+    if (!currentUser) {
+      return <AdminLoginView />;
     }
     return <AdminAccessDeniedView />;
   }
@@ -345,7 +385,10 @@ function AppContent() {
 
   const handleSelectTab = (tab: MainTabType) => {
     if (tab === 'admin') {
-      if (currentUser?.email?.toLowerCase() !== PRIMARY_ADMIN_EMAIL) {
+      if (
+        currentUser?.email?.toLowerCase() !== PRIMARY_ADMIN_EMAIL ||
+        !isVerifiedAdminGoogleSession()
+      ) {
         navigate('/administration/access-denied');
         return;
       }
@@ -538,6 +581,8 @@ function AppContent() {
             <SearchResultsView onOpenTrackDetails={handleOpenTrackDetails} />
           )}
 
+          {currentRoute.route === 'thank_you' && <ThankYouView />}
+
           {currentRoute.route === 'not_found' && <NotFoundView />}
 
           {currentRoute.route === 'server_error' && <ServerErrorView />}
@@ -558,6 +603,10 @@ function AppContent() {
       )}
 
       <BottomTabBar activeTab={activeTab} onSelectTab={handleSelectTab} />
+
+      <StickyMobileCta isPlayerVisible={isPlayerMounted && !isPlayerExiting} />
+
+      <CookieBanner hasPlayerOffset={isPlayerMounted && !isPlayerExiting} />
 
       {/* Active Offline Save Progress Toast */}
       {activeDownload && (

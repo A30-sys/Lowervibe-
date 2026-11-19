@@ -40,6 +40,14 @@ import { DEFAULT_AVATAR_SVG } from '../utils/artworkFallback';
 export const PRIMARY_ADMIN_EMAIL = 'odulamw@gmail.com';
 const ADMIN_CONFIG_DOC = 'setup';
 
+export function isVerifiedAdminGoogleSession(fbUser = auth.currentUser): boolean {
+  if (!fbUser) return false;
+  const emailMatches = (fbUser.email || '').trim().toLowerCase() === PRIMARY_ADMIN_EMAIL;
+  const verified = Boolean(fbUser.emailVerified);
+  const viaGoogle = fbUser.providerData.some((p) => p.providerId === 'google.com');
+  return emailMatches && verified && viaGoogle;
+}
+
 export interface AuthResponse {
   success: boolean;
   user?: User;
@@ -301,8 +309,8 @@ export async function registerUserAccount(
   const rateError = checkClientRateLimit('register', 5, 60_000);
   if (rateError) return { success: false, error: rateError };
 
-  const isPlatformAdmin = cleanEmail === PRIMARY_ADMIN_EMAIL;
-  const assignedRole: UserRole = isPlatformAdmin ? 'admin' : role === 'artist' ? 'artist' : 'listener';
+  const isPlatformAdmin = false;
+  const assignedRole: UserRole = role === 'artist' ? 'artist' : 'listener';
   const applicationStatus: 'none' | 'pending' | 'approved' | 'rejected' = extra?.application ? 'pending' : 'none';
 
   try {
@@ -428,7 +436,7 @@ export async function loginUserAccount(
   const rateError = checkClientRateLimit(`login:${cleanEmail}`, 6, 60_000);
   if (rateError) return { success: false, error: rateError };
 
-  const isPlatformAdmin = cleanEmail === PRIMARY_ADMIN_EMAIL;
+  const isPlatformAdmin = false;
 
   try {
     await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
@@ -732,62 +740,20 @@ export async function fetchAdminSetupStatus(): Promise<AdminSetupStatus> {
 }
 
 export async function initializeAdminAccount(
-  password: string
+  _password: string
 ): Promise<{ success: boolean; error?: string; errorCode?: string }> {
-  if (!password || password.length < 8) {
-    return { success: false, error: 'Admin password must be at least 8 characters.' };
-  }
-  try {
-    await setPersistence(auth, browserLocalPersistence);
-    const cred = await createUserWithEmailAndPassword(auth, PRIMARY_ADMIN_EMAIL, password);
-    await setDoc(
-      doc(db, 'admin_config', ADMIN_CONFIG_DOC),
-      {
-        id: ADMIN_CONFIG_DOC,
-        adminEmail: PRIMARY_ADMIN_EMAIL,
-        isInitialized: true,
-        royaltyPerStream: 0.0025,
-        maintenanceMode: false,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
-    const adminUser: User = {
-      id: cred.user.uid,
-      name: 'Platform Administrator',
-      username: 'odula_admin',
-      email: PRIMARY_ADMIN_EMAIL,
-      emailVerified: cred.user.emailVerified,
-      role: 'admin',
-      isAdmin: true,
-      avatar: DEFAULT_AVATAR_SVG,
-      bio: 'Platform owner & administrator.',
-      likedTrackIds: [],
-      followingArtistIds: [],
-      playlists: [],
-    };
-    await syncUserRecord(adminUser);
-    await sendEmailVerification(cred.user).catch(() => {});
-    return { success: true };
-  } catch (err) {
-    return {
-      success: false,
-      error: mapFirebaseAuthError(err),
-      errorCode: extractAuthErrorCode(err),
-    };
-  }
+  return {
+    success: false,
+    error: `Administration uses Google Login Auth only (${PRIMARY_ADMIN_EMAIL}).`,
+  };
 }
 
 export async function verifyAdminCredentials(
-  email: string,
-  password: string
+  _email: string,
+  _password: string
 ): Promise<{ success: boolean; error?: string; errorCode?: string; user?: User }> {
-  const cleanEmail = email.trim().toLowerCase();
-  if (cleanEmail !== PRIMARY_ADMIN_EMAIL) {
-    return {
-      success: false,
-      error: 'Access Denied: Only odulamw@gmail.com can access the Admin Dashboard.',
-    };
-  }
-  return loginUserAccount(cleanEmail, password, true);
+  return {
+    success: false,
+    error: `Administration sign-in requires Google Login Auth with ${PRIMARY_ADMIN_EMAIL}.`,
+  };
 }

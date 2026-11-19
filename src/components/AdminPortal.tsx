@@ -47,7 +47,7 @@ import {
   User,
 } from '../types';
 import { formatNumber, formatTime, parseDurationInput } from '../utils/formatters';
-import { PRIMARY_ADMIN_EMAIL } from '../services/authService';
+import { isVerifiedAdminGoogleSession, PRIMARY_ADMIN_EMAIL } from '../services/authService';
 import { extractAudioMetadata, ExtractedAudioMetadata, saveAudioBlob } from '../services/audioStorage';
 import {
   uploadTrackAudioToFirebaseStorage,
@@ -92,6 +92,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
     applications,
     approveArtistApplication,
     rejectArtistApplication,
+    signInAdminWithGoogle,
     logout,
   } = useAuth();
 
@@ -505,9 +506,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
   };
 
   const isVerifiedAdminSession = Boolean(
-    auth.currentUser &&
-      auth.currentUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL &&
-      (auth.currentUser.emailVerified || emailVerified)
+    isVerifiedAdminGoogleSession(auth.currentUser) && (auth.currentUser?.emailVerified || emailVerified)
   );
 
   useEffect(() => {
@@ -735,10 +734,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
             <ShieldAlert className="w-5 h-5 text-[var(--accent-text)] shrink-0 mt-0.5" />
             <div className="space-y-0.5">
               <p className="text-xs sm:text-sm font-bold text-[var(--text)]">
-                Verify your admin email to load user &amp; payout records
+                Google Login Auth session required for {PRIMARY_ADMIN_EMAIL}
               </p>
               <p className="text-xs text-[var(--text-muted)]">
-                Firestore rules require a verified email token for {PRIMARY_ADMIN_EMAIL}. Verify via email or sign in with Google.
+                Firestore rules strictly require a verified Google Login Auth token for {PRIMARY_ADMIN_EMAIL}.
               </p>
             </div>
           </div>
@@ -746,26 +745,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
             <button
               type="button"
               onClick={async () => {
-                const res = await resendVerification();
-                showToast(res.success ? 'Verification email sent.' : res.error || 'Could not send email.');
-              }}
-              className="px-3.5 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer min-h-[40px]"
-            >
-              Send email
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                const res = await refreshEmailVerification();
-                if (res.verified) {
-                  showToast('Email verified. Loading admin data...');
-                } else {
-                  showToast(res.error || 'Email not verified yet.');
-                }
+                const res = await signInAdminWithGoogle();
+                showToast(res.success ? 'Verified Google Admin session active.' : res.error || 'Google sign-in required.');
               }}
               className="px-3.5 py-2 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer min-h-[40px]"
             >
-              Refresh status
+              Sign in with Google
             </button>
           </div>
         </div>

@@ -512,10 +512,45 @@ export async function optimizeArtistCoverPhoto(
   }
 }
 
+function notifyOfflineCacheChanged(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new CustomEvent('lowervibe:offline-cache-changed'));
+  } catch {}
+}
+
+export interface StorageQuotaInfo {
+  supported: boolean;
+  usageBytes: number;
+  quotaBytes: number;
+}
+
+export function formatStorageBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+export async function getStorageQuotaEstimate(): Promise<StorageQuotaInfo> {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.storage && typeof navigator.storage.estimate === 'function') {
+      const est = await navigator.storage.estimate();
+      return {
+        supported: true,
+        usageBytes: Number(est.usage || 0),
+        quotaBytes: Number(est.quota || 0),
+      };
+    }
+  } catch {}
+  return { supported: false, usageBytes: 0, quotaBytes: 0 };
+}
+
 export async function saveAudioBlob(trackId: string, blob: Blob): Promise<void> {
   try {
     const db = await openDb();
-    return new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       const tx = db.transaction([AUDIO_STORE, RECENT_STORE], 'readwrite');
       const store = tx.objectStore(AUDIO_STORE);
       store.put(blob, trackId);
@@ -526,6 +561,7 @@ export async function saveAudioBlob(trackId: string, blob: Blob): Promise<void> 
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
+    notifyOfflineCacheChanged();
   } catch (err) {
     console.warn('Failed to store audio in IndexedDB', err);
   }
@@ -556,10 +592,10 @@ export async function isTrackCachedOffline(trackId: string): Promise<boolean> {
   try {
     const db = await openDb();
     return new Promise((resolve) => {
-      const tx = db.transaction(RECENT_STORE, 'readonly');
-      const store = tx.objectStore(RECENT_STORE);
-      const req = store.get(trackId);
-      req.onsuccess = () => resolve(!!req.result);
+      const tx = db.transaction(AUDIO_STORE, 'readonly');
+      const store = tx.objectStore(AUDIO_STORE);
+      const req = store.getKey(trackId);
+      req.onsuccess = () => resolve(req.result !== undefined);
       req.onerror = () => resolve(false);
     });
   } catch {
@@ -570,20 +606,24 @@ export async function isTrackCachedOffline(trackId: string): Promise<boolean> {
 export async function removeTrackOfflineCache(trackId: string): Promise<void> {
   try {
     const db = await openDb();
-    return new Promise((resolve) => {
+    await new Promise<void>((resolve) => {
       const tx = db.transaction([AUDIO_STORE, RECENT_STORE], 'readwrite');
       tx.objectStore(AUDIO_STORE).delete(trackId);
       tx.objectStore(RECENT_STORE).delete(trackId);
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
     });
+    notifyOfflineCacheChanged();
   } catch {}
 }
 
 export async function getOfflineCacheStats(): Promise<OfflineCacheStats> {
   try {
     const db = await openDb();
-    return new Promise((resolve) => {
+    const { keys, recentMap } = await new Promise<{
+      keys: string[];
+      recentMap: Map<string, OfflineCacheEntry>;
+    }>((resolve) => {
       const tx = db.transaction([AUDIO_STORE, RECENT_STORE], 'readonly');
       const audioStore = tx.objectStore(AUDIO_STORE);
       const recentStore = tx.objectStore(RECENT_STORE);
@@ -591,43 +631,63 @@ export async function getOfflineCacheStats(): Promise<OfflineCacheStats> {
       const keysReq = audioStore.getAllKeys();
       const recentReq = recentStore.getAll();
 
-      tx.oncomplete = async () => {
-        const recentMap = new Map<string, OfflineCacheEntry>();
-        const recentList = (recentReq.result || []) as Array<{ trackId: string; sizeBytes?: number; timestamp?: number }>;
+      tx.oncomplete = () => {
+        const map = new Map<string, OfflineCacheEntry>();
+        const recentList = (recentReq.result || []) as Array<{
+          trackId: string;
+          sizeBytes?: number;
+          timestamp?: number;
+        }>;
         for (const item of recentList) {
           if (item?.trackId) {
-            recentMap.set(item.trackId, {
+            map.set(item.trackId, {
               trackId: item.trackId,
               sizeBytes: item.sizeBytes || 0,
               timestamp: item.timestamp || 0,
             });
           }
         }
-
-        const keys = (keysReq.result || []) as string[];
-        let totalBytes = 0;
-        const entries: OfflineCacheEntry[] = [];
-
-        for (const k of keys) {
-          const entry = recentMap.get(String(k));
-          const bytes = entry?.sizeBytes || 0;
-          totalBytes += bytes;
-          entries.push({
-            trackId: String(k),
-            sizeBytes: bytes,
-            timestamp: entry?.timestamp || Date.now(),
-          });
-        }
-
         resolve({
-          totalBytes,
-          count: entries.length,
-          entries: entries.sort((a, b) => b.timestamp - a.timestamp),
+          keys: (keysReq.result || []).map((k) => String(k)),
+          recentMap: map,
         });
       };
 
-      tx.onerror = () => resolve({ totalBytes: 0, count: 0, entries: [] });
+      tx.onerror = () => resolve({ keys: [], recentMap: new Map() });
     });
+
+    // Backfill exact Blob byte size for any entry missing sizeBytes in RECENT_STORE
+    const entries: OfflineCacheEntry[] = [];
+    let totalBytes = 0;
+
+    for (const k of keys) {
+      const recent = recentMap.get(k);
+      let bytes = recent?.sizeBytes || 0;
+      if (bytes <= 0) {
+        bytes = await new Promise<number>((resolve) => {
+          try {
+            const tx = db.transaction(AUDIO_STORE, 'readonly');
+            const req = tx.objectStore(AUDIO_STORE).get(k);
+            req.onsuccess = () => resolve(req.result instanceof Blob ? req.result.size : 0);
+            req.onerror = () => resolve(0);
+          } catch {
+            resolve(0);
+          }
+        });
+      }
+      totalBytes += bytes;
+      entries.push({
+        trackId: k,
+        sizeBytes: bytes,
+        timestamp: recent?.timestamp || Date.now(),
+      });
+    }
+
+    return {
+      totalBytes,
+      count: entries.length,
+      entries: entries.sort((a, b) => b.timestamp - a.timestamp),
+    };
   } catch {
     return { totalBytes: 0, count: 0, entries: [] };
   }
@@ -636,12 +696,13 @@ export async function getOfflineCacheStats(): Promise<OfflineCacheStats> {
 export async function clearOfflineCache(): Promise<void> {
   try {
     const db = await openDb();
-    return new Promise((resolve) => {
+    await new Promise<void>((resolve) => {
       const tx = db.transaction([AUDIO_STORE, RECENT_STORE], 'readwrite');
       tx.objectStore(AUDIO_STORE).clear();
       tx.objectStore(RECENT_STORE).clear();
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
     });
+    notifyOfflineCacheChanged();
   } catch {}
 }
