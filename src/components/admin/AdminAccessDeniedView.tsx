@@ -21,7 +21,7 @@ export const AdminAccessDeniedView: React.FC = () => {
         );
         return;
       }
-      navigate('/administration');
+      navigate('/administrationside');
     } finally {
       setIsLoading(false);
     }

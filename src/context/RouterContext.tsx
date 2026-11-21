@@ -73,14 +73,24 @@ export function parseRoute(pathname: string, search: string, hash: string = ''):
     return { route: 'forgot_password', params: {}, pathname: cleanPath, searchQuery, hash };
   }
 
-  // Dedicated Standalone Administration Page Routes (/administration) & /admin aliases
-  if (cleanPath === '/administration/login' || cleanPath === '/admin/login') {
+  // Dedicated Standalone Administration Page Routes (/administrationside) & legacy aliases
+  if (
+    cleanPath === '/administrationside/login' ||
+    cleanPath === '/administration/login' ||
+    cleanPath === '/admin/login'
+  ) {
     return { route: 'admin_login', params: {}, pathname: cleanPath, searchQuery, hash };
   }
-  if (cleanPath === '/administration/access-denied' || cleanPath === '/admin/access-denied') {
+  if (
+    cleanPath === '/administrationside/access-denied' ||
+    cleanPath === '/administration/access-denied' ||
+    cleanPath === '/admin/access-denied'
+  ) {
     return { route: 'admin_access_denied', params: {}, pathname: cleanPath, searchQuery, hash };
   }
   if (
+    cleanPath === '/administrationside' ||
+    cleanPath === '/administrationside/dashboard' ||
     cleanPath === '/administration' ||
     cleanPath === '/administration/dashboard' ||
     cleanPath === '/admin' ||
@@ -110,7 +120,7 @@ export function parseRoute(pathname: string, search: string, hash: string = ''):
   if (cleanPath === '/library') {
     return { route: 'library', params: {}, pathname: cleanPath, searchQuery, hash };
   }
-  if (cleanPath === '/studio') {
+  if (cleanPath === '/artistcreator' || cleanPath === '/studio') {
     return { route: 'studio', params: {}, pathname: cleanPath, searchQuery, hash };
   }
   if (cleanPath === '/account') {

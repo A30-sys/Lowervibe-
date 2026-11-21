@@ -40,6 +40,7 @@ import {
   parseDurationInput,
 } from '../utils/formatters';
 import { GenreSelectOrCustom } from './common/GenreSelectOrCustom';
+import { MoodSelectOrCustom } from './common/MoodSelectOrCustom';
 
 interface TrackDetailDrawerProps {
   track: Track | null;
@@ -84,6 +85,7 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
   const [isEditingMetadata, setIsEditingMetadata] = useState(false);
   const [editTitle, setEditTitle] = useState(track?.title || '');
   const [editGenre, setEditGenre] = useState(track?.genre || 'Afro Chillout');
+  const [editMood, setEditMood] = useState(track?.mood || '');
   const [editDescription, setEditDescription] = useState(track?.story || '');
   const [editDuration, setEditDuration] = useState(
     track ? formatTime(getTrackDurationSeconds(track)) : ''
@@ -95,9 +97,10 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
     setIsEditingMetadata(false);
     setEditTitle(track?.title || '');
     setEditGenre(track?.genre || 'Afro Chillout');
+    setEditMood(track?.mood || '');
     setEditDescription(track?.story || '');
     setEditDuration(track ? formatTime(getTrackDurationSeconds(track)) : '');
-  }, [track?.id, track?.title, track?.genre, track?.story, track?.durationSeconds, track?.metadata?.Duration]);
+  }, [track?.id, track?.title, track?.genre, track?.mood, track?.story, track?.durationSeconds, track?.metadata?.Duration]);
 
   if (!track) return null;
 
@@ -147,9 +150,12 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
       const parsedDur = parseDurationInput(editDuration);
       const nextDuration = parsedDur > 0 ? parsedDur : trackDurationSec;
       const cleanGenre = editGenre.trim() || track.genre;
+      const cleanMood = editMood.trim();
       await updateTrack(track.id, {
         title: editTitle.trim(),
         genre: cleanGenre,
+        mood: cleanMood,
+        vibeTags: [cleanGenre, ...(cleanMood ? [cleanMood] : [])].filter(Boolean),
         story: editDescription.trim(),
         durationSeconds: nextDuration,
         metadata: {
@@ -397,6 +403,7 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
                       setActiveTab('overview');
                       setEditTitle(track.title);
                       setEditGenre(track.genre);
+                      setEditMood(track.mood || '');
                       setEditDescription(track.story || '');
                       setEditDuration(formatTime(trackDurationSec));
                       setIsEditingMetadata((prev) => !prev);
@@ -468,6 +475,15 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
                   onCustomGenreCreated={(name) => {
                     upsertGenre(name, { region: track.region }).catch(() => {});
                   }}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-[var(--text-dim)]">Mood (optional)</label>
+                <MoodSelectOrCustom
+                  value={editMood}
+                  onChange={setEditMood}
+                  className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-[var(--surface)] border border-[var(--border-strong)] text-xs text-[var(--text)] focus:outline-none focus:border-[var(--accent-text)]"
                 />
               </div>
 

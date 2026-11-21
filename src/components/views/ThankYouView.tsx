@@ -13,18 +13,18 @@ export const ThankYouView: React.FC = () => {
       case 'artist':
         return {
           badge: 'Application Received',
-          heading: 'Thank you for applying to LOWERVIBE Studio',
-          body: 'Your creator profile application has been saved safely. We are reviewing your details and you will get an instant notification as soon as your artist studio unlocks.',
+          heading: 'Thank you for applying to LOWERVIBE Artist Creator',
+          body: 'Your creator profile application has been saved safely. We are reviewing your details and you will get an instant notification as soon as your artist creator workspace unlocks.',
           primaryLabel: 'View Approval Status',
-          primaryRoute: '/studio',
+          primaryRoute: '/artistcreator',
         };
       case 'upload':
         return {
           badge: 'Release Live',
           heading: itemTitle ? `Thank you — “${itemTitle}” is published` : 'Thank you — Your release is live',
-          body: 'Your track has been validated, stored, and published to the LOWERVIBE catalog. Real plays and listener metrics update automatically in Studio.',
-          primaryLabel: 'Open Studio Tracks',
-          primaryRoute: '/studio',
+          body: 'Your track has been validated, stored, and published to the LOWERVIBE catalog. Real plays and listener metrics update automatically in Artist Creator.',
+          primaryLabel: 'Open Artist Creator',
+          primaryRoute: '/artistcreator',
         };
       case 'payout':
         return {
@@ -32,7 +32,7 @@ export const ThankYouView: React.FC = () => {
           heading: 'Thank you — Your payout request is recorded',
           body: 'Your withdrawal request and cryptographic settlement token are recorded on your artist ledger. Track real-time status updates anytime in Withdrawals.',
           primaryLabel: 'Open Withdrawals',
-          primaryRoute: '/studio?tab=withdrawals',
+          primaryRoute: '/artistcreator?tab=withdrawals',
         };
       case 'support':
         return {

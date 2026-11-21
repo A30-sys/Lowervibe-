@@ -15,6 +15,20 @@ function setMetaTag(attr: 'name' | 'property', key: string, content: string): vo
   el.setAttribute('content', content);
 }
 
+function removeMetaTag(attr: 'name' | 'property', key: string): void {
+  if (typeof document === 'undefined') return;
+  const el = document.head.querySelector(`meta[${attr}="${key}"]`);
+  if (el) el.remove();
+}
+
+function clearDynamicMediaMetaTags(): void {
+  removeMetaTag('property', 'profile:username');
+  removeMetaTag('property', 'music:musician');
+  removeMetaTag('property', 'music:duration');
+  removeMetaTag('property', 'og:audio');
+  removeMetaTag('property', 'og:audio:type');
+}
+
 function setCanonicalLink(href: string): void {
   if (typeof document === 'undefined') return;
   let el = document.head.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
@@ -56,6 +70,37 @@ export function resolvePublicImageUrl(rawUrl: string | undefined, origin: string
   return `${origin}/${trimmed}`;
 }
 
+export function resolvePublicAudioUrl(rawUrl: string | undefined, origin: string): string | undefined {
+  if (!rawUrl) return undefined;
+  const trimmed = rawUrl.trim();
+  if (!trimmed || trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return undefined;
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+  if (trimmed.startsWith('/')) return `${origin}${trimmed}`;
+  return undefined;
+}
+
+function inferAudioMimeType(audioUrl: string): string {
+  const lower = audioUrl.toLowerCase().split('?')[0];
+  if (lower.endsWith('.wav')) return 'audio/wav';
+  if (lower.endsWith('.flac')) return 'audio/flac';
+  if (lower.endsWith('.m4a') || lower.endsWith('.mp4')) return 'audio/mp4';
+  if (lower.endsWith('.ogg')) return 'audio/ogg';
+  return 'audio/mpeg';
+}
+
+function formatIsoDuration(secondsValue: number): string | undefined {
+  const totalSeconds = Math.round(secondsValue);
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return undefined;
+  const hours = Math.floor(totalSeconds / 3600);
+  const mins = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+  let out = 'PT';
+  if (hours > 0) out += `${hours}H`;
+  if (mins > 0) out += `${mins}M`;
+  if (secs > 0 || (hours === 0 && mins === 0)) out += `${secs}S`;
+  return out;
+}
+
 export function buildArtistSeoPayload(
   artist: Partial<Artist> & { name?: string },
   options: {
@@ -90,6 +135,9 @@ export function buildArtistSeoPayload(
   const description = truncateText(baseDesc, 160);
 
   const image = resolvePublicImageUrl(artist.avatar || artist.banner, options.origin);
+  const genres = Array.isArray(artist.genres)
+    ? artist.genres.filter((g) => typeof g === 'string' && g.trim().length > 0)
+    : [];
   const sameAs = Object.values(artist.socials || {})
     .map((u) => (typeof u === 'string' ? u.trim() : ''))
     .filter((u) => u.startsWith('https://') || u.startsWith('http://'));
@@ -101,6 +149,7 @@ export function buildArtistSeoPayload(
     description,
     image,
     url: options.canonicalUrl,
+    ...(genres.length > 0 ? { genre: genres } : {}),
     ...(locationText ? { foundingLocation: { '@type': 'Place', name: locationText } } : {}),
     ...(sameAs.length > 0 ? { sameAs } : {}),
     ...(typeof artist.followersCount === 'number' && artist.followersCount > 0
@@ -118,6 +167,7 @@ export function buildArtistSeoPayload(
     title,
     description,
     image,
+    imageAlt: `${safeName} on LOWERVIBE`,
     canonicalUrl: options.canonicalUrl,
     username: artist.slug || artist.id || safeName,
     structuredData,
@@ -134,16 +184,18 @@ export function applyArtistSeoMeta(artist: Artist, tracksCount = 0): void {
     tracksCount,
   });
 
+  clearDynamicMediaMetaTags();
   document.title = seo.title;
   setCanonicalLink(seo.canonicalUrl);
   setMetaTag('name', 'description', seo.description);
 
   setMetaTag('property', 'og:type', 'profile');
+  setMetaTag('property', 'og:locale', 'en_US');
   setMetaTag('property', 'og:site_name', 'LOWERVIBE');
   setMetaTag('property', 'og:title', seo.title);
   setMetaTag('property', 'og:description', seo.description);
   setMetaTag('property', 'og:image', seo.image);
-  setMetaTag('property', 'og:image:alt', `${artist.name || 'Artist'} on LOWERVIBE`);
+  setMetaTag('property', 'og:image:alt', seo.imageAlt);
   setMetaTag('property', 'og:url', seo.canonicalUrl);
   setMetaTag('property', 'profile:username', seo.username);
 
@@ -151,16 +203,21 @@ export function applyArtistSeoMeta(artist: Artist, tracksCount = 0): void {
   setMetaTag('name', 'twitter:title', seo.title);
   setMetaTag('name', 'twitter:description', seo.description);
   setMetaTag('name', 'twitter:image', seo.image);
+  setMetaTag('name', 'twitter:image:alt', seo.imageAlt);
 
   setStructuredData(seo.structuredData);
 }
 
-export function applyTrackSeoMeta(track: Track): void {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return;
-  const origin = window.location.origin;
-  const canonicalUrl = `${origin}${window.location.pathname}`;
-  const safeTrack = track.title || 'Track';
-  const safeArtist = track.artistName || 'Independent Artist';
+export function buildTrackSeoPayload(
+  track: Track,
+  options: {
+    origin: string;
+    canonicalUrl: string;
+    artist?: Artist | null;
+  }
+) {
+  const safeTrack = (track.title || 'Track').trim();
+  const safeArtist = (track.artistName || options.artist?.name || 'Independent Artist').trim();
 
   let title = `${safeTrack} by ${safeArtist} – LOWERVIBE`;
   if (title.length > 60) {
@@ -172,43 +229,99 @@ export function applyTrackSeoMeta(track: Track): void {
       `Stream "${safeTrack}" by ${safeArtist} (${track.genre || 'Independent Music'}) on LOWERVIBE. Listen offline, share, and support creators directly.`,
     160
   );
-  const image = resolvePublicImageUrl(track.coverArt, origin);
+  const image = resolvePublicImageUrl(track.coverArt, options.origin);
+  const durationSeconds = Math.round(
+    Number(track.durationSeconds || track.metadata?.duration || track.metadata?.Duration || 0)
+  );
+  const isoDuration = formatIsoDuration(durationSeconds);
+  const artistSlugOrId = (options.artist?.slug || track.artistId || '').trim();
+  const artistUrl = artistSlugOrId ? `${options.origin}/artists/${encodeURIComponent(artistSlugOrId)}` : '';
+  const audioUrl = resolvePublicAudioUrl(track.audioUrl, options.origin);
+  const datePublished = track.releaseDate ? track.releaseDate.trim().slice(0, 10) : undefined;
 
-  document.title = title;
-  setCanonicalLink(canonicalUrl);
-  setMetaTag('name', 'description', description);
-
-  setMetaTag('property', 'og:type', 'music.song');
-  setMetaTag('property', 'og:site_name', 'LOWERVIBE');
-  setMetaTag('property', 'og:title', title);
-  setMetaTag('property', 'og:description', description);
-  setMetaTag('property', 'og:image', image);
-  setMetaTag('property', 'og:image:alt', `${safeTrack} cover artwork`);
-  setMetaTag('property', 'og:url', canonicalUrl);
-
-  setMetaTag('name', 'twitter:card', 'summary_large_image');
-  setMetaTag('name', 'twitter:title', title);
-  setMetaTag('name', 'twitter:description', description);
-  setMetaTag('name', 'twitter:image', image);
-
-  setStructuredData({
+  const structuredData: Record<string, unknown> = {
     '@context': 'https://schema.org',
     '@type': 'MusicRecording',
     name: safeTrack,
     byArtist: {
       '@type': 'MusicGroup',
       name: safeArtist,
+      ...(artistUrl ? { url: artistUrl } : {}),
     },
     genre: track.genre || 'Independent',
-    url: canonicalUrl,
+    url: options.canonicalUrl,
     image,
     description,
-  });
+    ...(isoDuration ? { duration: isoDuration } : {}),
+    ...(datePublished ? { datePublished } : {}),
+    ...(typeof track.plays === 'number' && track.plays > 0
+      ? {
+          interactionStatistic: {
+            '@type': 'InteractionCounter',
+            interactionType: 'https://schema.org/ListenAction',
+            userInteractionCount: track.plays,
+          },
+        }
+      : {}),
+  };
+
+  return {
+    title,
+    description,
+    image,
+    imageAlt: `${safeTrack} cover artwork`,
+    canonicalUrl: options.canonicalUrl,
+    artistUrl,
+    durationSeconds,
+    audioUrl,
+    audioType: audioUrl ? inferAudioMimeType(audioUrl) : undefined,
+    structuredData,
+  };
+}
+
+export function applyTrackSeoMeta(track: Track, artist?: Artist | null): void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const origin = window.location.origin;
+  const canonicalUrl = `${origin}${window.location.pathname}`;
+  const seo = buildTrackSeoPayload(track, { origin, canonicalUrl, artist });
+
+  clearDynamicMediaMetaTags();
+  document.title = seo.title;
+  setCanonicalLink(seo.canonicalUrl);
+  setMetaTag('name', 'description', seo.description);
+
+  setMetaTag('property', 'og:type', 'music.song');
+  setMetaTag('property', 'og:locale', 'en_US');
+  setMetaTag('property', 'og:site_name', 'LOWERVIBE');
+  setMetaTag('property', 'og:title', seo.title);
+  setMetaTag('property', 'og:description', seo.description);
+  setMetaTag('property', 'og:image', seo.image);
+  setMetaTag('property', 'og:image:alt', seo.imageAlt);
+  setMetaTag('property', 'og:url', seo.canonicalUrl);
+  if (seo.artistUrl) {
+    setMetaTag('property', 'music:musician', seo.artistUrl);
+  }
+  if (seo.durationSeconds > 0) {
+    setMetaTag('property', 'music:duration', String(seo.durationSeconds));
+  }
+  if (seo.audioUrl && seo.audioType) {
+    setMetaTag('property', 'og:audio', seo.audioUrl);
+    setMetaTag('property', 'og:audio:type', seo.audioType);
+  }
+
+  setMetaTag('name', 'twitter:card', 'summary_large_image');
+  setMetaTag('name', 'twitter:title', seo.title);
+  setMetaTag('name', 'twitter:description', seo.description);
+  setMetaTag('name', 'twitter:image', seo.image);
+  setMetaTag('name', 'twitter:image:alt', seo.imageAlt);
+
+  setStructuredData(seo.structuredData);
 }
 
 export function applyRouteSeoMeta(route: string, searchQuery = ''): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   if (route === 'artist_detail' || route === 'track_detail') return;
+  clearDynamicMediaMetaTags();
 
   const origin = window.location.origin;
   const canonicalUrl = `${origin}${window.location.pathname}`;
@@ -320,6 +433,7 @@ export function applyRouteSeoMeta(route: string, searchQuery = ''): void {
   setMetaTag('name', 'description', meta.description);
 
   setMetaTag('property', 'og:type', 'website');
+  setMetaTag('property', 'og:locale', 'en_US');
   setMetaTag('property', 'og:site_name', 'LOWERVIBE');
   setMetaTag('property', 'og:title', meta.title);
   setMetaTag('property', 'og:description', meta.description);
@@ -331,6 +445,7 @@ export function applyRouteSeoMeta(route: string, searchQuery = ''): void {
   setMetaTag('name', 'twitter:title', meta.title);
   setMetaTag('name', 'twitter:description', meta.description);
   setMetaTag('name', 'twitter:image', defaultImage);
+  setMetaTag('name', 'twitter:image:alt', meta.title);
 
   setStructuredData({
     '@context': 'https://schema.org',

@@ -7,10 +7,12 @@ Allow: /terms
 Allow: /privacy
 Allow: /copyright
 
+Disallow: /administrationside
 Disallow: /administration
 Disallow: /admin
 Disallow: /api/
 Disallow: /account
+Disallow: /artistcreator
 Disallow: /studio
 
 Sitemap: /sitemap.xml

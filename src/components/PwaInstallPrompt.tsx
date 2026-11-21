@@ -185,11 +185,11 @@ export const PwaInstallPrompt: React.FC = () => {
               type="button"
               onClick={() => {
                 setShowPrompt(false);
-                navigate(currentUser ? '/studio' : '/register');
+                navigate(currentUser ? '/artistcreator' : '/register');
               }}
               className="flex-1 py-3 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer min-h-[44px]"
             >
-              {currentUser ? 'Open Artist Studio' : 'Register as Artist'}
+              {currentUser ? 'Open Artist Creator' : 'Register as Artist'}
             </button>
           </div>
         </div>

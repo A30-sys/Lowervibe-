@@ -55,7 +55,7 @@ import {
 } from './services/analyticsService';
 import { isVerifiedAdminGoogleSession, PRIMARY_ADMIN_EMAIL } from './services/authService';
 import { Track } from './types';
-import { applyRouteSeoMeta } from './utils/seoMeta';
+import { applyArtistSeoMeta, applyRouteSeoMeta, applyTrackSeoMeta } from './utils/seoMeta';
 
 function AppContent() {
   const { currentRoute, navigate, searchParams } = useRouter();
@@ -200,13 +200,40 @@ function AppContent() {
     isAdmin,
   ]);
 
-  // When an approved artist launches the standalone WebApp, open straight into Studio / Artist Page
+  // Keep URLs canonical: /studio -> /artistcreator and /admin|/administration -> /administrationside
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const rawPath = window.location.pathname.replace(/\/+$/, '') || '/';
+    const searchStr = window.location.search || '';
+    if (rawPath === '/studio') {
+      navigate(`/artistcreator${searchStr}`, { replace: true });
+      return;
+    }
+    if (
+      rawPath === '/administration' ||
+      rawPath === '/administration/dashboard' ||
+      rawPath === '/admin' ||
+      rawPath === '/admin/dashboard'
+    ) {
+      navigate(`/administrationside${searchStr}`, { replace: true });
+      return;
+    }
+    if (rawPath === '/administration/login' || rawPath === '/admin/login') {
+      navigate(`/administrationside/login${searchStr}`, { replace: true });
+      return;
+    }
+    if (rawPath === '/administration/access-denied' || rawPath === '/admin/access-denied') {
+      navigate(`/administrationside/access-denied${searchStr}`, { replace: true });
+    }
+  }, [currentRoute.pathname, navigate]);
+
+  // When an approved artist launches the standalone WebApp, open straight into Artist Creator
   useEffect(() => {
     if (!authReady || !currentUser || !isApprovedArtistAccount || !isStandaloneArtistApp) return;
     if (standaloneInitialRoutedRef.current) return;
     standaloneInitialRoutedRef.current = true;
     if (currentRoute.route === 'home') {
-      navigate('/studio?standalone=artist', { replace: true });
+      navigate('/artistcreator?standalone=artist', { replace: true });
     }
   }, [authReady, currentUser, isApprovedArtistAccount, isStandaloneArtistApp, currentRoute.route, navigate]);
 
@@ -276,11 +303,61 @@ function AppContent() {
     }
   }, []);
 
-  // Sync per-route <title>, <meta description>, canonical, OG tags, and analytics page_view
+  // Sync per-route <title>, <meta description>, canonical, OG tags, JSON-LD, and analytics page_view
   useEffect(() => {
+    if (currentRoute.route === 'artist_detail') {
+      const slugParam = (currentRoute.params.slug || '').toLowerCase();
+      const matchedArtist = artists.find(
+        (a) =>
+          (a.slug && a.slug.toLowerCase() === slugParam) ||
+          a.id.toLowerCase() === slugParam ||
+          (a.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-') === slugParam
+      );
+      if (matchedArtist) {
+        const artistNameLower = (matchedArtist.name || '').toLowerCase();
+        const artistTracksCount = tracks.filter(
+          (t) =>
+            !t.isDraft &&
+            !t.isDeranked &&
+            (t.artistId === matchedArtist.id ||
+              (t.artistName || '').toLowerCase() === artistNameLower)
+        ).length;
+        applyArtistSeoMeta(matchedArtist, artistTracksCount);
+        trackPageView(
+          currentRoute.pathname,
+          typeof document !== 'undefined' ? document.title : 'LOWERVIBE'
+        );
+      }
+      return;
+    }
+
+    if (currentRoute.route === 'track_detail') {
+      const trackIdParam = currentRoute.params.id || '';
+      const matchedTrack = tracks.find(
+        (t) => t.id === trackIdParam && !t.isDraft && !t.isDeranked
+      );
+      if (matchedTrack) {
+        const matchedArtist = artists.find((a) => a.id === matchedTrack.artistId);
+        applyTrackSeoMeta(matchedTrack, matchedArtist);
+        trackPageView(
+          currentRoute.pathname,
+          typeof document !== 'undefined' ? document.title : 'LOWERVIBE'
+        );
+      }
+      return;
+    }
+
     applyRouteSeoMeta(currentRoute.route, currentRoute.searchQuery);
     trackPageView(currentRoute.pathname, typeof document !== 'undefined' ? document.title : 'LOWERVIBE');
-  }, [currentRoute.route, currentRoute.pathname, currentRoute.searchQuery]);
+  }, [
+    currentRoute.route,
+    currentRoute.pathname,
+    currentRoute.searchQuery,
+    currentRoute.params.slug,
+    currentRoute.params.id,
+    artists,
+    tracks,
+  ]);
 
   if (!authReady) {
     return <InitialLoader />;
@@ -309,7 +386,7 @@ function AppContent() {
     );
   }
 
-  // Dedicated Standalone Administration Page (/administration, /administration/login, /administration/access-denied)
+  // Dedicated Standalone Administration Side (/administrationside, /administrationside/login, /administrationside/access-denied)
   if (currentRoute.route === 'admin_login') {
     return <AdminLoginView />;
   }
@@ -371,7 +448,7 @@ function AppContent() {
               type="button"
               onClick={() => {
                 setStandaloneGateBypassed(true);
-                navigate('/studio');
+                navigate('/artistcreator');
               }}
               className="flex-1 py-3 px-4 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs cursor-pointer"
             >
@@ -419,10 +496,10 @@ function AppContent() {
         currentUser?.email?.toLowerCase() !== PRIMARY_ADMIN_EMAIL ||
         !isVerifiedAdminGoogleSession()
       ) {
-        navigate('/administration/access-denied');
+        navigate('/administrationside/access-denied');
         return;
       }
-      navigate('/administration');
+      navigate('/administrationside');
       return;
     }
 
@@ -432,7 +509,7 @@ function AppContent() {
     if (tab === 'home') navigate('/');
     else if (tab === 'search' || tab === 'discover') navigate('/search');
     else if (tab === 'library') navigate('/library');
-    else if (tab === 'upload' || tab === 'studio') navigate('/studio');
+    else if (tab === 'upload' || tab === 'studio') navigate('/artistcreator');
     else if (tab === 'profile' || tab === 'account') navigate('/account');
 
     setTimeout(() => setIsPageTransitioning(false), 160);
@@ -490,21 +567,21 @@ function AppContent() {
             <div className="flex items-center gap-1.5 flex-wrap">
               <button
                 type="button"
-                onClick={() => navigate('/studio?standalone=artist')}
+                onClick={() => navigate('/artistcreator?standalone=artist')}
                 className={`px-3 py-1 rounded-full font-semibold cursor-pointer ${
                   currentRoute.route === 'studio' && searchParams.get('tab') !== 'withdrawals'
                     ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
                     : 'bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)]'
                 }`}
               >
-                Artist Studio
+                Artist Creator
               </button>
               <button
                 type="button"
                 onClick={() => {
                   const targetId = currentUser?.artistId;
                   if (targetId) navigate(`/artists/${targetId}?standalone=artist`);
-                  else navigate('/studio?standalone=artist');
+                  else navigate('/artistcreator?standalone=artist');
                 }}
                 className={`px-3 py-1 rounded-full font-semibold cursor-pointer ${
                   currentRoute.route === 'artist_detail'
@@ -516,7 +593,7 @@ function AppContent() {
               </button>
               <button
                 type="button"
-                onClick={() => navigate('/studio?standalone=artist&tab=withdrawals')}
+                onClick={() => navigate('/artistcreator?standalone=artist&tab=withdrawals')}
                 className={`px-3 py-1 rounded-full font-semibold cursor-pointer ${
                   currentRoute.route === 'studio' && searchParams.get('tab') === 'withdrawals'
                     ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
@@ -717,7 +794,7 @@ function AppContent() {
 
       <ReauthModal />
 
-      <CelebrationModal onGoToStudio={() => navigate('/studio')} />
+      <CelebrationModal onGoToStudio={() => navigate('/artistcreator')} />
 
       <FullscreenPlayerModal />
 

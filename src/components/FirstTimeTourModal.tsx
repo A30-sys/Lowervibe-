@@ -175,7 +175,7 @@ const TOUR_STEPS: TourStep[] = [
     description:
       'Making music? Switch to an artist account anytime in Upload or Profile to share your tracks and see listener stats.',
     locationLabel: 'Bottom nav -> Upload',
-    routePreview: '/studio',
+    routePreview: '/artistcreator',
     highlights: [
       'Save drafts or publish straight away',
       'Track plays and follower growth',
@@ -187,7 +187,7 @@ const TOUR_STEPS: TourStep[] = [
             <Mic2 className="w-4 h-4" />
           </div>
           <div>
-            <div className="text-xs font-bold text-[var(--text)]">Creator Studio</div>
+            <div className="text-xs font-bold text-[var(--text)]">Artist Creator</div>
             <div className="text-[11px] text-[var(--text-muted)]">Upload · Tracks · Stats</div>
           </div>
         </div>

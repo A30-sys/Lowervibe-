@@ -14,7 +14,7 @@ export const CelebrationModal: React.FC<CelebrationModalProps> = ({ onGoToStudio
 
   if (!celebrationModal?.isOpen) return null;
 
-  const artistRoute = currentUser?.artistId ? `/artists/${currentUser.artistId}` : '/studio';
+  const artistRoute = currentUser?.artistId ? `/artists/${currentUser.artistId}` : '/artistcreator';
 
   return (
     <div

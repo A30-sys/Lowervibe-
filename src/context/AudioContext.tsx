@@ -4,6 +4,7 @@ import {
   deleteDoc,
   doc,
   enableNetwork,
+  getDocs,
   getDocsFromServer,
   increment,
   limit,
@@ -157,6 +158,7 @@ interface AudioContextType {
       Partial<Pick<Track, 'id' | 'plays' | 'likes' | 'reposts' | 'releaseDate' | 'comments'>>
   ) => Promise<Track>;
   updateArtistProfile: (artistId: string, updates: Partial<Artist>) => Promise<{ success: boolean; error?: string }>;
+  deleteArtistProfile: (artistId: string) => Promise<{ success: boolean; deletedTracks: number; error?: string }>;
   updateTrack: (trackId: string, updates: Partial<Track>) => Promise<void>;
   downloadTrack: (track: Track) => void;
   deleteTrack: (trackId: string) => Promise<{ success: boolean; error?: string }>;
@@ -310,6 +312,37 @@ function stripOversizedInlineDataUrl(value?: string): string | undefined {
   return value;
 }
 
+const REMOVED_DEMO_ARTIST_KEYS = new Set(['dontoliver', 'zezekingston', 'emkay']);
+const REMOVED_DEMO_ARTIST_REGEX = /(?:^|[^a-z0-9])(don[\s_-]*toliver|zeze[\s_-]*kingston|emkay)(?:[^a-z0-9]|$)/i;
+
+function isRemovedDemoArtistValue(value?: string | null): boolean {
+  if (!value) return false;
+  const trimmed = String(value).trim();
+  if (!trimmed) return false;
+  const compact = trimmed.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (REMOVED_DEMO_ARTIST_KEYS.has(compact)) return true;
+  return REMOVED_DEMO_ARTIST_REGEX.test(trimmed);
+}
+
+function isRemovedDemoArtistRecord(artist?: Partial<Artist> & { slug?: string } | null): boolean {
+  if (!artist) return false;
+  return (
+    isRemovedDemoArtistValue(artist.id) ||
+    isRemovedDemoArtistValue(artist.name) ||
+    isRemovedDemoArtistValue(artist.handle) ||
+    isRemovedDemoArtistValue(artist.slug)
+  );
+}
+
+function isRemovedDemoTrackRecord(track?: Partial<Track> | null, extraRemovedArtistIds?: Set<string>): boolean {
+  if (!track) return false;
+  if (track.artistId && extraRemovedArtistIds?.has(track.artistId)) return true;
+  return (
+    isRemovedDemoArtistValue(track.artistId) ||
+    isRemovedDemoArtistValue(track.artistName)
+  );
+}
+
 function safeCacheSnapshotWrite<T>(key: string, items: T[], maxItems: number, mapItem?: (item: T) => T) {
   try {
     const sliced = items.slice(0, maxItems);
@@ -435,7 +468,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const saved = localStorage.getItem(TRACKS_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return dedupeTracksById(parsed);
+        if (Array.isArray(parsed)) {
+          return dedupeTracksById(parsed.filter((t) => !isRemovedDemoTrackRecord(t)));
+        }
       }
     } catch {}
     return [];
@@ -446,7 +481,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const saved = localStorage.getItem(ARTISTS_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return dedupeArtistsCatalog(parsed).artists;
+        if (Array.isArray(parsed)) {
+          return dedupeArtistsCatalog(parsed.filter((a) => !isRemovedDemoArtistRecord(a))).artists;
+        }
       }
     } catch {}
     return [];
@@ -466,7 +503,16 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [events, setEvents] = useState<ArtistEvent[]>(() => {
     try {
       const saved = localStorage.getItem(EVENTS_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(
+            (e: ArtistEvent) =>
+              !isRemovedDemoArtistValue(e?.artistId) &&
+              !isRemovedDemoArtistValue(e?.artistName)
+          );
+        }
+      }
     } catch {}
     return [];
   });
@@ -931,7 +977,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const unsubTracks = onSnapshot(
       query(collection(db, 'tracks'), limit(250)),
       (snap) => {
-        const mapped = snap.docs.map((d) => mapTrackDoc(d.id, d.data() as Track));
+        const mapped = snap.docs
+          .map((d) => mapTrackDoc(d.id, d.data() as Track))
+          .filter((t) => !isRemovedDemoTrackRecord(t));
 
         const loadedTracks = dedupeTracksById(mapped);
         setTracks(loadedTracks);
@@ -939,11 +987,11 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setCatalogError(null);
         setCurrentTrack((prev) => {
           if (!prev) return null;
-          return loadedTracks.find((t) => t.id === prev.id) || prev;
+          return loadedTracks.find((t) => t.id === prev.id) || (isRemovedDemoTrackRecord(prev) ? null : prev);
         });
         setActiveDetailTrack((prev) => {
           if (!prev) return null;
-          return loadedTracks.find((t) => t.id === prev.id) || prev;
+          return loadedTracks.find((t) => t.id === prev.id) || (isRemovedDemoTrackRecord(prev) ? null : prev);
         });
       },
       (err) => {
@@ -958,51 +1006,62 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const unsubArtists = onSnapshot(
       query(collection(db, 'artists'), limit(200)),
       (snap) => {
-        const rawArtists = snap.docs.map((d) => {
-          const raw = d.data() as Partial<Artist> & { headerImage?: string; genre?: string; region?: string };
-          const safeName = raw.name || 'Artist';
-          const cleanName = cleanArtistDisplayName(safeName);
-          const safeHandle = raw.handle || `@${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'artist'}`;
-          const likedBy = Array.isArray(raw.likedByUserIds)
-            ? Array.from(new Set(raw.likedByUserIds.filter(Boolean)))
-            : undefined;
-          return {
-            ...raw,
-            id: d.id,
-            name: safeName,
-            handle: safeHandle,
-            avatar: raw.avatar || DEFAULT_AVATAR_SVG,
-            banner: raw.banner || raw.headerImage || DEFAULT_BANNER_SVG,
-            bio: raw.bio || '',
-            location: raw.location || raw.region || raw.country || 'Malawi',
-            country: raw.country || raw.location || raw.region || '',
-            followersCount: typeof raw.followersCount === 'number' ? raw.followersCount : 0,
-            likedByUserIds: likedBy,
-            likesCount: likedBy ? likedBy.length : Math.max(0, raw.likesCount || 0),
-            monthlyListeners: typeof raw.monthlyListeners === 'number' ? raw.monthlyListeners : 0,
-            verified: Boolean(raw.verified),
-            joinedDate: raw.joinedDate || new Date().toISOString(),
-            genres: Array.isArray(raw.genres) ? raw.genres : raw.genre ? [raw.genre] : ['Afro-Fusion'],
-            socials: raw.socials && typeof raw.socials === 'object' ? raw.socials : {},
-            gearAndSetup: Array.isArray(raw.gearAndSetup) ? raw.gearAndSetup : [],
-            endorsedBy: Array.isArray(raw.endorsedBy) ? raw.endorsedBy : [],
-          } as Artist;
-        });
+        const removedIds = new Set<string>();
+        const rawArtists = snap.docs
+          .map((d) => {
+            const raw = d.data() as Partial<Artist> & { headerImage?: string; genre?: string; region?: string };
+            const safeName = raw.name || 'Artist';
+            const cleanName = cleanArtistDisplayName(safeName);
+            const safeHandle = raw.handle || `@${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'artist'}`;
+            const likedBy = Array.isArray(raw.likedByUserIds)
+              ? Array.from(new Set(raw.likedByUserIds.filter(Boolean)))
+              : undefined;
+            return {
+              ...raw,
+              id: d.id,
+              name: safeName,
+              handle: safeHandle,
+              avatar: raw.avatar || DEFAULT_AVATAR_SVG,
+              banner: raw.banner || raw.headerImage || DEFAULT_BANNER_SVG,
+              bio: raw.bio || '',
+              location: raw.location || raw.region || raw.country || 'Malawi',
+              country: raw.country || raw.location || raw.region || '',
+              followersCount: typeof raw.followersCount === 'number' ? raw.followersCount : 0,
+              likedByUserIds: likedBy,
+              likesCount: likedBy ? likedBy.length : Math.max(0, raw.likesCount || 0),
+              monthlyListeners: typeof raw.monthlyListeners === 'number' ? raw.monthlyListeners : 0,
+              verified: Boolean(raw.verified),
+              joinedDate: raw.joinedDate || new Date().toISOString(),
+              genres: Array.isArray(raw.genres) ? raw.genres : raw.genre ? [raw.genre] : ['Afro-Fusion'],
+              socials: raw.socials && typeof raw.socials === 'object' ? raw.socials : {},
+              gearAndSetup: Array.isArray(raw.gearAndSetup) ? raw.gearAndSetup : [],
+              endorsedBy: Array.isArray(raw.endorsedBy) ? raw.endorsedBy : [],
+            } as Artist;
+          })
+          .filter((artist) => {
+            if (isRemovedDemoArtistRecord(artist)) {
+              removedIds.add(artist.id);
+              return false;
+            }
+            return true;
+          });
 
         const { artists: dedupedArtists, idRemap } = dedupeArtistsCatalog(rawArtists);
         artistRemapRef.current = idRemap;
         setArtists(dedupedArtists);
 
-        // Apply artist name/ID deduplication to loaded tracks immediately
+        // Apply artist name/ID deduplication and demo-artist exclusion to loaded tracks immediately
         setTracks((prevTracks) =>
-          prevTracks.map((t) => {
-            const canonical = idRemap.get(t.artistId);
-            if (!canonical) return t;
-            if (canonical.id !== t.artistId || canonical.name !== t.artistName) {
-              return { ...t, artistId: canonical.id, artistName: canonical.name };
-            }
-            return t;
-          })
+          prevTracks
+            .filter((t) => !isRemovedDemoTrackRecord(t, removedIds))
+            .map((t) => {
+              const canonical = idRemap.get(t.artistId);
+              if (!canonical) return t;
+              if (canonical.id !== t.artistId || canonical.name !== t.artistName) {
+                return { ...t, artistId: canonical.id, artistName: canonical.name };
+              }
+              return t;
+            })
         );
 
         // Note: artist profile records are strictly editable only by their verified owners.
@@ -1062,7 +1121,13 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const unsubEvents = onSnapshot(
       query(collection(db, 'events'), limit(100)),
       (snap) => {
-        const loadedEvents = snap.docs.map((d) => ({ ...d.data(), id: d.id } as ArtistEvent));
+        const loadedEvents = snap.docs
+          .map((d) => ({ ...d.data(), id: d.id } as ArtistEvent))
+          .filter(
+            (e) =>
+              !isRemovedDemoArtistValue(e.artistId) &&
+              !isRemovedDemoArtistValue(e.artistName)
+          );
         setEvents(loadedEvents);
       },
       () => {}
@@ -1179,38 +1244,47 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         ]);
 
         let refreshedAny = false;
+        const removedArtistIds = new Set<string>();
         if (artistsRes.status === 'fulfilled') {
           refreshedAny = true;
-          const rawArtists = artistsRes.value.docs.map((d) => {
-            const raw = d.data() as Partial<Artist> & { headerImage?: string; genre?: string; region?: string };
-            const safeName = raw.name || 'Artist';
-            const cleanName = cleanArtistDisplayName(safeName);
-            const safeHandle = raw.handle || `@${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'artist'}`;
-            const likedBy = Array.isArray(raw.likedByUserIds)
-              ? Array.from(new Set(raw.likedByUserIds.filter(Boolean)))
-              : undefined;
-            return {
-              ...raw,
-              id: d.id,
-              name: safeName,
-              handle: safeHandle,
-              avatar: raw.avatar || DEFAULT_AVATAR_SVG,
-              banner: raw.banner || raw.headerImage || DEFAULT_BANNER_SVG,
-              bio: raw.bio || '',
-              location: raw.location || raw.region || raw.country || 'Malawi',
-              country: raw.country || raw.location || raw.region || '',
-              followersCount: typeof raw.followersCount === 'number' ? raw.followersCount : 0,
-              likedByUserIds: likedBy,
-              likesCount: likedBy ? likedBy.length : Math.max(0, raw.likesCount || 0),
-              monthlyListeners: typeof raw.monthlyListeners === 'number' ? raw.monthlyListeners : 0,
-              verified: Boolean(raw.verified),
-              joinedDate: raw.joinedDate || new Date().toISOString(),
-              genres: Array.isArray(raw.genres) ? raw.genres : raw.genre ? [raw.genre] : ['Afro-Fusion'],
-              socials: raw.socials && typeof raw.socials === 'object' ? raw.socials : {},
-              gearAndSetup: Array.isArray(raw.gearAndSetup) ? raw.gearAndSetup : [],
-              endorsedBy: Array.isArray(raw.endorsedBy) ? raw.endorsedBy : [],
-            } as Artist;
-          });
+          const rawArtists = artistsRes.value.docs
+            .map((d) => {
+              const raw = d.data() as Partial<Artist> & { headerImage?: string; genre?: string; region?: string };
+              const safeName = raw.name || 'Artist';
+              const cleanName = cleanArtistDisplayName(safeName);
+              const safeHandle = raw.handle || `@${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'artist'}`;
+              const likedBy = Array.isArray(raw.likedByUserIds)
+                ? Array.from(new Set(raw.likedByUserIds.filter(Boolean)))
+                : undefined;
+              return {
+                ...raw,
+                id: d.id,
+                name: safeName,
+                handle: safeHandle,
+                avatar: raw.avatar || DEFAULT_AVATAR_SVG,
+                banner: raw.banner || raw.headerImage || DEFAULT_BANNER_SVG,
+                bio: raw.bio || '',
+                location: raw.location || raw.region || raw.country || 'Malawi',
+                country: raw.country || raw.location || raw.region || '',
+                followersCount: typeof raw.followersCount === 'number' ? raw.followersCount : 0,
+                likedByUserIds: likedBy,
+                likesCount: likedBy ? likedBy.length : Math.max(0, raw.likesCount || 0),
+                monthlyListeners: typeof raw.monthlyListeners === 'number' ? raw.monthlyListeners : 0,
+                verified: Boolean(raw.verified),
+                joinedDate: raw.joinedDate || new Date().toISOString(),
+                genres: Array.isArray(raw.genres) ? raw.genres : raw.genre ? [raw.genre] : ['Afro-Fusion'],
+                socials: raw.socials && typeof raw.socials === 'object' ? raw.socials : {},
+                gearAndSetup: Array.isArray(raw.gearAndSetup) ? raw.gearAndSetup : [],
+                endorsedBy: Array.isArray(raw.endorsedBy) ? raw.endorsedBy : [],
+              } as Artist;
+            })
+            .filter((artist) => {
+              if (isRemovedDemoArtistRecord(artist)) {
+                removedArtistIds.add(artist.id);
+                return false;
+              }
+              return true;
+            });
           const { artists: dedupedArtists, idRemap } = dedupeArtistsCatalog(rawArtists);
           artistRemapRef.current = idRemap;
           setArtists(dedupedArtists);
@@ -1219,47 +1293,51 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (tracksRes.status === 'fulfilled') {
           refreshedAny = true;
           const freshTracks = dedupeTracksById(
-            tracksRes.value.docs.map((d) => {
-              const raw = d.data() as Track;
-              const resolvedDuration = Math.max(
-                0,
-                Math.round(raw.metadata?.Duration ?? raw.metadata?.duration ?? raw.durationSeconds ?? 0)
-              );
-              const likedBy = Array.isArray(raw.likedByUserIds)
-                ? Array.from(new Set(raw.likedByUserIds.filter(Boolean)))
-                : undefined;
-              const remappedArtist = artistRemapRef.current.get(raw.artistId);
-              return {
-                ...raw,
-                id: d.id,
-                artistId: remappedArtist ? remappedArtist.id : raw.artistId,
-                artistName: remappedArtist ? remappedArtist.name : cleanArtistDisplayName(raw.artistName),
-                coverArt: raw.coverArt || DEFAULT_ARTWORK_SVG,
-                artistAvatar: raw.artistAvatar || DEFAULT_AVATAR_SVG,
-                durationSeconds: resolvedDuration,
-                metadata: {
-                  ...(raw.metadata || {}),
-                  Duration: resolvedDuration,
-                  duration: resolvedDuration,
-                  durationFormatted: raw.metadata?.durationFormatted || formatTime(resolvedDuration),
-                  bitrate: raw.metadata?.bitrate || raw.bitrate,
-                  sampleRate: raw.metadata?.sampleRate || raw.sampleRate,
-                  bitDepth: raw.metadata?.bitDepth || raw.bitDepth,
-                  fileSize: raw.metadata?.fileSize || raw.fileSize,
-                  audioFormat: raw.metadata?.audioFormat || raw.audioFormat || raw.audioQuality,
-                  isrcCode: raw.metadata?.isrcCode || raw.isrcCode,
-                  bpm: raw.metadata?.bpm ?? raw.bpm,
-                  keySignature: raw.metadata?.keySignature || raw.keySignature,
-                  composer: raw.metadata?.composer || raw.composer,
-                  recordLabel: raw.metadata?.recordLabel || raw.recordLabel,
-                },
-                likedByUserIds: likedBy,
-                likes: likedBy ? likedBy.length : Math.max(0, raw.likes || 0),
-              } as Track;
-            })
+            tracksRes.value.docs
+              .map((d) => {
+                const raw = d.data() as Track;
+                const resolvedDuration = Math.max(
+                  0,
+                  Math.round(raw.metadata?.Duration ?? raw.metadata?.duration ?? raw.durationSeconds ?? 0)
+                );
+                const likedBy = Array.isArray(raw.likedByUserIds)
+                  ? Array.from(new Set(raw.likedByUserIds.filter(Boolean)))
+                  : undefined;
+                const remappedArtist = artistRemapRef.current.get(raw.artistId);
+                return {
+                  ...raw,
+                  id: d.id,
+                  artistId: remappedArtist ? remappedArtist.id : raw.artistId,
+                  artistName: remappedArtist ? remappedArtist.name : cleanArtistDisplayName(raw.artistName),
+                  coverArt: raw.coverArt || DEFAULT_ARTWORK_SVG,
+                  artistAvatar: raw.artistAvatar || DEFAULT_AVATAR_SVG,
+                  durationSeconds: resolvedDuration,
+                  metadata: {
+                    ...(raw.metadata || {}),
+                    Duration: resolvedDuration,
+                    duration: resolvedDuration,
+                    durationFormatted: raw.metadata?.durationFormatted || formatTime(resolvedDuration),
+                    bitrate: raw.metadata?.bitrate || raw.bitrate,
+                    sampleRate: raw.metadata?.sampleRate || raw.sampleRate,
+                    bitDepth: raw.metadata?.bitDepth || raw.bitDepth,
+                    fileSize: raw.metadata?.fileSize || raw.fileSize,
+                    audioFormat: raw.metadata?.audioFormat || raw.audioFormat || raw.audioQuality,
+                    isrcCode: raw.metadata?.isrcCode || raw.isrcCode,
+                    bpm: raw.metadata?.bpm ?? raw.bpm,
+                    keySignature: raw.metadata?.keySignature || raw.keySignature,
+                    composer: raw.metadata?.composer || raw.composer,
+                    recordLabel: raw.metadata?.recordLabel || raw.recordLabel,
+                  },
+                  likedByUserIds: likedBy,
+                  likes: likedBy ? likedBy.length : Math.max(0, raw.likes || 0),
+                } as Track;
+              })
+              .filter((t) => !isRemovedDemoTrackRecord(t, removedArtistIds))
           );
           setTracks((prev) => {
-            const byId = new Map(prev.map((t) => [t.id, t]));
+            const byId = new Map(
+              prev.filter((t) => !isRemovedDemoTrackRecord(t, removedArtistIds)).map((t) => [t.id, t])
+            );
             for (const ft of freshTracks) {
               byId.set(ft.id, ft);
             }
@@ -2195,6 +2273,130 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
+  const deleteArtistProfile = async (
+    artistId: string
+  ): Promise<{ success: boolean; deletedTracks: number; error?: string }> => {
+    const targetArtist = artists.find((a) => a.id === artistId);
+    const isAdminUser = isVerifiedAdminGoogleSession();
+    const isOwnerUser = Boolean(
+      currentUser &&
+        targetArtist &&
+        (targetArtist.ownerId === currentUser.id ||
+          targetArtist.ownerUserId === currentUser.id ||
+          targetArtist.claimedByUserId === currentUser.id)
+    );
+
+    if (!isAdminUser && !isOwnerUser) {
+      return {
+        success: false,
+        deletedTracks: 0,
+        error: 'Permission denied: only the platform administrator or artist owner can remove this artist.',
+      };
+    }
+
+    try {
+      const artistTracks = tracks.filter((t) => t.artistId === artistId);
+      let deletedTracks = 0;
+
+      for (const tr of artistTracks) {
+        try {
+          await deleteDoc(doc(db, 'tracks', tr.id));
+          deletedTracks += 1;
+        } catch {}
+      }
+
+      const artistEvents = events.filter((ev) => ev.artistId === artistId);
+      for (const ev of artistEvents) {
+        try {
+          await deleteDoc(doc(db, 'events', ev.id));
+        } catch {}
+      }
+
+      await deleteDoc(doc(db, 'artists', artistId));
+
+      setArtists((prev) => prev.filter((a) => a.id !== artistId));
+      setTracks((prev) => prev.filter((t) => t.artistId !== artistId));
+      setEvents((prev) => prev.filter((e) => e.artistId !== artistId));
+      setQueue((prev) => prev.filter((t) => t.artistId !== artistId));
+      if (currentTrack?.artistId === artistId) {
+        clearActiveTrack();
+      }
+      if (selectedArtistModal?.id === artistId) {
+        setSelectedArtistModal(null);
+      }
+
+      addAuditLog(
+        'DELETE_ARTIST',
+        'artist',
+        artistId,
+        `Removed artist ${targetArtist?.name || artistId} and ${deletedTracks} track(s)`
+      );
+      return { success: true, deletedTracks };
+    } catch (err) {
+      return {
+        success: false,
+        deletedTracks: 0,
+        error: formatFirebaseError(err, 'Could not remove artist'),
+      };
+    }
+  };
+
+  // Automatic one-time Firestore purge for removed demo artists (Don Toliver, Zeze Kingston, Emkay) when admin signs in
+  const didPurgeNamedDemoArtistsRef = useRef(false);
+  useEffect(() => {
+    const fbUser = auth.currentUser;
+    if (!authReady || !currentUser || !fbUser || !isVerifiedAdminGoogleSession(fbUser)) {
+      return;
+    }
+    if (didPurgeNamedDemoArtistsRef.current) return;
+    didPurgeNamedDemoArtistsRef.current = true;
+
+    void (async () => {
+      try {
+        const [artistsSnap, tracksSnap, eventsSnap] = await Promise.all([
+          getDocs(collection(db, 'artists')),
+          getDocs(collection(db, 'tracks')),
+          getDocs(collection(db, 'events')),
+        ]);
+
+        const demoArtistIds = new Set<string>();
+        const deletePromises: Array<Promise<void>> = [];
+
+        for (const d of artistsSnap.docs) {
+          const data = d.data() as Partial<Artist> & { slug?: string };
+          if (isRemovedDemoArtistRecord({ ...data, id: d.id })) {
+            demoArtistIds.add(d.id);
+            deletePromises.push(deleteDoc(doc(db, 'artists', d.id)).catch(() => {}));
+          }
+        }
+
+        for (const d of tracksSnap.docs) {
+          const data = d.data() as Partial<Track>;
+          if (isRemovedDemoTrackRecord({ ...data, id: d.id }, demoArtistIds)) {
+            deletePromises.push(deleteDoc(doc(db, 'tracks', d.id)).catch(() => {}));
+          }
+        }
+
+        for (const d of eventsSnap.docs) {
+          const data = d.data() as Partial<ArtistEvent>;
+          if (
+            (data.artistId && demoArtistIds.has(data.artistId)) ||
+            isRemovedDemoArtistValue(data.artistId) ||
+            isRemovedDemoArtistValue(data.artistName)
+          ) {
+            deletePromises.push(deleteDoc(doc(db, 'events', d.id)).catch(() => {}));
+          }
+        }
+
+        if (deletePromises.length > 0) {
+          await Promise.allSettled(deletePromises);
+        }
+      } catch (err) {
+        console.warn('Demo artist cleanup skipped:', err);
+      }
+    })();
+  }, [authReady, currentUser?.id, currentUser?.email]);
+
   const setCertifiedStatus = (trackId: string, certified: boolean) => {
     setTracks((prev) => prev.map((t) => (t.id === trackId ? { ...t, isCertified: certified } : t)));
     void durableUpdateDoc('tracks', trackId, { isCertified: certified });
@@ -2461,7 +2663,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           readBy: [],
           createdAt: nowIso,
           createdBy: approver,
-          actionRoute: '/studio',
+          actionRoute: '/artistcreator',
         },
         { mirrorBackup: true }
       );
@@ -2555,7 +2757,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             readBy: [],
             createdAt: nowIso,
             createdBy: 'auto-eligibility',
-            actionRoute: '/studio',
+            actionRoute: '/artistcreator',
           },
           { mirrorBackup: true }
         );
@@ -2602,7 +2804,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         readBy: [],
         createdAt: nowIso,
         createdBy: currentUser?.email || 'creator',
-        actionRoute: '/administration',
+        actionRoute: '/administrationside',
       });
 
       addAuditLog('REQUEST_MONETIZATION', 'monetization', artistId, `${targetArtist?.name || artistId} requested monetization review`);
@@ -2720,7 +2922,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       readBy: [],
       createdAt: nowIso,
       createdBy: currentUser?.email || PRIMARY_ADMIN_EMAIL,
-      actionRoute: '/studio',
+      actionRoute: '/artistcreator',
     });
 
     addAuditLog('REJECT_MONETIZATION', 'monetization', artistId, `Rejected monetization: ${reason}`);
@@ -2763,7 +2965,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       readBy: [],
       createdAt: nowIso,
       createdBy: currentUser?.email || PRIMARY_ADMIN_EMAIL,
-      actionRoute: '/studio',
+      actionRoute: '/artistcreator',
     });
   };
 
@@ -2897,7 +3099,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           : `${label} (${masked}) was saved to your account.`,
         readBy: [],
         createdAt: nowIso,
-        actionRoute: '/studio',
+        actionRoute: '/artistcreator',
       });
       return { success: true };
     } catch (err) {
@@ -3029,7 +3231,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         message: `${input.artistName} requested ${netAmountMwk.toLocaleString()} MWK via ${method.label} (Token ${tokenRes.payoutToken}).`,
         readBy: [],
         createdAt: nowIso,
-        actionRoute: '/administration',
+        actionRoute: '/administrationside',
       });
       addAuditLog('GENERATE_PAYOUT_TOKEN', 'payout', reqObj.id, `Issued ${tokenRes.payoutToken} (${tokenRes.txRef}) for ${netAmountMwk} MWK`);
       return { success: true, request: reqObj };
@@ -3095,7 +3297,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         readBy: [],
         createdAt: nowIso,
         createdBy: currentUser?.email || PRIMARY_ADMIN_EMAIL,
-        actionRoute: '/studio?tab=withdrawals',
+        actionRoute: '/artistcreator?tab=withdrawals',
         payoutRequestId: requestId,
         payoutStatus: status,
       });
@@ -3367,6 +3569,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         addNewTrack,
         saveNewTrack,
         updateArtistProfile,
+        deleteArtistProfile,
         updateTrack,
         downloadTrack,
         deleteTrack,

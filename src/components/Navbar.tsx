@@ -198,19 +198,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             <ListMusic className="w-3.5 h-3.5" />
             <span>{t('playlists', 'Playlists')}</span>
           </button>
-
-          <button
-            onClick={() => handleTabClick('admin')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
-              currentTab === 'admin'
-                ? 'bg-emerald-600 text-white shadow-md font-bold'
-                : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60'
-            }`}
-            title="LOWERVIBE Administration & Certified Music"
-          >
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Admin</span>
-          </button>
         </nav>
 
         {/* Right Section: Search, Visualizer, Theme, PWA Install, Submit Music & Unified Profile Hub */}
@@ -401,17 +388,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <span>Exploration History</span>
                 </button>
 
-                <button
-                  onClick={() => {
-                    onSelectTab('admin');
-                    setIsUserMenuOpen(false);
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-emerald-400 hover:bg-emerald-950/30 transition text-left font-semibold"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Admin Control Center</span>
-                </button>
-
                 {/* Legal and compliance links */}
                 <div className="border-t border-zinc-800/80 my-1 pt-1">
                   <button
@@ -496,16 +472,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <span>Upload & Share as Artist</span>
                   </button>
 
-                  <button
-                    onClick={() => {
-                      setIsUserMenuOpen(false);
-                      onSelectTab('admin');
-                    }}
-                    className="w-full py-2 px-3 rounded-xl bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 font-bold text-xs border border-emerald-500/30 transition flex items-center justify-center gap-1.5"
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Admin Control Center</span>
-                  </button>
                 </div>
 
                 <div className="border-t border-zinc-800/80 mt-2 pt-2 text-[10px] text-zinc-500 space-y-1">

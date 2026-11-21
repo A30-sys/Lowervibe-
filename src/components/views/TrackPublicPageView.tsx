@@ -54,11 +54,17 @@ export const TrackPublicPageView: React.FC = () => {
   const [audioError, setAudioError] = useState(false);
 
   const track = tracks.find((t) => t.id === trackId);
+  const artistForTrack = track ? artists.find((a) => a.id === track.artistId) : undefined;
 
   useEffect(() => {
-    if (!track) return;
-    applyTrackSeoMeta(track);
-  }, [track]);
+    if (!track) {
+      if (tracks.length > 0) {
+        resetDefaultSeoMeta();
+      }
+      return;
+    }
+    applyTrackSeoMeta(track, artistForTrack);
+  }, [track, artistForTrack, tracks.length]);
 
   useEffect(() => {
     return () => {
@@ -98,7 +104,6 @@ export const TrackPublicPageView: React.FC = () => {
   const trackMetaDuration = getTrackDurationSeconds(track);
   const activeDuration = isCurrent && duration > 0 ? duration : trackMetaDuration;
   const activeProgress = isCurrent && activeDuration > 0 ? (currentTime / activeDuration) * 100 : 0;
-  const artistForTrack = artists.find((a) => a.id === track.artistId);
   const canEditMetadata = Boolean(
     currentUser &&
       (track.uploadedByUserId
@@ -197,6 +202,9 @@ export const TrackPublicPageView: React.FC = () => {
           <div className="space-y-1">
             <div className="flex items-center justify-center md:justify-start gap-2 flex-wrap">
               <span className="text-xs font-semibold text-[var(--accent-text)]">{track.genre}</span>
+              {track.mood && (
+                <span className="text-xs text-[var(--text-muted)]">· {track.mood}</span>
+              )}
               {track.region && (
                 <span className="text-xs text-[var(--text-muted)]">· {track.region}</span>
               )}

@@ -1624,17 +1624,17 @@ export const AccountView: React.FC = () => {
             {isArtist || isAdmin ? (
               <div className="p-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs font-bold text-[var(--text)]">Creator Studio</div>
+                  <div className="text-xs font-bold text-[var(--text)]">Artist Creator</div>
                   <div className="text-[11px] text-[var(--text-muted)]">
                     Upload tracks, review real stats, and manage your payouts.
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => navigate('/studio')}
+                  onClick={() => navigate('/artistcreator')}
                   className="px-4 py-2 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer self-start sm:self-auto"
                 >
-                  Open Studio
+                  Open Artist Creator
                 </button>
               </div>
             ) : (
@@ -1647,34 +1647,16 @@ export const AccountView: React.FC = () => {
                   </div>
                   <div className="text-[11px] text-[var(--text-muted)]">
                     {currentUser.applicationStatus === 'pending'
-                      ? 'Your creator request is queued for review. View your status in Studio.'
-                      : 'Submit your artist details to unlock Creator Studio and upload music.'}
+                      ? 'Your creator request is queued for review. View your status in Artist Creator.'
+                      : 'Submit your artist details to unlock Artist Creator and upload music.'}
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => navigate('/studio')}
+                  onClick={() => navigate('/artistcreator')}
                   className="px-4 py-2 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer self-start sm:self-auto"
                 >
                   {currentUser.applicationStatus === 'pending' ? 'View wait page' : 'Apply as artist'}
-                </button>
-              </div>
-            )}
-
-            {isAdmin && (
-              <div className="p-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs font-bold text-[var(--text)]">Admin Portal</div>
-                  <div className="text-[11px] text-[var(--text-muted)]">
-                    Moderation, monetization approvals, and payouts
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => navigate('/administration')}
-                  className="px-4 py-2 rounded-full bg-[var(--surface)] border border-[var(--border)] text-xs font-bold text-[var(--text)] cursor-pointer"
-                >
-                  Open Administration
                 </button>
               </div>
             )}

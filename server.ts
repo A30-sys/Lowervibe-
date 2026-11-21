@@ -249,9 +249,34 @@ function getFirestoreBaseUrl(): string {
   return `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents`;
 }
 
+function withFirestoreApiKey(url: string, idToken?: string): string {
+  if (idToken || !FIREBASE_API_KEY) return url;
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}key=${encodeURIComponent(FIREBASE_API_KEY)}`;
+}
+
+const DEMO_ARTIST_COMPACT_KEYS = new Set([
+  'dontoliver',
+  'zezekingston',
+  'emkay',
+  'artistdontoliver',
+  'artistzezekingston',
+  'artistemkay',
+]);
+
+function isExcludedDemoArtistRecord(artist: Record<string, any> | null | undefined): boolean {
+  if (!artist) return false;
+  const candidates = [artist.name, artist.slug, artist.id];
+  return candidates.some((val) => {
+    if (typeof val !== 'string') return false;
+    const compact = val.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return DEMO_ARTIST_COMPACT_KEYS.has(compact);
+  });
+}
+
 async function firestoreGetDocRest(docPath: string, idToken?: string): Promise<Record<string, any> | null> {
   try {
-    const res = await fetch(`${getFirestoreBaseUrl()}/${docPath}`, {
+    const res = await fetch(withFirestoreApiKey(`${getFirestoreBaseUrl()}/${docPath}`, idToken), {
       headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},
       signal: AbortSignal.timeout(3000),
     });
@@ -275,7 +300,7 @@ async function firestoreQueryEqualsRest(
   idToken?: string
 ): Promise<Array<Record<string, any>>> {
   try {
-    const res = await fetch(`${getFirestoreBaseUrl()}:runQuery`, {
+    const res = await fetch(withFirestoreApiKey(`${getFirestoreBaseUrl()}:runQuery`, idToken), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -311,6 +336,45 @@ async function firestoreQueryEqualsRest(
   }
 }
 
+async function firestoreRunListQueryRest(
+  collectionId: string,
+  limitCount: number = 250
+): Promise<Array<Record<string, any>>> {
+  try {
+    const res = await fetch(withFirestoreApiKey(`${getFirestoreBaseUrl()}:runQuery`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId }],
+          limit: limitCount,
+        },
+      }),
+      signal: AbortSignal.timeout(3500),
+    });
+    if (!res.ok) return [];
+    const rows = (await res.json()) as Array<{
+      document?: {
+        name?: string;
+        updateTime?: string;
+        fields?: Record<string, FirestoreRestValue>;
+      };
+    }>;
+    return rows
+      .filter((r) => Boolean(r.document?.fields))
+      .map((r) => {
+        const docId = r.document?.name?.split('/').pop() || '';
+        return {
+          id: docId,
+          __updateTime: r.document?.updateTime,
+          ...decodeFirestoreFields(r.document?.fields),
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
 const seoArtistCache = new Map<
   string,
   { expiresAt: number; artist: Record<string, any> | null; tracksCount: number }
@@ -339,28 +403,19 @@ async function lookupPublicArtistForSeo(
   }
 
   if (!artist) {
-    try {
-      const listRes = await fetch(`${getFirestoreBaseUrl()}/artists?pageSize=100`, {
-        signal: AbortSignal.timeout(2500),
-      });
-      if (listRes.ok) {
-        const listJson = (await listRes.json()) as {
-          documents?: Array<{ name?: string; fields?: Record<string, FirestoreRestValue> }>;
-        };
-        const docs: Array<Record<string, any>> = (listJson.documents || []).map((d) => ({
-          id: d.name?.split('/').pop() || '',
-          ...decodeFirestoreFields(d.fields),
-        }));
-        artist =
-          docs.find(
-            (a) =>
-              (typeof a.slug === 'string' && a.slug.toLowerCase() === cacheKey) ||
-              a.id.toLowerCase() === cacheKey ||
-              (typeof a.name === 'string' &&
-                a.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') === cacheKey)
-          ) || null;
-      }
-    } catch {}
+    const docs = await firestoreRunListQueryRest('artists', 200);
+    artist =
+      docs.find(
+        (a) =>
+          (typeof a.slug === 'string' && a.slug.toLowerCase() === cacheKey) ||
+          String(a.id || '').toLowerCase() === cacheKey ||
+          (typeof a.name === 'string' &&
+            a.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') === cacheKey)
+      ) || null;
+  }
+
+  if (isExcludedDemoArtistRecord(artist)) {
+    artist = null;
   }
 
   let tracksCount = 0;
@@ -423,6 +478,49 @@ function truncateSeoText(text: string, maxLen: number): string {
   return `${(lastSpace > 40 ? sliced.slice(0, lastSpace) : sliced).trim()}…`;
 }
 
+function resolveSeoPublicAudio(rawUrl: unknown, origin: string): string | undefined {
+  if (typeof rawUrl !== 'string') return undefined;
+  const trimmed = rawUrl.trim();
+  if (!trimmed || trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return undefined;
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+  if (trimmed.startsWith('/')) return `${origin}${trimmed}`;
+  return undefined;
+}
+
+function inferAudioMimeType(audioUrl: string): string {
+  const lower = audioUrl.toLowerCase().split('?')[0];
+  if (lower.endsWith('.wav')) return 'audio/wav';
+  if (lower.endsWith('.flac')) return 'audio/flac';
+  if (lower.endsWith('.m4a') || lower.endsWith('.mp4')) return 'audio/mp4';
+  if (lower.endsWith('.ogg')) return 'audio/ogg';
+  return 'audio/mpeg';
+}
+
+function formatIsoDuration(secondsValue: unknown): string | undefined {
+  const totalSeconds = Math.round(Number(secondsValue || 0));
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return undefined;
+  const hours = Math.floor(totalSeconds / 3600);
+  const mins = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+  let out = 'PT';
+  if (hours > 0) out += `${hours}H`;
+  if (mins > 0) out += `${mins}M`;
+  if (secs > 0 || (hours === 0 && mins === 0)) out += `${secs}S`;
+  return out;
+}
+
+function stripExistingSeoTags(html: string): string {
+  return html
+    .replace(/<title>[\s\S]*?<\/title>/i, '')
+    .replace(/<link\s+rel="canonical"[^>]*>/gi, '')
+    .replace(/<meta\s+name="description"[^>]*>/gi, '')
+    .replace(/<meta\s+property="og:[^"]+"[^>]*>/gi, '')
+    .replace(/<meta\s+property="profile:[^"]+"[^>]*>/gi, '')
+    .replace(/<meta\s+property="music:[^"]+"[^>]*>/gi, '')
+    .replace(/<meta\s+name="twitter:[^"]+"[^>]*>/gi, '')
+    .replace(/<script\s+id="lv-structured-data"[\s\S]*?<\/script>/gi, '');
+}
+
 function injectArtistSeoHtml(
   html: string,
   artist: Record<string, any> | null,
@@ -469,6 +567,9 @@ function injectArtistSeoHtml(
   const description = truncateSeoText(rawDescription, 160);
 
   const image = resolveSeoPublicImage(artist.avatar || artist.banner, origin);
+  const genres = Array.isArray(artist.genres)
+    ? artist.genres.filter((g): g is string => typeof g === 'string' && g.trim().length > 0)
+    : [];
   const socialsMap = (artist.socials && typeof artist.socials === 'object' ? artist.socials : {}) as Record<
     string,
     unknown
@@ -484,6 +585,7 @@ function injectArtistSeoHtml(
     description,
     image,
     url: canonicalUrl,
+    ...(genres.length > 0 ? { genre: genres } : {}),
     ...(locationText ? { foundingLocation: { '@type': 'Place', name: locationText } } : {}),
     ...(sameAs.length > 0 ? { sameAs } : {}),
     ...(typeof artist.followersCount === 'number' && artist.followersCount > 0
@@ -497,60 +599,77 @@ function injectArtistSeoHtml(
       : {}),
   };
 
+  const imageAlt = `${safeName} on LOWERVIBE`;
   const headInject = [
     `<title>${escapeHtmlAttr(title)}</title>`,
     `<link rel="canonical" href="${escapeHtmlAttr(canonicalUrl)}" />`,
     `<meta name="description" content="${escapeHtmlAttr(description)}" />`,
     `<meta property="og:type" content="profile" />`,
+    `<meta property="og:locale" content="en_US" />`,
     `<meta property="og:site_name" content="LOWERVIBE" />`,
     `<meta property="og:title" content="${escapeHtmlAttr(title)}" />`,
     `<meta property="og:description" content="${escapeHtmlAttr(description)}" />`,
     `<meta property="og:image" content="${escapeHtmlAttr(image)}" />`,
-    `<meta property="og:image:alt" content="${escapeHtmlAttr(`${safeName} on LOWERVIBE`)}" />`,
+    `<meta property="og:image:alt" content="${escapeHtmlAttr(imageAlt)}" />`,
     `<meta property="og:url" content="${escapeHtmlAttr(canonicalUrl)}" />`,
     `<meta property="profile:username" content="${escapeHtmlAttr(String(artist.slug || artist.id || safeName))}" />`,
     `<meta name="twitter:card" content="summary_large_image" />`,
     `<meta name="twitter:title" content="${escapeHtmlAttr(title)}" />`,
     `<meta name="twitter:description" content="${escapeHtmlAttr(description)}" />`,
     `<meta name="twitter:image" content="${escapeHtmlAttr(image)}" />`,
+    `<meta name="twitter:image:alt" content="${escapeHtmlAttr(imageAlt)}" />`,
     `<script id="lv-structured-data" type="application/ld+json">${escapeJsonLd(structuredData)}</script>`,
   ].join('\n    ');
 
-  const stripped = html
-    .replace(/<title>[\s\S]*?<\/title>/i, '')
-    .replace(/<link\s+rel="canonical"[^>]*>/gi, '')
-    .replace(/<meta\s+name="description"[^>]*>/gi, '')
-    .replace(/<meta\s+property="og:[^"]+"[^>]*>/gi, '')
-    .replace(/<meta\s+property="profile:[^"]+"[^>]*>/gi, '')
-    .replace(/<meta\s+name="twitter:[^"]+"[^>]*>/gi, '')
-    .replace(/<script\s+id="lv-structured-data"[\s\S]*?<\/script>/gi, '');
-
+  const stripped = stripExistingSeoTags(html);
   return stripped.replace('</head>', `    ${headInject}\n  </head>`);
 }
 
-const seoTrackCache = new Map<string, { expiresAt: number; track: Record<string, any> | null }>();
+const seoTrackCache = new Map<
+  string,
+  { expiresAt: number; track: Record<string, any> | null; artist: Record<string, any> | null }
+>();
 
-async function lookupPublicTrackForSeo(trackId: string): Promise<Record<string, any> | null> {
+async function lookupPublicTrackForSeo(
+  trackId: string
+): Promise<{ track: Record<string, any> | null; artist: Record<string, any> | null }> {
   const cleanId = trackId.trim();
   const cached = seoTrackCache.get(cleanId);
   if (cached && cached.expiresAt > Date.now()) {
-    return cached.track;
+    return { track: cached.track, artist: cached.artist };
   }
 
   let track = await firestoreGetDocRest(`tracks/${encodeURIComponent(cleanId)}`);
-  if (track && (track.isDraft || track.isDeranked)) {
+  if (
+    track &&
+    (track.isDraft ||
+      track.isDeranked ||
+      isExcludedDemoArtistRecord({ id: track.artistId, name: track.artistName }))
+  ) {
     track = null;
   }
+
+  let artist: Record<string, any> | null = null;
+  if (track?.artistId) {
+    artist = await firestoreGetDocRest(`artists/${encodeURIComponent(String(track.artistId))}`);
+    if (isExcludedDemoArtistRecord(artist)) {
+      artist = null;
+      track = null;
+    }
+  }
+
   setBoundedMapEntry(seoTrackCache, cleanId, {
     expiresAt: Date.now() + (track ? 30_000 : 5_000),
     track,
+    artist,
   });
-  return track;
+  return { track, artist };
 }
 
 function injectTrackSeoHtml(
   html: string,
   track: Record<string, any> | null,
+  artist: Record<string, any> | null,
   req: express.Request
 ): string {
   const origin = resolveRequestOrigin(req);
@@ -562,7 +681,7 @@ function injectTrackSeoHtml(
   }
 
   const safeTrack = String(track.title || 'Track').trim();
-  const safeArtist = String(track.artistName || 'Independent Artist').trim();
+  const safeArtist = String(track.artistName || artist?.name || 'Independent Artist').trim();
   let title = `${safeTrack} by ${safeArtist} – LOWERVIBE`;
   if (title.length > 60) {
     title = `${truncateSeoText(safeTrack, 38)} – LOWERVIBE`;
@@ -575,6 +694,17 @@ function injectTrackSeoHtml(
     160
   );
   const image = resolveSeoPublicImage(track.coverArt, origin);
+  const durationSeconds = Math.round(
+    Number(track.durationSeconds || track.metadata?.duration || track.metadata?.Duration || 0)
+  );
+  const isoDuration = formatIsoDuration(durationSeconds);
+  const artistSlugOrId = String(artist?.slug || track.artistId || '').trim();
+  const artistUrl = artistSlugOrId ? `${origin}/artists/${encodeURIComponent(artistSlugOrId)}` : '';
+  const audioUrl = resolveSeoPublicAudio(track.audioUrl, origin);
+  const datePublished =
+    typeof track.releaseDate === 'string' && track.releaseDate.trim()
+      ? track.releaseDate.trim().slice(0, 10)
+      : undefined;
 
   const structuredData: Record<string, unknown> = {
     '@context': 'https://schema.org',
@@ -583,41 +713,62 @@ function injectTrackSeoHtml(
     byArtist: {
       '@type': 'MusicGroup',
       name: safeArtist,
+      ...(artistUrl ? { url: artistUrl } : {}),
     },
     genre: track.genre || 'Independent',
     url: canonicalUrl,
     image,
     description,
+    ...(isoDuration ? { duration: isoDuration } : {}),
+    ...(datePublished ? { datePublished } : {}),
+    ...(typeof track.plays === 'number' && track.plays > 0
+      ? {
+          interactionStatistic: {
+            '@type': 'InteractionCounter',
+            interactionType: 'https://schema.org/ListenAction',
+            userInteractionCount: track.plays,
+          },
+        }
+      : {}),
   };
 
-  const headInject = [
+  const imageAlt = `${safeTrack} cover artwork`;
+  const headTags: string[] = [
     `<title>${escapeHtmlAttr(title)}</title>`,
     `<link rel="canonical" href="${escapeHtmlAttr(canonicalUrl)}" />`,
     `<meta name="description" content="${escapeHtmlAttr(description)}" />`,
     `<meta property="og:type" content="music.song" />`,
+    `<meta property="og:locale" content="en_US" />`,
     `<meta property="og:site_name" content="LOWERVIBE" />`,
     `<meta property="og:title" content="${escapeHtmlAttr(title)}" />`,
     `<meta property="og:description" content="${escapeHtmlAttr(description)}" />`,
     `<meta property="og:image" content="${escapeHtmlAttr(image)}" />`,
-    `<meta property="og:image:alt" content="${escapeHtmlAttr(`${safeTrack} cover artwork`)}" />`,
+    `<meta property="og:image:alt" content="${escapeHtmlAttr(imageAlt)}" />`,
     `<meta property="og:url" content="${escapeHtmlAttr(canonicalUrl)}" />`,
+  ];
+
+  if (artistUrl) {
+    headTags.push(`<meta property="music:musician" content="${escapeHtmlAttr(artistUrl)}" />`);
+  }
+  if (durationSeconds > 0) {
+    headTags.push(`<meta property="music:duration" content="${durationSeconds}" />`);
+  }
+  if (audioUrl) {
+    headTags.push(`<meta property="og:audio" content="${escapeHtmlAttr(audioUrl)}" />`);
+    headTags.push(`<meta property="og:audio:type" content="${inferAudioMimeType(audioUrl)}" />`);
+  }
+
+  headTags.push(
     `<meta name="twitter:card" content="summary_large_image" />`,
     `<meta name="twitter:title" content="${escapeHtmlAttr(title)}" />`,
     `<meta name="twitter:description" content="${escapeHtmlAttr(description)}" />`,
     `<meta name="twitter:image" content="${escapeHtmlAttr(image)}" />`,
-    `<script id="lv-structured-data" type="application/ld+json">${escapeJsonLd(structuredData)}</script>`,
-  ].join('\n    ');
+    `<meta name="twitter:image:alt" content="${escapeHtmlAttr(imageAlt)}" />`,
+    `<script id="lv-structured-data" type="application/ld+json">${escapeJsonLd(structuredData)}</script>`
+  );
 
-  const stripped = html
-    .replace(/<title>[\s\S]*?<\/title>/i, '')
-    .replace(/<link\s+rel="canonical"[^>]*>/gi, '')
-    .replace(/<meta\s+name="description"[^>]*>/gi, '')
-    .replace(/<meta\s+property="og:[^"]+"[^>]*>/gi, '')
-    .replace(/<meta\s+property="profile:[^"]+"[^>]*>/gi, '')
-    .replace(/<meta\s+name="twitter:[^"]+"[^>]*>/gi, '')
-    .replace(/<script\s+id="lv-structured-data"[\s\S]*?<\/script>/gi, '');
-
-  return stripped.replace('</head>', `    ${headInject}\n  </head>`);
+  const stripped = stripExistingSeoTags(html);
+  return stripped.replace('</head>', `    ${headTags.join('\n    ')}\n  </head>`);
 }
 
 let sitemapCache: { expiresAt: number; xml: string; origin: string } | null = null;
@@ -628,59 +779,57 @@ async function buildDynamicSitemapXml(origin: string): Promise<string> {
   }
 
   const today = new Date().toISOString().split('T')[0];
-  const urls: Array<{ loc: string; changefreq: string; priority: string; lastmod?: string }> = [
+  const seenLocs = new Set<string>();
+  const urls: Array<{ loc: string; changefreq: string; priority: string; lastmod?: string }> = [];
+
+  const pushUrl = (entry: { loc: string; changefreq: string; priority: string; lastmod?: string }) => {
+    if (seenLocs.has(entry.loc)) return;
+    seenLocs.add(entry.loc);
+    urls.push(entry);
+  };
+
+  [
     { loc: `${origin}/`, changefreq: 'daily', priority: '1.0', lastmod: today },
     { loc: `${origin}/discover`, changefreq: 'daily', priority: '0.9', lastmod: today },
     { loc: `${origin}/artists`, changefreq: 'daily', priority: '0.9', lastmod: today },
     { loc: `${origin}/search`, changefreq: 'weekly', priority: '0.7', lastmod: today },
     { loc: `${origin}/library`, changefreq: 'weekly', priority: '0.6', lastmod: today },
-    { loc: `${origin}/studio`, changefreq: 'weekly', priority: '0.7', lastmod: today },
+    { loc: `${origin}/artistcreator`, changefreq: 'weekly', priority: '0.7', lastmod: today },
     { loc: `${origin}/terms`, changefreq: 'monthly', priority: '0.4', lastmod: today },
     { loc: `${origin}/privacy`, changefreq: 'monthly', priority: '0.4', lastmod: today },
     { loc: `${origin}/copyright`, changefreq: 'monthly', priority: '0.4', lastmod: today },
     { loc: `${origin}/thank-you`, changefreq: 'monthly', priority: '0.3', lastmod: today },
-  ];
+  ].forEach(pushUrl);
 
   try {
-    const [artistsRes, tracksRes] = await Promise.all([
-      fetch(`${getFirestoreBaseUrl()}/artists?pageSize=150`, { signal: AbortSignal.timeout(2500) }).catch(() => null),
-      fetch(`${getFirestoreBaseUrl()}/tracks?pageSize=250`, { signal: AbortSignal.timeout(2500) }).catch(() => null),
+    const [artistDocs, trackDocs] = await Promise.all([
+      firestoreRunListQueryRest('artists', 200),
+      firestoreRunListQueryRest('tracks', 300),
     ]);
 
-    if (artistsRes?.ok) {
-      const artistsJson = (await artistsRes.json()) as {
-        documents?: Array<{ name?: string; updateTime?: string; fields?: Record<string, FirestoreRestValue> }>;
-      };
-      for (const doc of artistsJson.documents || []) {
-        const data = decodeFirestoreFields(doc.fields);
-        const docId = doc.name?.split('/').pop() || '';
-        const slugOrId = String(data.slug || docId || '').trim();
-        if (!slugOrId) continue;
-        urls.push({
-          loc: `${origin}/artists/${encodeURIComponent(slugOrId)}`,
-          changefreq: 'weekly',
-          priority: '0.8',
-          lastmod: (doc.updateTime || today).slice(0, 10),
-        });
-      }
+    for (const artist of artistDocs) {
+      if (isExcludedDemoArtistRecord(artist)) continue;
+      const slugOrId = String(artist.slug || artist.id || '').trim();
+      if (!slugOrId) continue;
+      pushUrl({
+        loc: `${origin}/artists/${encodeURIComponent(slugOrId)}`,
+        changefreq: 'weekly',
+        priority: '0.8',
+        lastmod: String(artist.__updateTime || today).slice(0, 10),
+      });
     }
 
-    if (tracksRes?.ok) {
-      const tracksJson = (await tracksRes.json()) as {
-        documents?: Array<{ name?: string; updateTime?: string; fields?: Record<string, FirestoreRestValue> }>;
-      };
-      for (const doc of tracksJson.documents || []) {
-        const data = decodeFirestoreFields(doc.fields);
-        if (data.isDraft || data.isDeranked) continue;
-        const docId = doc.name?.split('/').pop() || '';
-        if (!docId) continue;
-        urls.push({
-          loc: `${origin}/tracks/${encodeURIComponent(docId)}`,
-          changefreq: 'weekly',
-          priority: '0.7',
-          lastmod: (doc.updateTime || today).slice(0, 10),
-        });
-      }
+    for (const track of trackDocs) {
+      if (track.isDraft || track.isDeranked) continue;
+      if (isExcludedDemoArtistRecord({ id: track.artistId, name: track.artistName })) continue;
+      const docId = String(track.id || '').trim();
+      if (!docId) continue;
+      pushUrl({
+        loc: `${origin}/tracks/${encodeURIComponent(docId)}`,
+        changefreq: 'weekly',
+        priority: '0.7',
+        lastmod: String(track.__updateTime || today).slice(0, 10),
+      });
     }
   } catch {}
 
@@ -1693,6 +1842,8 @@ async function startServer() {
     const body = [
       'User-agent: *',
       'Allow: /',
+      'Disallow: /administrationside',
+      'Disallow: /administrationside/',
       'Disallow: /administration',
       'Disallow: /administration/',
       'Disallow: /admin',
@@ -1765,8 +1916,8 @@ async function startServer() {
         const indexPath = path.resolve(__dirname, 'index.html');
         const rawTemplate = fs.readFileSync(indexPath, 'utf8');
         const transformed = await vite.transformIndexHtml(req.originalUrl, rawTemplate);
-        const track = await lookupPublicTrackForSeo(trackId);
-        const seoHtml = injectTrackSeoHtml(transformed, track, req);
+        const { track, artist } = await lookupPublicTrackForSeo(trackId);
+        const seoHtml = injectTrackSeoHtml(transformed, track, artist, req);
         res.status(200).set({ 'Content-Type': 'text/html' }).end(seoHtml);
       } catch (err) {
         vite.ssrFixStacktrace(err as Error);
@@ -1803,8 +1954,8 @@ async function startServer() {
         try {
           const rawHtml = fs.readFileSync(distIndexPath, 'utf8');
           const trackId = String(req.params.id || '').trim();
-          const track = await lookupPublicTrackForSeo(trackId);
-          const seoHtml = injectTrackSeoHtml(rawHtml, track, req);
+          const { track, artist } = await lookupPublicTrackForSeo(trackId);
+          const seoHtml = injectTrackSeoHtml(rawHtml, track, artist, req);
           res
             .status(200)
             .set({

@@ -168,7 +168,7 @@ export const ArtistSubmissionModal: React.FC<ArtistSubmissionModalProps> = ({
       });
       showToast('Artist application submitted! Admin will review & notify you.');
       onClose();
-      navigate('/studio');
+      navigate('/artistcreator');
       return;
     }
 

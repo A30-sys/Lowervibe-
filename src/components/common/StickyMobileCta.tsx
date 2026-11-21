@@ -34,7 +34,7 @@ export const StickyMobileCta: React.FC<StickyMobileCtaProps> = ({ isPlayerVisibl
   const isGuest = !currentUser || isGuestMode;
   const label = isGuest ? 'Join Free · Stream & Save' : 'Release Your Music';
   const subLabel = isGuest ? 'Unlimited African music & offline saves' : 'Apply for LOWERVIBE Artist Studio';
-  const targetRoute = isGuest ? '/register' : '/studio';
+  const targetRoute = isGuest ? '/register' : '/artistcreator';
 
   return (
     <div

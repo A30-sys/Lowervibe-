@@ -1,7 +1,5 @@
-import { Instagram, Lock, Music2, Twitter, Youtube } from 'lucide-react';
+import { Instagram, Music2, Twitter, Youtube } from 'lucide-react';
 import React from 'react';
-import { useAuth } from '../../context/AuthContext';
-import { PRIMARY_ADMIN_EMAIL } from '../../services/authService';
 import { LowerVibeLogo } from '../brand/LowerVibeLogo';
 
 interface FooterProps {
@@ -16,9 +14,6 @@ const SOCIAL_LINKS = [
 ];
 
 export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
-  const { currentUser, isAdmin } = useAuth();
-  const isOwnerAdmin = Boolean(isAdmin && currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL);
-
   return (
     <footer className="mt-16 pt-10 pb-4 border-t border-[var(--border)] text-[var(--text-muted)] transition-colors duration-200">
       <div className="space-y-8">
@@ -98,10 +93,10 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               <li>
                 <button
                   type="button"
-                  onClick={() => onNavigate?.('/studio')}
+                  onClick={() => onNavigate?.('/artistcreator')}
                   className="hover:text-[var(--text)] transition cursor-pointer text-left"
                 >
-                  Upload music
+                  Artist Creator
                 </button>
               </li>
               <li>
@@ -113,18 +108,6 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   Your Profile
                 </button>
               </li>
-              {isOwnerAdmin && (
-                <li>
-                  <button
-                    type="button"
-                    onClick={() => onNavigate?.('/administration')}
-                    className="text-[var(--accent-text)] hover:underline flex items-center gap-1.5 cursor-pointer font-semibold"
-                  >
-                    <Lock className="w-3.5 h-3.5" />
-                    <span>Administration</span>
-                  </button>
-                </li>
-              )}
             </ul>
           </div>
 

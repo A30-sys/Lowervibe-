@@ -19,7 +19,7 @@ export const AdminLoginView: React.FC = () => {
       currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL.toLowerCase() &&
       isVerifiedAdminGoogleSession()
     ) {
-      navigate('/administration');
+      navigate('/administrationside');
     }
   }, [currentUser, navigate]);
 
@@ -38,7 +38,7 @@ export const AdminLoginView: React.FC = () => {
       setSuccessMessage('Verified with Google Auth. Opening administration...');
       showToast('Signed in to Administration');
       setTimeout(() => {
-        navigate('/administration');
+        navigate('/administrationside');
       }, 250);
     } finally {
       setIsLoading(false);

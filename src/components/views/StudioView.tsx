@@ -68,6 +68,7 @@ import { PayoutProviderType, Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG, DEFAULT_BANNER_SVG } from '../../utils/artworkFallback';
 import { formatTime } from '../../utils/formatters';
 import { GenreSelectOrCustom } from '../common/GenreSelectOrCustom';
+import { MoodSelectOrCustom } from '../common/MoodSelectOrCustom';
 import { RegionSelect } from '../common/RegionSelect';
 import { CountUpValue } from '../studio/CountUpValue';
 import { StudioSongEarningsPanel } from '../studio/StudioSongEarningsPanel';
@@ -208,7 +209,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 ? 'Withdrawal Failed'
                 : 'Withdrawal Updated',
             message: `${amountText} payout${tokenText} moved from ${formatStatus(prevStatus)} to ${formatStatus(req.status)}.`,
-            actionRoute: '/studio?tab=withdrawals',
+            actionRoute: '/artistcreator?tab=withdrawals',
             payoutRequestId: req.id,
             payoutStatus: req.status,
           });
@@ -461,7 +462,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
   const [title, setTitle] = useState('');
   const [genre, setGenre] = useState('Afro-Fusion');
   const [region, setRegion] = useState(currentUser?.country || 'Malawi');
-  const [mood, setMood] = useState('Chill');
+  const [mood, setMood] = useState('');
   const [bpm, setBpm] = useState('110');
   const [lyrics, setLyrics] = useState('');
   const [story, setStory] = useState('');
@@ -479,6 +480,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editGenre, setEditGenre] = useState('');
+  const [editMood, setEditMood] = useState('');
   const [editStory, setEditStory] = useState('');
   const [savingTrackId, setSavingTrackId] = useState<string | null>(null);
   const [togglingTrackId, setTogglingTrackId] = useState<string | null>(null);
@@ -599,6 +601,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
     setArtworkNoLogoConfirmed(false);
     setRightsConfirmed(false);
     setTitle('');
+    setMood('');
     setLyrics('');
     setStory('');
     setUploadProgress(0);
@@ -762,6 +765,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
       const resolvedDuration = Math.max(1, Math.round(durationSeconds));
       const cleanBpm = Math.max(40, Math.min(240, parseInt(bpm, 10) || 110));
 
+      const cleanMood = mood.trim();
       const savedTrack = await saveNewTrack({
         id: trackId,
         title: title.trim(),
@@ -792,9 +796,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
           verifiedSource: audioFile ? 'firebase_storage' : 'https_stream',
         },
         genre,
-        mood,
+        mood: cleanMood || undefined,
         region,
-        vibeTags: [genre, mood].filter(Boolean),
+        vibeTags: [genre, ...(cleanMood ? [cleanMood] : [])].filter(Boolean),
         bpm: cleanBpm,
         lyrics: lyrics.trim() || undefined,
         story: story.trim() || undefined,
@@ -1035,7 +1039,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
   }
 
   // Listener / Non-owner Artist Application Wait Page & Submission Gate
-  // Note: Admin role does NOT bypass artist ownership in Studio; admins manage platform moderation in /administration.
+  // Note: Admin role does NOT bypass artist ownership in Studio; admins manage platform moderation in /administrationside.
   if (!isArtist && !isVerifiedStudioOwner) {
     if (currentUser.applicationStatus === 'pending') {
       const app = currentUser.artistApplication;
@@ -1936,406 +1940,486 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
       )}
 
       {/* ==================== TAB 2: UPLOAD (3-STEP WIZARD) ==================== */}
-      {activeTab === 'upload' && (
-        <div className="rounded-[24px] bg-[var(--surface)] border border-[var(--border)] p-5 sm:p-6 space-y-6">
-          {/* Stepper Header */}
-          <div className="flex items-center justify-between gap-2 pb-4 border-b border-[var(--border)]">
-            {[
-              { step: 1 as const, label: '1. Audio' },
-              { step: 2 as const, label: '2. Details' },
-              { step: 3 as const, label: '3. Review' },
-            ].map((s) => (
-              <button
-                key={s.step}
-                type="button"
-                onClick={() => {
-                  if (s.step < uploadStep || (s.step === 2 && (audioFile || isValidHttpsUrl(audioUrlInput)))) {
-                    setUploadStep(s.step);
-                  }
-                }}
-                className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${
-                  uploadStep === s.step
-                    ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
-                    : uploadStep > s.step
-                    ? 'bg-[var(--surface-2)] text-[var(--accent-text)] border border-[var(--border)]'
-                    : 'bg-[var(--surface-2)] text-[var(--text-muted)]'
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
+      {activeTab === 'upload' && (() => {
+        const hasAudioSource = Boolean(audioFile || isValidHttpsUrl(audioUrlInput));
+        const missingRequirements = [
+          !hasAudioSource ? 'Audio file or HTTPS link' : null,
+          !title.trim() ? 'Track title' : null,
+          !coverBlob ? 'Square cover artwork' : null,
+          !artworkNoLogoConfirmed ? 'Clean artwork checkbox' : null,
+          !rightsConfirmed ? 'Audio rights checkbox' : null,
+        ].filter((item): item is string => Boolean(item));
+        const isReadyForReview = missingRequirements.length === 0;
 
-          {uploadError && (
-            <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--danger)] text-xs text-[var(--danger)] flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{uploadError}</span>
+        return (
+          <div className="rounded-[24px] bg-[var(--surface)] border border-[var(--border)] p-5 sm:p-6 space-y-6">
+            {/* Simple 3-Step Publish Overview */}
+            <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <div className="space-y-0.5">
+                <div className="font-bold text-[var(--text)]">Easy 3-step publish</div>
+                <p className="text-[11px] text-[var(--text-muted)]">
+                  Only audio, title, cover photo, and rights confirmation are required. Mood, BPM, story, and lyrics are completely optional.
+                </p>
+              </div>
+              <span className="px-3 py-1 rounded-full bg-[var(--surface)] border border-[var(--border)] text-[11px] font-mono text-[var(--accent-text)] font-bold shrink-0 self-start sm:self-center">
+                Step {uploadStep} of 3
+              </span>
             </div>
-          )}
 
-          {/* STEP 1: AUDIO */}
-          {uploadStep === 1 && (
-            <div className="space-y-4">
-              <div>
-                <h2 className="text-base font-bold text-[var(--text)]">Choose your audio file</h2>
-                <p className="text-xs text-[var(--text-muted)]">MP3, WAV, FLAC, or M4A</p>
-              </div>
-
-              <div
-                onClick={() => audioInputRef.current?.click()}
-                className="p-8 rounded-2xl border-2 border-dashed border-[var(--border)] hover:border-[var(--accent-text)] bg-[var(--surface-2)] text-center cursor-pointer transition space-y-2"
-              >
-                <input
-                  ref={audioInputRef}
-                  type="file"
-                  accept="audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) handleAudioFile(f);
-                  }}
-                />
-                {isAnalyzingAudio ? (
-                  <div className="flex flex-col items-center gap-2">
-                    <RefreshCw className="w-7 h-7 text-[var(--accent-text)] animate-spin" />
-                    <span className="text-xs font-semibold text-[var(--text)]">Checking audio file...</span>
-                  </div>
-                ) : audioFile ? (
-                  <div className="space-y-1">
-                    <FileAudio className="w-8 h-8 text-[var(--accent-text)] mx-auto" />
-                    <div className="text-sm font-bold text-[var(--text)] truncate max-w-md mx-auto">
-                      {audioFile.name}
-                    </div>
-                    <div className="text-xs font-mono text-[var(--text-muted)]">
-                      {extractedMeta ? `${formatTime(extractedMeta.durationSeconds)} · ${extractedMeta.fileSizeFormatted}` : ''}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-1">
-                    <UploadCloud className="w-8 h-8 text-[var(--text-muted)] mx-auto" />
-                    <div className="text-sm font-semibold text-[var(--text)]">Tap to choose an audio file</div>
-                    <div className="text-xs text-[var(--text-muted)]">Max 120 MB</div>
-                  </div>
-                )}
-              </div>
-
-              {duplicateAudioMatch && (
-                <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-amber-500/50 text-xs text-amber-500 flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>
-                    Warning: this exact audio file matches an existing track ("{duplicateAudioMatch.title}").
-                    Uploading duplicates can cause copyright flags.
-                  </span>
-                </div>
-              )}
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-[var(--text-muted)]">
-                  Or paste a direct HTTPS audio link
-                </label>
-                <input
-                  type="url"
-                  value={audioUrlInput}
-                  onChange={(e) => setAudioUrlInput(e.target.value)}
-                  onBlur={async () => {
-                    if (!audioFile && isValidHttpsUrl(audioUrlInput)) {
-                      try {
-                        const res = await probeAudioUrlMetadata(audioUrlInput.trim());
-                        setProbedUrlDuration(res.durationSeconds);
-                      } catch {}
+            {/* Stepper Header */}
+            <div className="flex items-center justify-between gap-2 pb-4 border-b border-[var(--border)]">
+              {[
+                { step: 1 as const, label: '1. Audio' },
+                { step: 2 as const, label: '2. Details' },
+                { step: 3 as const, label: '3. Publish' },
+              ].map((s) => (
+                <button
+                  key={s.step}
+                  type="button"
+                  onClick={() => {
+                    if (
+                      s.step < uploadStep ||
+                      (s.step === 2 && hasAudioSource) ||
+                      (s.step === 3 && isReadyForReview)
+                    ) {
+                      setUploadStep(s.step);
                     }
                   }}
-                  placeholder="https://..."
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
-                />
-              </div>
-
-              <div className="flex justify-end pt-2">
-                <button
-                  type="button"
-                  disabled={!audioFile && !isValidHttpsUrl(audioUrlInput)}
-                  onClick={() => setUploadStep(2)}
-                  className="px-6 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    uploadStep === s.step
+                      ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
+                      : uploadStep > s.step
+                      ? 'bg-[var(--surface-2)] text-[var(--accent-text)] border border-[var(--border)]'
+                      : 'bg-[var(--surface-2)] text-[var(--text-muted)]'
+                  }`}
                 >
-                  <span>Next: Details</span>
-                  <ArrowRight className="w-4 h-4" />
+                  {s.label}
                 </button>
-              </div>
+              ))}
             </div>
-          )}
 
-          {/* STEP 2: DETAILS & SQUARE 1400x1400 COVER */}
-          {uploadStep === 2 && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-[var(--text)]">Track title *</label>
-                  <input
-                    type="text"
-                    required
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="Song title"
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)]"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-[var(--text)]">Genre</label>
-                  <GenreSelectOrCustom
-                    value={genre}
-                    onChange={setGenre}
-                    onCustomGenreCreated={(name: string) => {
-                      upsertGenre(name, { region }).catch(() => {});
-                    }}
-                  />
-                </div>
+            {uploadError && (
+              <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--danger)] text-xs text-[var(--danger)] flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{uploadError}</span>
               </div>
+            )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-[var(--text)]">Country</label>
-                  <RegionSelect
-                    value={region}
-                    onChange={setRegion}
-                    className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
-                  />
+            {/* STEP 1: AUDIO */}
+            {uploadStep === 1 && (
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-base font-bold text-[var(--text)]">Step 1: Choose your song file</h2>
+                  <p className="text-xs text-[var(--text-muted)]">MP3, WAV, FLAC, or M4A (max 120 MB)</p>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-[var(--text)]">Mood</label>
-                  <select
-                    value={mood}
-                    onChange={(e) => setMood(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
-                  >
-                    <option value="Chill">Chill</option>
-                    <option value="Deep">Deep</option>
-                    <option value="Night">Night</option>
-                    <option value="Upbeat">Upbeat</option>
-                    <option value="Warm">Warm</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-[var(--text)]">BPM</label>
-                  <input
-                    type="number"
-                    min={40}
-                    max={240}
-                    value={bpm}
-                    onChange={(e) => setBpm(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-mono text-[var(--text)]"
-                  />
-                </div>
-              </div>
 
-              {/* Cover Art Upload (Auto-cropped square WebP) */}
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-[var(--text)]">
-                  Cover artwork (Auto-cropped to 1:1 square · Fast WebP) *
-                </label>
                 <div
-                  onClick={() => coverInputRef.current?.click()}
-                  className="p-4 rounded-2xl border border-dashed border-[var(--border)] hover:border-[var(--accent-text)] bg-[var(--surface-2)] flex items-center gap-4 cursor-pointer"
+                  onClick={() => audioInputRef.current?.click()}
+                  className="p-8 rounded-2xl border-2 border-dashed border-[var(--border)] hover:border-[var(--accent-text)] bg-[var(--surface-2)] text-center cursor-pointer transition space-y-2"
                 >
                   <input
-                    ref={coverInputRef}
+                    ref={audioInputRef}
                     type="file"
-                    accept="image/*"
+                    accept="audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg"
                     className="hidden"
                     onChange={(e) => {
                       const f = e.target.files?.[0];
-                      if (f) handleCoverFile(f);
+                      if (f) handleAudioFile(f);
                     }}
                   />
-                  <div className="w-16 h-16 rounded-xl bg-[var(--surface)] border border-[var(--border)] overflow-hidden shrink-0 flex items-center justify-center">
-                    {coverPreview ? (
-                      <img src={coverPreview} alt="Cover" className="w-full h-full object-cover" />
-                    ) : (
-                      <ImageIcon className="w-6 h-6 text-[var(--text-muted)]" />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-[var(--text)] truncate">
-                      {coverPreview ? coverOriginalName : 'Choose square cover image'}
+                  {isAnalyzingAudio ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <RefreshCw className="w-7 h-7 text-[var(--accent-text)] animate-spin" />
+                      <span className="text-xs font-semibold text-[var(--text)]">Checking audio file...</span>
                     </div>
-                    <p className="text-[11px] text-[var(--text-muted)]">
-                      {coverCompressionNote ||
-                        'Clean square image without third-party platform banners or logos.'}
-                    </p>
-                  </div>
-                </div>
-                {coverError && (
-                  <p className="text-xs text-[var(--danger)] font-medium">{coverError}</p>
-                )}
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-[var(--text)]">About this song (optional)</label>
-                <textarea
-                  rows={2}
-                  value={story}
-                  onChange={(e) => setStory(e.target.value)}
-                  placeholder="Share credits or story behind the track..."
-                  className="w-full px-3.5 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-[var(--text)]">Lyrics (optional)</label>
-                <textarea
-                  rows={3}
-                  value={lyrics}
-                  onChange={(e) => setLyrics(e.target.value)}
-                  placeholder="Paste song lyrics..."
-                  className="w-full px-3.5 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
-                />
-              </div>
-
-              {/* Required Checkboxes */}
-              <div className="space-y-2 pt-1">
-                <label className="flex items-start gap-2.5 p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] cursor-pointer text-xs text-[var(--text)]">
-                  <input
-                    type="checkbox"
-                    checked={artworkNoLogoConfirmed}
-                    onChange={(e) => setArtworkNoLogoConfirmed(e.target.checked)}
-                    className="mt-0.5 accent-[var(--accent)]"
-                  />
-                  <span>This artwork has no other platform's logo and I own the rights</span>
-                </label>
-
-                <label className="flex items-start gap-2.5 p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] cursor-pointer text-xs text-[var(--text)]">
-                  <input
-                    type="checkbox"
-                    checked={rightsConfirmed}
-                    onChange={(e) => setRightsConfirmed(e.target.checked)}
-                    className="mt-0.5 accent-[var(--accent)]"
-                  />
-                  <span>I own or control the rights to publish this audio recording</span>
-                </label>
-              </div>
-
-              <div className="flex items-center justify-between pt-2">
-                <button
-                  type="button"
-                  onClick={() => setUploadStep(1)}
-                  className="px-4 py-2 rounded-full bg-[var(--surface-2)] text-xs font-semibold text-[var(--text)] flex items-center gap-1.5 cursor-pointer"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  <span>Back</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={!title.trim() || !coverBlob || !artworkNoLogoConfirmed || !rightsConfirmed}
-                  onClick={() => setUploadStep(3)}
-                  className="px-6 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                >
-                  <span>Next: Review</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 3: REVIEW & PUBLISH / SAVE DRAFT */}
-          {uploadStep === 3 && (
-            <div className="space-y-5">
-              <div className="flex items-center gap-4 p-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)]">
-                <img
-                  src={coverPreview || DEFAULT_ARTWORK_SVG}
-                  alt={title}
-                  className="w-20 h-20 rounded-xl object-cover shrink-0 border border-[var(--border)]"
-                />
-                <div className="min-w-0 space-y-1">
-                  <div className="text-base font-extrabold text-[var(--text)] truncate">{title}</div>
-                  <div className="text-xs text-[var(--text-muted)]">
-                    {currentArtist?.name || currentUser.name} · {genre} · {region}
-                  </div>
-                  <div className="text-xs font-mono text-[var(--text-muted)]">
-                    {extractedMeta
-                      ? `${formatTime(extractedMeta.durationSeconds)} · ${bpm} BPM · ${extractedMeta.fileSizeFormatted}`
-                      : probedUrlDuration
-                      ? `${formatTime(probedUrlDuration)} · ${bpm} BPM`
-                      : `${bpm} BPM`}
-                  </div>
-                </div>
-              </div>
-
-              {isUploading && (
-                <div className="space-y-2.5">
-                  <div className="flex items-center justify-between text-xs font-semibold text-[var(--accent-text)]">
-                    <span>{uploadStatusText || 'Uploading...'}</span>
-                    <span className="font-mono tabular-nums">{uploadProgress}%</span>
-                  </div>
-                  <div className="w-full h-2 rounded-full bg-[var(--surface-2)] overflow-hidden">
-                    <div
-                      className="h-full bg-[var(--accent)] transition-all duration-200"
-                      style={{ width: `${uploadProgress}%` }}
-                    />
-                  </div>
-                  {activeUploadControllerRef.current && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (isUploadPaused) {
-                            activeUploadControllerRef.current?.resume();
-                            setIsUploadPaused(false);
-                          } else {
-                            activeUploadControllerRef.current?.pause();
-                            setIsUploadPaused(true);
-                          }
-                        }}
-                        className="px-3 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-semibold text-[var(--text)] cursor-pointer"
-                      >
-                        {isUploadPaused ? 'Resume upload' : 'Pause upload'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          activeUploadControllerRef.current?.cancel();
-                        }}
-                        className="px-3 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-semibold text-[var(--danger)] cursor-pointer"
-                      >
-                        Cancel
-                      </button>
+                  ) : audioFile ? (
+                    <div className="space-y-1">
+                      <FileAudio className="w-8 h-8 text-[var(--accent-text)] mx-auto" />
+                      <div className="text-sm font-bold text-[var(--text)] truncate max-w-md mx-auto">
+                        {audioFile.name}
+                      </div>
+                      <div className="text-xs font-mono text-[var(--text-muted)]">
+                        {extractedMeta ? `${formatTime(extractedMeta.durationSeconds)} · ${extractedMeta.fileSizeFormatted}` : ''}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <UploadCloud className="w-8 h-8 text-[var(--text-muted)] mx-auto" />
+                      <div className="text-sm font-semibold text-[var(--text)]">Tap to choose an audio file</div>
+                      <div className="text-xs text-[var(--text-muted)]">Max 120 MB · Fast resumable upload</div>
                     </div>
                   )}
                 </div>
-              )}
 
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <button
-                  type="button"
-                  disabled={isUploading}
-                  onClick={() => setUploadStep(2)}
-                  className="px-4 py-2.5 rounded-full bg-[var(--surface-2)] text-xs font-semibold text-[var(--text)] flex items-center gap-1.5 cursor-pointer"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  <span>Back to details</span>
-                </button>
+                {duplicateAudioMatch && (
+                  <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-amber-500/50 text-xs text-amber-500 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>
+                      Warning: this exact audio file matches an existing track ("{duplicateAudioMatch.title}").
+                      Uploading duplicates can cause copyright flags.
+                    </span>
+                  </div>
+                )}
 
-                <div className="flex items-center gap-2.5">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-[var(--text-muted)]">
+                    Or paste a direct HTTPS audio link (optional if uploading a file)
+                  </label>
+                  <input
+                    type="url"
+                    value={audioUrlInput}
+                    onChange={(e) => setAudioUrlInput(e.target.value)}
+                    onBlur={async () => {
+                      if (!audioFile && isValidHttpsUrl(audioUrlInput)) {
+                        try {
+                          const res = await probeAudioUrlMetadata(audioUrlInput.trim());
+                          setProbedUrlDuration(res.durationSeconds);
+                        } catch {}
+                      }
+                    }}
+                    placeholder="https://..."
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-3 pt-2">
+                  <span className="text-[11px] text-[var(--text-muted)]">
+                    {hasAudioSource ? 'Audio ready — continue to details.' : 'Select an audio file or link to continue.'}
+                  </span>
                   <button
                     type="button"
-                    disabled={isUploading}
-                    onClick={() => handlePublishOrDraft(true)}
-                    className="px-5 py-2.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-xs font-bold text-[var(--text)] cursor-pointer disabled:opacity-50"
+                    disabled={!hasAudioSource}
+                    onClick={() => setUploadStep(2)}
+                    className="px-6 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold flex items-center gap-2 cursor-pointer disabled:opacity-50"
                   >
-                    Save draft
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isUploading}
-                    onClick={() => handlePublishOrDraft(false)}
-                    className="px-6 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer disabled:opacity-50"
-                  >
-                    {isUploading ? 'Uploading...' : 'Publish track'}
+                    <span>Next: Details</span>
+                    <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
               </div>
-            </div>
-          )}
-        </div>
-      )}
+            )}
+
+            {/* STEP 2: DETAILS & SQUARE COVER */}
+            {uploadStep === 2 && (
+              <div className="space-y-5">
+                {/* Required Section */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--accent-text)]">
+                      Required to publish
+                    </h3>
+                    <span className="text-[11px] text-[var(--text-muted)]">Fields marked * are needed</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-[var(--text)]">Track title *</label>
+                      <input
+                        type="text"
+                        required
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                        placeholder="Enter song title"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-[var(--text)]">Genre</label>
+                      <GenreSelectOrCustom
+                        value={genre}
+                        onChange={setGenre}
+                        onCustomGenreCreated={(name: string) => {
+                          upsertGenre(name, { region }).catch(() => {});
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Cover Art Upload (Auto-cropped square WebP) */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-[var(--text)]">
+                      Cover artwork (Auto-cropped to 1:1 square · Fast WebP) *
+                    </label>
+                    <div
+                      onClick={() => coverInputRef.current?.click()}
+                      className="p-4 rounded-2xl border border-dashed border-[var(--border)] hover:border-[var(--accent-text)] bg-[var(--surface-2)] flex items-center gap-4 cursor-pointer"
+                    >
+                      <input
+                        ref={coverInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleCoverFile(f);
+                        }}
+                      />
+                      <div className="w-16 h-16 rounded-xl bg-[var(--surface)] border border-[var(--border)] overflow-hidden shrink-0 flex items-center justify-center">
+                        {coverPreview ? (
+                          <img src={coverPreview} alt="Cover" className="w-full h-full object-cover" />
+                        ) : (
+                          <ImageIcon className="w-6 h-6 text-[var(--text-muted)]" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-[var(--text)] truncate">
+                          {coverPreview ? coverOriginalName : 'Tap to choose square cover image'}
+                        </div>
+                        <p className="text-[11px] text-[var(--text-muted)]">
+                          {coverCompressionNote ||
+                            'Clean square image without third-party platform banners or logos.'}
+                        </p>
+                      </div>
+                    </div>
+                    {coverError && (
+                      <p className="text-xs text-[var(--danger)] font-medium">{coverError}</p>
+                    )}
+                  </div>
+
+                  {/* Required Checkboxes */}
+                  <div className="space-y-2">
+                    <label className="flex items-start gap-2.5 p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] cursor-pointer text-xs text-[var(--text)]">
+                      <input
+                        type="checkbox"
+                        checked={artworkNoLogoConfirmed}
+                        onChange={(e) => setArtworkNoLogoConfirmed(e.target.checked)}
+                        className="mt-0.5 accent-[var(--accent)]"
+                      />
+                      <span>This artwork has no other platform&apos;s logo and I own the rights *</span>
+                    </label>
+
+                    <label className="flex items-start gap-2.5 p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] cursor-pointer text-xs text-[var(--text)]">
+                      <input
+                        type="checkbox"
+                        checked={rightsConfirmed}
+                        onChange={(e) => setRightsConfirmed(e.target.checked)}
+                        className="mt-0.5 accent-[var(--accent)]"
+                      />
+                      <span>I own or control the rights to publish this audio recording *</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Optional Details Section */}
+                <div className="pt-4 border-t border-[var(--border)] space-y-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                      Optional details (you can skip)
+                    </h3>
+                    <span className="text-[11px] text-[var(--text-muted)]">Pick preset, write custom, or skip</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-[var(--text)]">Country</label>
+                      <RegionSelect
+                        value={region}
+                        onChange={setRegion}
+                        className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+                      />
+                    </div>
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-xs font-semibold text-[var(--text)]">
+                        Mood <span className="text-[var(--text-muted)] font-normal">(optional · preset, custom, or skip)</span>
+                      </label>
+                      <MoodSelectOrCustom
+                        value={mood}
+                        onChange={setMood}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-[var(--text)]">BPM (optional)</label>
+                      <input
+                        type="number"
+                        min={40}
+                        max={240}
+                        value={bpm}
+                        onChange={(e) => setBpm(e.target.value)}
+                        className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-mono text-[var(--text)]"
+                      />
+                    </div>
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-xs font-semibold text-[var(--text)]">About this song (optional)</label>
+                      <input
+                        type="text"
+                        value={story}
+                        onChange={(e) => setStory(e.target.value)}
+                        placeholder="Share credits or story behind the track..."
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-[var(--text)]">Lyrics (optional)</label>
+                    <textarea
+                      rows={3}
+                      value={lyrics}
+                      onChange={(e) => setLyrics(e.target.value)}
+                      placeholder="Paste song lyrics..."
+                      className="w-full px-3.5 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+                    />
+                  </div>
+                </div>
+
+                {/* Publish Readiness Indicator */}
+                <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-between gap-3 text-xs">
+                  {isReadyForReview ? (
+                    <span className="inline-flex items-center gap-2 font-semibold text-[var(--accent-text)]">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>All required fields ready — tap Next: Review to publish.</span>
+                    </span>
+                  ) : (
+                    <span className="text-[var(--text-muted)]">
+                      <strong className="text-[var(--text)]">Still needed:</strong>{' '}
+                      {missingRequirements.join(' · ')}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setUploadStep(1)}
+                    className="px-4 py-2 rounded-full bg-[var(--surface-2)] text-xs font-semibold text-[var(--text)] flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    <span>Back</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!isReadyForReview}
+                    onClick={() => setUploadStep(3)}
+                    className="px-6 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <span>Next: Review &amp; Publish</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 3: REVIEW & PUBLISH / SAVE DRAFT */}
+            {uploadStep === 3 && (
+              <div className="space-y-5">
+                <div className="flex items-center gap-4 p-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)]">
+                  <img
+                    src={coverPreview || DEFAULT_ARTWORK_SVG}
+                    alt={title}
+                    className="w-20 h-20 rounded-xl object-cover shrink-0 border border-[var(--border)]"
+                  />
+                  <div className="min-w-0 space-y-1">
+                    <div className="text-base font-extrabold text-[var(--text)] truncate">{title}</div>
+                    <div className="text-xs text-[var(--text-muted)]">
+                      {currentArtist?.name || currentUser.name} · {genre} · {region}
+                      {mood.trim() ? ` · ${mood.trim()} mood` : ''}
+                    </div>
+                    <div className="text-xs font-mono text-[var(--text-muted)]">
+                      {extractedMeta
+                        ? `${formatTime(extractedMeta.durationSeconds)} · ${bpm} BPM · ${extractedMeta.fileSizeFormatted}`
+                        : probedUrlDuration
+                        ? `${formatTime(probedUrlDuration)} · ${bpm} BPM`
+                        : `${bpm} BPM`}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] space-y-0.5">
+                    <div className="font-bold text-[var(--text)]">Publish track (Live now)</div>
+                    <p className="text-[11px] text-[var(--text-muted)]">
+                      Appears immediately on Home, Discover, and your Artist page for streaming and sharing.
+                    </p>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] space-y-0.5">
+                    <div className="font-bold text-[var(--text)]">Save draft (Private)</div>
+                    <p className="text-[11px] text-[var(--text-muted)]">
+                      Uploads and saves securely inside Studio Tracks only — tap Publish anytime later.
+                    </p>
+                  </div>
+                </div>
+
+                {isUploading && (
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between text-xs font-semibold text-[var(--accent-text)]">
+                      <span>{uploadStatusText || 'Uploading...'}</span>
+                      <span className="font-mono tabular-nums">{uploadProgress}%</span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-[var(--surface-2)] overflow-hidden">
+                      <div
+                        className="h-full bg-[var(--accent)] transition-all duration-200"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                    {activeUploadControllerRef.current && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isUploadPaused) {
+                              activeUploadControllerRef.current?.resume();
+                              setIsUploadPaused(false);
+                            } else {
+                              activeUploadControllerRef.current?.pause();
+                              setIsUploadPaused(true);
+                            }
+                          }}
+                          className="px-3 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-semibold text-[var(--text)] cursor-pointer"
+                        >
+                          {isUploadPaused ? 'Resume upload' : 'Pause upload'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            activeUploadControllerRef.current?.cancel();
+                          }}
+                          className="px-3 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-semibold text-[var(--danger)] cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    disabled={isUploading}
+                    onClick={() => setUploadStep(2)}
+                    className="px-4 py-2.5 rounded-full bg-[var(--surface-2)] text-xs font-semibold text-[var(--text)] flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    <span>Back to details</span>
+                  </button>
+
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      disabled={isUploading}
+                      onClick={() => handlePublishOrDraft(true)}
+                      className="px-5 py-2.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-xs font-bold text-[var(--text)] cursor-pointer disabled:opacity-50"
+                    >
+                      Save draft
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isUploading}
+                      onClick={() => handlePublishOrDraft(false)}
+                      className="px-6 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer disabled:opacity-50"
+                    >
+                      {isUploading ? 'Publishing...' : 'Publish track'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ==================== TAB 3: TRACKS (REAL-TIME FIRESTORE METRICS & EARNINGS) ==================== */}
       {activeTab === 'tracks' && (
@@ -2585,130 +2669,145 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                             <div className="flex flex-wrap items-center gap-2">
                               <button
                                 type="button"
-                                onClick={() => {
-                                  if (isEditing) {
-                                    setEditingTrackId(null);
-                                  } else {
-                                    setEditingTrackId(track.id);
-                                    setEditTitle(track.title);
-                                    setEditGenre(track.genre);
-                                    setEditStory(track.story || '');
-                                  }
-                                }}
-                                className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer flex items-center gap-1 hover:border-[var(--accent)] transition-colors"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                                <span>Edit</span>
-                              </button>
+                                  onClick={() => {
+                                    if (isEditing) {
+                                      setEditingTrackId(null);
+                                    } else {
+                                      setEditingTrackId(track.id);
+                                      setEditTitle(track.title);
+                                      setEditGenre(track.genre);
+                                      setEditMood(track.mood || '');
+                                      setEditStory(track.story || '');
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer flex items-center gap-1 hover:border-[var(--accent)] transition-colors"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                  <span>Edit</span>
+                                </button>
 
-                              <button
-                                type="button"
-                                disabled={isTogglingRow}
-                                onClick={async () => {
-                                  setTogglingTrackId(track.id);
-                                  const res = await toggleDraftTrack(track.id);
-                                  setTogglingTrackId(null);
-                                  if (!res.success) {
-                                    showNotice(res.error || 'Could not update track status.', 'err');
-                                    return;
-                                  }
-                                  showNotice(track.isDraft ? 'Track published.' : 'Moved to drafts.');
-                                }}
-                                className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer hover:border-[var(--accent)] transition-colors disabled:opacity-50"
-                              >
-                                {isTogglingRow ? 'Updating...' : track.isDraft ? 'Publish' : 'Unpublish'}
-                              </button>
-
-                              {!isConfirmingDel ? (
                                 <button
                                   type="button"
-                                  onClick={() => setConfirmDeleteId(track.id)}
-                                  className="p-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--danger)] cursor-pointer transition-colors"
-                                  title="Delete track"
-                                  aria-label={`Delete ${track.title}`}
+                                  disabled={isTogglingRow}
+                                  onClick={async () => {
+                                    setTogglingTrackId(track.id);
+                                    const res = await toggleDraftTrack(track.id);
+                                    setTogglingTrackId(null);
+                                    if (!res.success) {
+                                      showNotice(res.error || 'Could not update track status.', 'err');
+                                      return;
+                                    }
+                                    showNotice(track.isDraft ? 'Track published.' : 'Moved to drafts.');
+                                  }}
+                                  className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer hover:border-[var(--accent)] transition-colors disabled:opacity-50"
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  {isTogglingRow ? 'Updating...' : track.isDraft ? 'Publish' : 'Unpublish'}
                                 </button>
-                              ) : (
-                                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-[var(--surface-2)] border border-[var(--danger)]/40">
-                                  <span className="text-[11px] text-[var(--text)]">Are you sure?</span>
-                                  <button
-                                    type="button"
-                                    disabled={isDeletingRow}
-                                    onClick={() => handleDeleteTrackConfirm(track)}
-                                    className="px-2 py-0.5 rounded-lg bg-[var(--danger)] text-white text-[11px] font-bold cursor-pointer disabled:opacity-50"
-                                  >
-                                    {isDeletingRow ? '...' : 'Delete'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteId(null)}
-                                    className="text-[11px] text-[var(--text-muted)] cursor-pointer"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
 
-                        {isEditing && (
-                          <div className="p-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] space-y-3">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              <input
-                                type="text"
-                                value={editTitle}
-                                onChange={(e) => setEditTitle(e.target.value)}
-                                placeholder="Title"
-                                className="px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text)]"
-                              />
-                              <GenreSelectOrCustom value={editGenre} onChange={setEditGenre} />
-                            </div>
-                            <textarea
-                              rows={2}
-                              value={editStory}
-                              onChange={(e) => setEditStory(e.target.value)}
-                              placeholder="About this track"
-                              className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text)]"
-                            />
-                            <div className="flex justify-end gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setEditingTrackId(null)}
-                                className="px-3 py-1.5 text-xs text-[var(--text-muted)] cursor-pointer"
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                type="button"
-                                disabled={isSavingRow}
-                                onClick={async () => {
-                                  setSavingTrackId(track.id);
-                                  try {
-                                    await updateTrack(track.id, {
-                                      title: editTitle.trim() || track.title,
-                                      genre: editGenre || track.genre,
-                                      story: editStory.trim(),
-                                    });
-                                    setEditingTrackId(null);
-                                    showNotice('Track updated.');
-                                  } catch (err) {
-                                    showNotice(
-                                      err instanceof Error ? err.message : 'Could not update track.',
-                                      'err'
-                                    );
-                                  } finally {
-                                    setSavingTrackId(null);
-                                  }
-                                }}
-                                className="px-4 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer disabled:opacity-50"
-                              >
-                                {isSavingRow ? 'Saving...' : 'Save'}
-                              </button>
+                                {!isConfirmingDel ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteId(track.id)}
+                                    className="p-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--danger)] cursor-pointer transition-colors"
+                                    title="Delete track"
+                                    aria-label={`Delete ${track.title}`}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                ) : (
+                                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-[var(--surface-2)] border border-[var(--danger)]/40">
+                                    <span className="text-[11px] text-[var(--text)]">Are you sure?</span>
+                                    <button
+                                      type="button"
+                                      disabled={isDeletingRow}
+                                      onClick={() => handleDeleteTrackConfirm(track)}
+                                      className="px-2 py-0.5 rounded-lg bg-[var(--danger)] text-white text-[11px] font-bold cursor-pointer disabled:opacity-50"
+                                    >
+                                      {isDeletingRow ? '...' : 'Delete'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteId(null)}
+                                      className="text-[11px] text-[var(--text-muted)] cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
-                        )}
+
+                          {isEditing && (
+                            <div className="p-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] space-y-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <input
+                                  type="text"
+                                  value={editTitle}
+                                  onChange={(e) => setEditTitle(e.target.value)}
+                                  placeholder="Title"
+                                  className="px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text)]"
+                                />
+                                <GenreSelectOrCustom value={editGenre} onChange={setEditGenre} />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[11px] font-semibold text-[var(--text-muted)]">
+                                  Mood (optional)
+                                </label>
+                                <MoodSelectOrCustom
+                                  value={editMood}
+                                  onChange={setEditMood}
+                                  className="flex-1 min-w-0 px-3 py-2 bg-[var(--surface)] border border-[var(--border)] rounded-xl text-xs text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                                />
+                              </div>
+                              <textarea
+                                rows={2}
+                                value={editStory}
+                                onChange={(e) => setEditStory(e.target.value)}
+                                placeholder="About this track"
+                                className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text)]"
+                              />
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingTrackId(null)}
+                                  className="px-3 py-1.5 text-xs text-[var(--text-muted)] cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isSavingRow}
+                                  onClick={async () => {
+                                    setSavingTrackId(track.id);
+                                    try {
+                                      const nextGenre = editGenre || track.genre;
+                                      const nextMood = editMood.trim();
+                                      await updateTrack(track.id, {
+                                        title: editTitle.trim() || track.title,
+                                        genre: nextGenre,
+                                        mood: nextMood,
+                                        vibeTags: [nextGenre, ...(nextMood ? [nextMood] : [])].filter(Boolean),
+                                        story: editStory.trim(),
+                                      });
+                                      setEditingTrackId(null);
+                                      showNotice('Track updated.');
+                                    } catch (err) {
+                                      showNotice(
+                                        err instanceof Error ? err.message : 'Could not update track.',
+                                        'err'
+                                      );
+                                    } finally {
+                                      setSavingTrackId(null);
+                                    }
+                                  }}
+                                  className="px-4 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer disabled:opacity-50"
+                                >
+                                  {isSavingRow ? 'Saving...' : 'Save'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
                       </div>
                     );
                   });

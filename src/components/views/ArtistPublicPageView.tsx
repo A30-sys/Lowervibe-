@@ -93,11 +93,13 @@ export const ArtistPublicPageView: React.FC = () => {
 
   useEffect(() => {
     if (!artist) {
-      resetDefaultSeoMeta();
+      if (artists.length > 0) {
+        resetDefaultSeoMeta();
+      }
       return;
     }
     applyArtistSeoMeta(artist, artistTracks.length);
-  }, [artist, artistTracks.length]);
+  }, [artist, artistTracks.length, artists.length]);
 
   useEffect(() => {
     return () => {
@@ -228,10 +230,10 @@ export const ArtistPublicPageView: React.FC = () => {
         {isOwner && (
           <button
             type="button"
-            onClick={() => navigate('/studio')}
+            onClick={() => navigate('/artistcreator')}
             className="px-4 py-2 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold transition cursor-pointer min-h-[40px]"
           >
-            Manage in Studio
+            Manage in Artist Creator
           </button>
         )}
       </div>

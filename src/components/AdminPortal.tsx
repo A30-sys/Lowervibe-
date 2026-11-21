@@ -56,6 +56,7 @@ import {
 import { CANONICAL_GENRES, subscribeToFirestoreGenres } from '../services/genresService';
 import { detectDefaultCountry } from '../data/regions';
 import { GenreSelectOrCustom } from './common/GenreSelectOrCustom';
+import { MoodSelectOrCustom } from './common/MoodSelectOrCustom';
 import { RegionSelect } from './common/RegionSelect';
 
 interface AdminPortalProps {
@@ -82,6 +83,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
     approveArtistMonetization,
     rejectArtistMonetization,
     suspendArtistMonetization,
+    deleteArtistProfile,
   } = useAudio();
 
   const {
@@ -114,6 +116,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
   const [catalogSearch, setCatalogSearch] = useState('');
   const [selectedGenreFilter, setSelectedGenreFilter] = useState('all');
   const [confirmDeleteTrackId, setConfirmDeleteTrackId] = useState<string | null>(null);
+  const [confirmDeleteArtistId, setConfirmDeleteArtistId] = useState<string | null>(null);
+  const [deletingArtistId, setDeletingArtistId] = useState<string | null>(null);
   const [confirmPurgeCatalog, setConfirmPurgeCatalog] = useState(false);
 
   // Platform settings
@@ -153,7 +157,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadArtist, setUploadArtist] = useState('');
   const [uploadGenre, setUploadGenre] = useState('Afro Chillout');
-  const [uploadMood, setUploadMood] = useState('Lake Breeze');
+  const [uploadMood, setUploadMood] = useState('');
   const [uploadRegion, setUploadRegion] = useState(() => {
     const detected = detectDefaultCountry();
     return detected && detected !== 'Global'
@@ -206,7 +210,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
     setUploadTitle('');
     setUploadArtist('');
     setUploadGenre('Afro Chillout');
-    setUploadMood('Lake Breeze');
+    setUploadMood('');
     setUploadRegion(defaultReg);
     setUploadStory('');
     setUploadBpm(90);
@@ -427,9 +431,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
           verifiedSource: audioFile ? 'firebase_storage' : 'https_stream',
         },
         genre: finalGenre,
-        mood: uploadMood,
+        mood: uploadMood.trim() || undefined,
         region: uploadRegion || 'Malawi',
-        vibeTags: [finalGenre, uploadMood, uploadRegion || 'Malawi'],
+        vibeTags: [finalGenre, ...(uploadMood.trim() ? [uploadMood.trim()] : []), uploadRegion || 'Malawi'].filter(Boolean),
         bpm: uploadBpm || 105,
         keySignature: 'C Min',
         plays: 0,
@@ -672,7 +676,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
   const handleAdminLogout = async () => {
     await logout();
     showToast('Signed out.');
-    navigate('/administration/login');
+    navigate('/administrationside/login');
   };
 
   return (
@@ -685,7 +689,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
               Standalone Administration
             </span>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-mono text-[var(--text-muted)] bg-[var(--surface-2)] border border-[var(--border)]">
-              /administration
+              /administrationside
             </span>
             <span className="text-[11px] font-mono text-[var(--text-muted)]">
               Admin: <span className="text-[var(--text)] font-bold">{PRIMARY_ADMIN_EMAIL}</span>
@@ -1658,6 +1662,50 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
                               <span>Suspend</span>
                             </button>
                           )}
+
+                          {confirmDeleteArtistId === artist.id ? (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                disabled={deletingArtistId === artist.id}
+                                onClick={async () => {
+                                  setDeletingArtistId(artist.id);
+                                  const res = await deleteArtistProfile(artist.id);
+                                  setDeletingArtistId(null);
+                                  if (!res.success) {
+                                    showToast(res.error || 'Could not remove artist');
+                                    return;
+                                  }
+                                  setConfirmDeleteArtistId(null);
+                                  showToast(
+                                    `Removed ${artist.name}${
+                                      res.deletedTracks > 0 ? ` & ${res.deletedTracks} song(s)` : ''
+                                    }`
+                                  );
+                                }}
+                                className="px-3 py-2 rounded-full bg-[var(--danger)] text-white text-xs font-bold cursor-pointer"
+                              >
+                                {deletingArtistId === artist.id ? 'Removing...' : 'Confirm Remove'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteArtistId(null)}
+                                className="px-2.5 py-2 text-xs text-[var(--text-muted)] cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteArtistId(artist.id)}
+                              className="px-3.5 py-2 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--danger)] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                              title="Remove artist and their tracks"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Remove</span>
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -2102,17 +2150,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-mono font-bold text-[var(--text)]">Mood</label>
-                  <select
+                  <label className="text-xs font-mono font-bold text-[var(--text)]">Mood (optional)</label>
+                  <MoodSelectOrCustom
                     value={uploadMood}
-                    onChange={(e) => setUploadMood(e.target.value)}
+                    onChange={setUploadMood}
                     className="w-full px-3 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
-                  >
-                    <option value="Lake Breeze">Lake Breeze</option>
-                    <option value="Midnight">Midnight</option>
-                    <option value="Golden Hour">Golden Hour</option>
-                    <option value="Focus">Focus</option>
-                  </select>
+                  />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-mono font-bold text-[var(--text)]">BPM</label>

@@ -16,7 +16,6 @@ import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { useRouter } from '../../context/RouterContext';
-import { PRIMARY_ADMIN_EMAIL } from '../../services/authService';
 import { NotificationItem } from '../../types';
 import { LowerVibeLogo } from '../brand/LowerVibeLogo';
 
@@ -49,7 +48,6 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
   const [isPwaInstalled, setIsPwaInstalled] = useState(false);
   const notifContainerRef = useRef<HTMLDivElement>(null);
 
-  const isOwnerAdmin = Boolean(isAdmin && currentUser?.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL);
   const canInstallArtistApp = Boolean(
     currentUser &&
       (isArtist ||
@@ -159,7 +157,7 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
     { label: t('home', 'Home'), path: '/', active: currentRoute.route === 'home' },
     { label: t('search', 'Search'), path: '/search', active: currentRoute.route === 'search' || currentRoute.route === 'discover' },
     { label: t('library', 'Library'), path: '/library', active: currentRoute.route === 'library' },
-    { label: t('upload', 'Upload'), path: '/studio', active: currentRoute.route === 'studio' },
+    { label: t('creator', 'Artist Creator'), path: '/artistcreator', active: currentRoute.route === 'studio' },
     { label: t('profile', 'Profile'), path: '/account', active: currentRoute.route === 'account' },
   ];
 
@@ -205,20 +203,6 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
             >
               <Download className="w-4 h-4" />
               <span className="hidden lg:inline">Artist App</span>
-            </button>
-          )}
-
-          {/* Owner-only Admin Shortcut */}
-          {isOwnerAdmin && (
-            <button
-              type="button"
-              onClick={() => navigate('/administration')}
-              className="hidden sm:flex items-center gap-1.5 px-3 rounded-2xl bg-[var(--surface)] text-[var(--accent-text)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-all active:scale-95 min-h-[48px] cursor-pointer text-xs font-bold"
-              title="Open Standalone Administration Portal"
-              aria-label="Administration Portal"
-            >
-              <ShieldCheck className="w-4 h-4" />
-              <span className="hidden lg:inline">Admin</span>
             </button>
           )}
 
@@ -387,8 +371,8 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
                               </p>
                               {item.actionRoute && (
                                 <span className="inline-block text-[11px] font-semibold text-[var(--accent-text)] pt-0.5">
-                                  {item.actionRoute === '/studio'
-                                    ? 'Open Studio →'
+                                  {item.actionRoute.startsWith('/artistcreator') || item.actionRoute.startsWith('/studio')
+                                    ? 'Open Artist Creator →'
                                     : item.actionRoute.startsWith('/artists')
                                     ? 'View Artist →'
                                     : 'Open →'}

@@ -1063,7 +1063,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         readBy: [],
         createdAt: new Date().toISOString(),
         createdBy: PRIMARY_ADMIN_EMAIL,
-        actionRoute: '/studio',
+        actionRoute: '/artistcreator',
       });
     } catch {}
   };
@@ -1107,7 +1107,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         readBy: [],
         createdAt: new Date().toISOString(),
         createdBy: PRIMARY_ADMIN_EMAIL,
-        actionRoute: '/studio',
+        actionRoute: '/artistcreator',
       });
     } catch {}
   };
