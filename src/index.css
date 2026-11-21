@@ -321,6 +321,52 @@ html.light .stroke-numeral {
   will-change: transform, opacity;
 }
 
+@keyframes lv-step-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translate3d(22px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes lv-step-slide-in-left {
+  from {
+    opacity: 0;
+    transform: translate3d(-22px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes lv-logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-step-slide-right {
+  animation: lv-step-slide-in-right 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+.animate-step-slide-left {
+  animation: lv-step-slide-in-left 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+.animate-lv-spin {
+  animation: lv-logo-spin 0.85s linear infinite;
+  will-change: transform;
+}
+
 .animate-fadeIn {
   animation: fade-in-quick 180ms ease-out both;
 }

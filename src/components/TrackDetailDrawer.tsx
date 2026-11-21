@@ -109,9 +109,11 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
         ? track.uploadedByUserId === currentUser.id
         : Boolean(
             artist &&
-              (artist.ownerUserId === currentUser.id ||
-                artist.claimedByUserId === currentUser.id ||
-                (!artist.ownerUserId && !artist.claimedByUserId && currentUser.artistId === artist.id))
+              (artist.ownerId
+                ? artist.ownerId === currentUser.id
+                : artist.ownerUserId === currentUser.id ||
+                  artist.claimedByUserId === currentUser.id ||
+                  (!artist.ownerUserId && !artist.claimedByUserId && currentUser.artistId === artist.id))
           ))
   );
 

@@ -101,6 +101,11 @@ interface AuthContextType {
       bio?: string;
       handle?: string;
       country?: string;
+      gender?: 'male' | 'female' | 'non-binary' | 'prefer_not_to_say';
+      age?: number;
+      preferredGenres?: string[];
+      favoriteArtistIds?: string[];
+      onboarded?: boolean;
       termsAccepted?: boolean;
       artistId?: string;
       avatar?: string;
@@ -653,6 +658,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       bio?: string;
       handle?: string;
       country?: string;
+      gender?: 'male' | 'female' | 'non-binary' | 'prefer_not_to_say';
+      age?: number;
+      preferredGenres?: string[];
+      favoriteArtistIds?: string[];
+      onboarded?: boolean;
       termsAccepted?: boolean;
       artistId?: string;
       avatar?: string;
@@ -823,10 +833,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const artistRef = doc(db, 'artists', assignedArtistId);
       const existingSnap = await getDoc(artistRef);
       if (existingSnap.exists()) {
-        const existingData = existingSnap.data() as { ownerUserId?: string; claimedByUserId?: string };
-        const owned =
-          existingData.ownerUserId === currentUser.id ||
-          existingData.claimedByUserId === currentUser.id;
+        const existingData = existingSnap.data() as {
+          ownerId?: string;
+          ownerUserId?: string;
+          claimedByUserId?: string;
+        };
+        const owned = existingData.ownerId
+          ? existingData.ownerId === currentUser.id
+          : existingData.ownerUserId === currentUser.id ||
+            existingData.claimedByUserId === currentUser.id;
         if (!owned) {
           return {
             success: false,
@@ -834,6 +849,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           };
         }
         await updateDoc(artistRef, {
+          ...(existingData.ownerId ? {} : { ownerId: currentUser.id }),
           name: cleanStage,
           country: country || currentUser.country || 'Malawi',
           city: currentUser.city || '',
@@ -845,6 +861,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         await setDoc(artistRef, {
           id: assignedArtistId,
+          ownerId: currentUser.id,
+          ownerUserId: currentUser.id,
+          claimedByUserId: currentUser.id,
           name: cleanStage,
           handle: `@${currentUser.username || cleanStage.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
           country: country || currentUser.country || 'Malawi',
@@ -868,8 +887,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           joinedDate: nowIso,
           socials: {},
           contactEmail: currentUser.email || '',
-          ownerUserId: currentUser.id,
-          claimedByUserId: currentUser.id,
         });
       }
 
@@ -1008,6 +1025,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         doc(db, 'artists', assignedArtistId),
         {
           id: assignedArtistId,
+          ownerId: app.userId,
+          ownerUserId: app.userId,
+          claimedByUserId: app.userId,
           name: app.stageName,
           handle: `@${(app.stageName || 'creator').toLowerCase().replace(/[^a-z0-9]/g, '')}`,
           country: app.country,
@@ -1028,8 +1048,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           joinedDate: new Date().toISOString(),
           socials: {},
           contactEmail: app.userEmail?.toLowerCase() || '',
-          ownerUserId: app.userId,
-          claimedByUserId: app.userId,
         },
         { merge: true }
       );

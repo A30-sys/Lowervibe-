@@ -26,6 +26,10 @@
         "followingArtistIds": { "type": "array" },
         "country": { "type": "string" },
         "city": { "type": "string" },
+        "gender": { "type": "string", "enum": ["male", "female", "non-binary", "prefer_not_to_say"] },
+        "age": { "type": "number" },
+        "preferredGenres": { "type": "array" },
+        "onboarded": { "type": "boolean" },
         "hasCompletedTour": { "type": "boolean" },
         "createdAt": { "type": "string" }
       },
@@ -49,6 +53,7 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
+        "ownerId": { "type": "string" },
         "ownerUserId": { "type": "string" },
         "name": { "type": "string", "maxLength": 100 },
         "handle": { "type": "string", "maxLength": 40 },

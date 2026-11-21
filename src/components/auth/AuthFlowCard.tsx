@@ -2,6 +2,7 @@ import { ConfirmationResult } from 'firebase/auth';
 import {
   ArrowLeft,
   ArrowRight,
+  Calendar,
   Check,
   CheckCircle2,
   Eye,
@@ -12,6 +13,9 @@ import {
   Phone,
   RefreshCw,
   ShieldAlert,
+  Sparkles,
+  UserPlus,
+  Users,
 } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
@@ -19,8 +23,33 @@ import { useAuth } from '../../context/AuthContext';
 import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
 import { detectDefaultCountry } from '../../data/regions';
+import { DEFAULT_AVATAR_SVG } from '../../utils/artworkFallback';
 import { LowerVibeLogo } from '../brand/LowerVibeLogo';
 import { RegionSelect } from '../common/RegionSelect';
+
+const SIGNUP_STARTER_GENRES = [
+  'Afrobeats',
+  'Amapiano',
+  'Malawi Afro-Pop',
+  'Gospel',
+  'Hip-Hop',
+  'Afro-Soul',
+  'Dancehall',
+  'Acoustic',
+  'Lo-Fi',
+  'Highlife',
+  'Reggae',
+  'R&B',
+];
+
+type GenderOption = 'male' | 'female' | 'non-binary' | 'prefer_not_to_say';
+
+const GENDER_OPTIONS: Array<{ value: GenderOption; label: string }> = [
+  { value: 'male', label: 'Male' },
+  { value: 'female', label: 'Female' },
+  { value: 'non-binary', label: 'Non-binary' },
+  { value: 'prefer_not_to_say', label: 'Prefer not to say' },
+];
 
 const DIAL_CODES = [
   { code: '+265', label: 'Malawi (+265)' },
@@ -83,7 +112,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
     refreshEmailVerification,
     enterGuestMode,
   } = useAuth();
-  const { setSelectedCountry } = useAudio();
+  const { artists, tracks, setSelectedCountry } = useAudio();
   const { navigate } = useRouter();
   const { showToast } = useToast();
 
@@ -100,7 +129,8 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
   const [errorCode, setErrorCode] = useState('');
   const [info, setInfo] = useState('');
 
-  // Email Sign-In / Sign-Up
+  // Email Sign-In / Multi-step Sign-Up
+  const [signupStep, setSignupStep] = useState<1 | 2 | 3>(1);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -110,6 +140,10 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
   const [role, setRole] = useState<'listener' | 'artist'>('listener');
   const [stageName, setStageName] = useState('');
   const [country, setCountry] = useState(() => detectDefaultCountry() || 'Malawi');
+  const [gender, setGender] = useState<GenderOption | ''>('');
+  const [age, setAge] = useState('');
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [selectedArtistIds, setSelectedArtistIds] = useState<string[]>([]);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [resendSeconds, setResendSeconds] = useState(60);
 
@@ -122,6 +156,32 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
   const otpInputsRef = useRef<(HTMLInputElement | null)[]>([]);
 
   const passwordChecks = useMemo(() => getPasswordChecks(password), [password]);
+
+  const genrePool = useMemo(() => {
+    const liveGenres = Array.from(
+      new Set(tracks.filter((t) => !t.isDraft && !t.isDeranked).map((t) => (t.genre || '').trim()).filter(Boolean))
+    );
+    return Array.from(new Set([...liveGenres, ...SIGNUP_STARTER_GENRES])).slice(0, 15);
+  }, [tracks]);
+
+  const artistSuggestions = useMemo(() => {
+    return artists
+      .slice()
+      .sort((a, b) => (b.followersCount || 0) - (a.followersCount || 0))
+      .slice(0, 12);
+  }, [artists]);
+
+  const toggleSignupGenre = (genre: string) => {
+    setSelectedGenres((prev) =>
+      prev.includes(genre) ? prev.filter((g) => g !== genre) : [...prev, genre]
+    );
+  };
+
+  const toggleSignupArtist = (artistId: string) => {
+    setSelectedArtistIds((prev) =>
+      prev.includes(artistId) ? prev.filter((id) => id !== artistId) : [...prev, artistId]
+    );
+  };
 
   // Verification email countdown
   useEffect(() => {
@@ -229,15 +289,12 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
     }
   };
 
-  const handleEmailSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAdvanceSignupStep1 = () => {
     setError('');
     setErrorCode('');
     setInfo('');
-
     const cleanEmail = email.trim();
     const displayName = role === 'artist' ? stageName.trim() || name.trim() : name.trim();
-
     if (!displayName) {
       setError(role === 'artist' ? 'Enter your artist or stage name.' : 'Enter your name.');
       return;
@@ -254,6 +311,58 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
       setError('Passwords do not match.');
       return;
     }
+    setSignupStep(2);
+  };
+
+  const handleAdvanceSignupStep2 = () => {
+    setError('');
+    setErrorCode('');
+    if (!gender) {
+      setError('Choose your gender option to continue.');
+      return;
+    }
+    const parsedAge = Number(age);
+    if (!age.trim() || !Number.isFinite(parsedAge) || parsedAge < 13 || parsedAge > 120) {
+      setError('Enter a valid age (minimum 13 years old).');
+      return;
+    }
+    setSignupStep(3);
+  };
+
+  const handleEmailSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setErrorCode('');
+    setInfo('');
+
+    const cleanEmail = email.trim();
+    const displayName = role === 'artist' ? stageName.trim() || name.trim() : name.trim();
+    const parsedAge = Math.floor(Number(age));
+
+    if (!displayName) {
+      setSignupStep(1);
+      setError(role === 'artist' ? 'Enter your artist or stage name.' : 'Enter your name.');
+      return;
+    }
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setSignupStep(1);
+      setError('Enter a valid email address.');
+      return;
+    }
+    if (!passwordChecks.isValid || password !== confirmPassword) {
+      setSignupStep(1);
+      setError('Check your password details.');
+      return;
+    }
+    if (!gender || !Number.isFinite(parsedAge) || parsedAge < 13 || parsedAge > 120) {
+      setSignupStep(2);
+      setError('Select your gender and enter a valid age (13+).');
+      return;
+    }
+    if (selectedGenres.length === 0 && selectedArtistIds.length === 0) {
+      setError('Pick at least 1 favourite genre or artist to personalize your feed.');
+      return;
+    }
     if (!termsAccepted) {
       setError('Please accept the Terms of Service and Privacy Policy to continue.');
       return;
@@ -267,6 +376,11 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
       'listener',
       {
         country,
+        gender,
+        age: parsedAge,
+        preferredGenres: selectedGenres,
+        favoriteArtistIds: selectedArtistIds,
+        onboarded: true,
         termsAccepted: true,
         ...(role === 'artist'
           ? {
@@ -276,7 +390,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 stageName: displayName,
                 legalName: name.trim() || displayName,
                 country,
-                primaryGenre: 'Afro-Fusion',
+                primaryGenre: selectedGenres[0] || 'Afro-Fusion',
                 bio: '',
                 avatarUrl: '',
                 rightsConfirmed: true,
@@ -289,9 +403,18 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
 
     if (res.success) {
       setSelectedCountry(country);
+      try {
+        localStorage.setItem('lowervibe_onboarded', 'true');
+        if (res.user?.id) {
+          localStorage.setItem(`lowervibe_onboarded_${res.user.id}`, 'true');
+        }
+        if (selectedGenres.length > 0) {
+          localStorage.setItem('lowervibe_preferred_genres', JSON.stringify(selectedGenres));
+        }
+      } catch {}
       setResendSeconds(60);
       setScreen('verify_inbox');
-      showToast('Account created. Check your inbox to verify.');
+      showToast('Account created! Verify your inbox or enter LOWERVIBE.');
     } else {
       setError(res.error || 'Could not create your account.');
       setErrorCode(res.errorCode || '');
@@ -444,6 +567,10 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
               setError('');
               setErrorCode('');
               setInfo('');
+              if (screen === 'email_signup' && signupStep > 1) {
+                setSignupStep((s) => (s === 3 ? 2 : 1));
+                return;
+              }
               setScreen(screen === 'phone_otp' ? 'phone_entry' : 'welcome');
             }}
             className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
@@ -574,6 +701,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 type="button"
                 onClick={() => {
                   setError('');
+                  setSignupStep(1);
                   setScreen('email_signup');
                 }}
                 className="py-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
@@ -674,7 +802,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
           </form>
         )}
 
-        {/* SCREEN 3: CREATE ACCOUNT */}
+        {/* SCREEN 3: CREATE ACCOUNT (3-STEP ONBOARDING) */}
         {screen === 'email_signup' && (
           <form onSubmit={handleEmailSignUp} className="space-y-4">
             <div className="grid grid-cols-2 p-1 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-bold">
@@ -682,6 +810,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 type="button"
                 onClick={() => {
                   setError('');
+                  setSignupStep(1);
                   setScreen('email_signin');
                 }}
                 className="py-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
@@ -697,221 +826,436 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
               </button>
             </div>
 
-            {/* Listener / Artist Toggle */}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setRole('listener')}
-                className={`p-3 rounded-xl border text-left transition cursor-pointer ${
-                  role === 'listener'
-                    ? 'border-[var(--accent)] bg-[var(--surface-2)] text-[var(--text)]'
-                    : 'border-[var(--border)] bg-[var(--surface-2)]/50 text-[var(--text-muted)]'
-                }`}
-              >
-                <div className="flex items-center gap-2 text-xs font-bold">
-                  <Headphones className="w-4 h-4 text-[var(--accent-text)]" />
-                  <span>Listener</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setRole('artist')}
-                className={`p-3 rounded-xl border text-left transition cursor-pointer ${
-                  role === 'artist'
-                    ? 'border-[var(--accent)] bg-[var(--surface-2)] text-[var(--text)]'
-                    : 'border-[var(--border)] bg-[var(--surface-2)]/50 text-[var(--text-muted)]'
-                }`}
-              >
-                <div className="flex items-center gap-2 text-xs font-bold">
-                  <Music className="w-4 h-4 text-[var(--accent-text)]" />
-                  <span>Artist</span>
-                </div>
-              </button>
+            {/* Step Progress Header */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-semibold text-[var(--text-muted)]">
+                <span>Step {signupStep} of 3</span>
+                <span className="text-[var(--accent-text)]">
+                  {signupStep === 1
+                    ? 'Account details'
+                    : signupStep === 2
+                    ? 'Gender, age & country'
+                    : 'Your favourite genres & artists'}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[1, 2, 3].map((stepIdx) => (
+                  <div
+                    key={stepIdx}
+                    className={`h-1.5 rounded-full transition-colors ${
+                      signupStep >= stepIdx ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'
+                    }`}
+                  />
+                ))}
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
-                {role === 'artist' ? 'Your full name' : 'Display name'}
-              </label>
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Chikumbutso Banda"
-                className="w-full h-14 px-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
-              />
-            </div>
+            {/* STEP 1: CREDENTIALS */}
+            {signupStep === 1 && (
+              <div className="space-y-3.5">
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRole('listener')}
+                    className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                      role === 'listener'
+                        ? 'border-[var(--accent)] bg-[var(--surface-2)] text-[var(--text)]'
+                        : 'border-[var(--border)] bg-[var(--surface-2)]/50 text-[var(--text-muted)]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 text-xs font-bold">
+                      <Headphones className="w-4 h-4 text-[var(--accent-text)]" />
+                      <span>Listener</span>
+                    </div>
+                  </button>
 
-            {role === 'artist' && (
-              <div>
-                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
-                  Artist / stage name
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={stageName}
-                  onChange={(e) => setStageName(e.target.value)}
-                  placeholder="How listeners see you"
-                  className="w-full h-14 px-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
-                />
+                  <button
+                    type="button"
+                    onClick={() => setRole('artist')}
+                    className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                      role === 'artist'
+                        ? 'border-[var(--accent)] bg-[var(--surface-2)] text-[var(--text)]'
+                        : 'border-[var(--border)] bg-[var(--surface-2)]/50 text-[var(--text-muted)]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 text-xs font-bold">
+                      <Music className="w-4 h-4 text-[var(--accent-text)]" />
+                      <span>Artist</span>
+                    </div>
+                  </button>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                    {role === 'artist' ? 'Your full name' : 'Display name'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Chikumbutso Banda"
+                    className="w-full h-12 px-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
+                  />
+                </div>
+
+                {role === 'artist' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                      Artist / stage name
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={stageName}
+                      onChange={(e) => setStageName(e.target.value)}
+                      placeholder="How listeners see you"
+                      className="w-full h-12 px-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Email</label>
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="w-full h-12 px-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-xs font-semibold text-[var(--text-muted)]">Password</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Create password"
+                      className="w-full h-12 pl-4 pr-12 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      className="absolute right-3.5 top-3 text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
+
+                  {password.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center gap-1.5">
+                        {[1, 2, 3, 4].map((bar) => (
+                          <div
+                            key={bar}
+                            className={`h-1.5 flex-1 rounded-full transition-colors ${
+                              passwordChecks.score >= bar
+                                ? passwordChecks.score >= 3
+                                  ? 'bg-[var(--accent)]'
+                                  : 'bg-amber-400'
+                                : 'bg-[var(--border)]'
+                            }`}
+                          />
+                        ))}
+                        <span className="text-[11px] font-semibold text-[var(--text-muted)] ml-1">
+                          {passwordChecks.label}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-3 text-[11px] text-[var(--text-muted)]">
+                        <span className={passwordChecks.lengthOk ? 'text-[var(--accent-text)] font-medium' : ''}>
+                          {passwordChecks.lengthOk ? '✓ ' : '• '}8+ characters
+                        </span>
+                        <span className={passwordChecks.letterOk ? 'text-[var(--accent-text)] font-medium' : ''}>
+                          {passwordChecks.letterOk ? '✓ ' : '• '}Letter
+                        </span>
+                        <span className={passwordChecks.numberOk ? 'text-[var(--accent-text)] font-medium' : ''}>
+                          {passwordChecks.numberOk ? '✓ ' : '• '}Number
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                    Confirm password
+                  </label>
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Repeat password"
+                    className="w-full h-12 px-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAdvanceSignupStep1}
+                  className="w-full h-12 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center justify-center gap-2 hover:brightness-95 transition cursor-pointer"
+                >
+                  <span>Next: About you</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+
+                <div className="relative py-1">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-[var(--border)]" />
+                  </div>
+                  <div className="relative flex justify-center text-[11px] uppercase">
+                    <span className="bg-[var(--surface)] px-2.5 text-[var(--text-muted)] font-semibold">or</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={handleGoogle}
+                  className="w-full h-12 px-4 rounded-2xl bg-white text-neutral-900 border border-neutral-300 font-bold text-xs flex items-center justify-center gap-2.5 hover:bg-neutral-50 transition cursor-pointer disabled:opacity-50"
+                >
+                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                  </svg>
+                  <span>Continue with Google</span>
+                </button>
               </div>
             )}
 
-            <div>
-              <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Country</label>
-              <RegionSelect
-                value={country}
-                onChange={setCountry}
-                includeGlobal={false}
-                className="w-full h-14 px-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Email</label>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                className="w-full h-14 px-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-xs font-semibold text-[var(--text-muted)]">Password</label>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Create password"
-                  className="w-full h-14 pl-4 pr-12 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((prev) => !prev)}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  className="absolute right-3.5 top-4 text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
-                >
-                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                </button>
-              </div>
-
-              {/* Password Strength Meter */}
-              {password.length > 0 && (
-                <div className="space-y-1.5 pt-1">
-                  <div className="flex items-center gap-1.5">
-                    {[1, 2, 3, 4].map((bar) => (
-                      <div
-                        key={bar}
-                        className={`h-1.5 flex-1 rounded-full transition-colors ${
-                          passwordChecks.score >= bar
-                            ? passwordChecks.score >= 3
-                              ? 'bg-[var(--accent)]'
-                              : 'bg-amber-400'
-                            : 'bg-[var(--border)]'
-                        }`}
-                      />
-                    ))}
-                    <span className="text-[11px] font-semibold text-[var(--text-muted)] ml-1">
-                      {passwordChecks.label}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-3 text-[11px] text-[var(--text-muted)]">
-                    <span className={passwordChecks.lengthOk ? 'text-[var(--accent-text)] font-medium' : ''}>
-                      {passwordChecks.lengthOk ? '✓ ' : '• '}8+ characters
-                    </span>
-                    <span className={passwordChecks.letterOk ? 'text-[var(--accent-text)] font-medium' : ''}>
-                      {passwordChecks.letterOk ? '✓ ' : '• '}Letter
-                    </span>
-                    <span className={passwordChecks.numberOk ? 'text-[var(--accent-text)] font-medium' : ''}>
-                      {passwordChecks.numberOk ? '✓ ' : '• '}Number
-                    </span>
+            {/* STEP 2: GENDER, AGE & COUNTRY */}
+            {signupStep === 2 && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)]">
+                    <Users className="w-3.5 h-3.5 text-[var(--accent-text)]" />
+                    <span>Gender</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {GENDER_OPTIONS.map((opt) => {
+                      const active = gender === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setGender(opt.value)}
+                          className={`px-3 py-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition cursor-pointer ${
+                            active
+                              ? 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-contrast)] font-bold'
+                              : 'border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] hover:border-[var(--border-strong)]'
+                          }`}
+                        >
+                          <span>{opt.label}</span>
+                          {active && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
-              )}
-            </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
-                Confirm password
-              </label>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                required
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Repeat password"
-                className="w-full h-14 px-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
-              />
-            </div>
+                <div className="space-y-1">
+                  <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)]">
+                    <Calendar className="w-3.5 h-3.5 text-[var(--accent-text)]" />
+                    <span>Age</span>
+                  </label>
+                  <input
+                    type="number"
+                    min={13}
+                    max={120}
+                    inputMode="numeric"
+                    value={age}
+                    onChange={(e) => setAge(e.target.value)}
+                    placeholder="e.g. 22"
+                    className="w-full h-12 px-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
+                  />
+                  <p className="text-[11px] text-[var(--text-muted)]">
+                    You must be at least 13 years old to join LOWERVIBE.
+                  </p>
+                </div>
 
-            <label className="flex items-start gap-2.5 text-xs text-[var(--text-muted)] cursor-pointer pt-1">
-              <input
-                type="checkbox"
-                checked={termsAccepted}
-                onChange={(e) => setTermsAccepted(e.target.checked)}
-                className="mt-0.5 accent-[var(--accent)]"
-              />
-              <span>
-                I agree to the{' '}
-                <button
-                  type="button"
-                  onClick={() => navigate('/terms')}
-                  className="underline text-[var(--text)] hover:text-[var(--accent-text)] cursor-pointer"
-                >
-                  Terms of Service
-                </button>{' '}
-                and{' '}
-                <button
-                  type="button"
-                  onClick={() => navigate('/privacy')}
-                  className="underline text-[var(--text)] hover:text-[var(--accent-text)] cursor-pointer"
-                >
-                  Privacy Policy
-                </button>
-                .
-              </span>
-            </label>
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Country</label>
+                  <RegionSelect
+                    value={country}
+                    onChange={setCountry}
+                    includeGlobal={false}
+                    className="w-full h-12 px-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
+                  />
+                </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full h-13 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center justify-center gap-2 hover:brightness-95 transition cursor-pointer disabled:opacity-50"
-            >
-              <span>{loading ? 'Creating account...' : 'Create account'}</span>
-              {!loading && <ArrowRight className="w-4 h-4" />}
-            </button>
-
-            <div className="relative py-1">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-[var(--border)]" />
+                <div className="flex items-center gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError('');
+                      setSignupStep(1);
+                    }}
+                    className="h-12 px-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAdvanceSignupStep2}
+                    className="flex-1 h-12 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center justify-center gap-2 hover:brightness-95 transition cursor-pointer"
+                  >
+                    <span>Next: Pick your vibe</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-              <div className="relative flex justify-center text-[11px] uppercase">
-                <span className="bg-[var(--surface)] px-2.5 text-[var(--text-muted)] font-semibold">or</span>
-              </div>
-            </div>
+            )}
 
-            <button
-              type="button"
-              disabled={loading}
-              onClick={handleGoogle}
-              className="w-full h-12 px-4 rounded-2xl bg-white text-neutral-900 border border-neutral-300 font-bold text-xs flex items-center justify-center gap-2.5 hover:bg-neutral-50 transition cursor-pointer disabled:opacity-50"
-            >
-              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-              </svg>
-              <span>Continue with Google</span>
-            </button>
+            {/* STEP 3: FAVOURITE GENRES & ARTISTS */}
+            {signupStep === 3 && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)]">
+                      <Sparkles className="w-3.5 h-3.5 text-[var(--accent-text)]" />
+                      <span>Favourite genres</span>
+                    </label>
+                    <span className="text-[11px] font-mono text-[var(--accent-text)]">
+                      {selectedGenres.length} picked
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1">
+                    {genrePool.map((g) => {
+                      const active = selectedGenres.includes(g);
+                      return (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() => toggleSignupGenre(g)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition cursor-pointer ${
+                            active
+                              ? 'bg-[var(--accent)] text-[var(--accent-contrast)] border-[var(--accent)]'
+                              : 'bg-[var(--surface-2)] text-[var(--text)] border-[var(--border)] hover:border-[var(--border-strong)]'
+                          }`}
+                        >
+                          {active && <Check className="w-3 h-3 stroke-[3]" />}
+                          <span>{g}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)]">
+                      <UserPlus className="w-3.5 h-3.5 text-[var(--accent-text)]" />
+                      <span>Favourite artists</span>
+                    </label>
+                    <span className="text-[11px] font-mono text-[var(--accent-text)]">
+                      {selectedArtistIds.length} following
+                    </span>
+                  </div>
+                  {artistSuggestions.length === 0 ? (
+                    <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text-muted)]">
+                      Your genre picks will tailor your home feed immediately while artists publish.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
+                      {artistSuggestions.map((artist) => {
+                        const isPicked = selectedArtistIds.includes(artist.id);
+                        return (
+                          <button
+                            key={artist.id}
+                            type="button"
+                            onClick={() => toggleSignupArtist(artist.id)}
+                            className={`p-2.5 rounded-xl border text-left flex items-center gap-2.5 transition cursor-pointer ${
+                              isPicked
+                                ? 'bg-[var(--surface-2)] border-[var(--accent)]'
+                                : 'bg-[var(--surface-2)] border-[var(--border)] hover:border-[var(--border-strong)]'
+                            }`}
+                          >
+                            <img
+                              src={artist.avatar || DEFAULT_AVATAR_SVG}
+                              alt={artist.name}
+                              referrerPolicy="no-referrer"
+                              className="w-8 h-8 rounded-full object-cover shrink-0 bg-[var(--surface)]"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-bold text-[var(--text)] truncate">{artist.name}</div>
+                              <div className="text-[10px] text-[var(--text-muted)] truncate">
+                                {artist.country || 'Malawi'}
+                              </div>
+                            </div>
+                            <div
+                              className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
+                                isPicked
+                                  ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
+                                  : 'border border-[var(--border-strong)] text-transparent'
+                              }`}
+                            >
+                              <Check className="w-3 h-3 stroke-[3]" />
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <label className="flex items-start gap-2.5 text-xs text-[var(--text-muted)] cursor-pointer pt-1">
+                  <input
+                    type="checkbox"
+                    checked={termsAccepted}
+                    onChange={(e) => setTermsAccepted(e.target.checked)}
+                    className="mt-0.5 accent-[var(--accent)]"
+                  />
+                  <span>
+                    I agree to the{' '}
+                    <button
+                      type="button"
+                      onClick={() => navigate('/terms')}
+                      className="underline text-[var(--text)] hover:text-[var(--accent-text)] cursor-pointer"
+                    >
+                      Terms of Service
+                    </button>{' '}
+                    and{' '}
+                    <button
+                      type="button"
+                      onClick={() => navigate('/privacy')}
+                      className="underline text-[var(--text)] hover:text-[var(--accent-text)] cursor-pointer"
+                    >
+                      Privacy Policy
+                    </button>
+                    .
+                  </span>
+                </label>
+
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError('');
+                      setSignupStep(2);
+                    }}
+                    className="h-12 px-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="flex-1 h-12 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center justify-center gap-2 hover:brightness-95 transition cursor-pointer disabled:opacity-50"
+                  >
+                    <span>{loading ? 'Creating account...' : 'Create account & Enter'}</span>
+                    {!loading && <ArrowRight className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+            )}
           </form>
         )}
 
@@ -937,16 +1281,21 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 className="w-full h-12 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 <Check className="w-4 h-4" />
-                <span>{loading ? 'Checking...' : "I've verified"}</span>
+                <span>{loading ? 'Checking...' : "I've verified & enter"}</span>
               </button>
 
-              <a
-                href="mailto:"
-                className="w-full h-11 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] flex items-center justify-center gap-2 hover:border-[var(--border-strong)] transition"
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  showToast('Welcome to LOWERVIBE! Verify your email anytime from Account.');
+                  finishAuthSuccess();
+                }}
+                className="w-full h-11 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] flex items-center justify-center gap-2 hover:border-[var(--border-strong)] transition cursor-pointer"
               >
-                <Mail className="w-3.5 h-3.5" />
-                <span>Open email app</span>
-              </a>
+                <span>Enter platform now</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
 
               <button
                 type="button"

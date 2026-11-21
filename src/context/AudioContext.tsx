@@ -3,7 +3,10 @@ import {
   collection,
   deleteDoc,
   doc,
+  enableNetwork,
+  getDocsFromServer,
   increment,
+  limit,
   onSnapshot,
   query,
   runTransaction,
@@ -131,6 +134,7 @@ interface AudioContextType {
   clearPlaybackError: () => void;
   retryPlayback: () => void;
   retryCatalogLoad: () => void;
+  refreshCatalog: () => Promise<boolean>;
 
   // Sleep Timer
   sleepTimerMinutes: number | null;
@@ -296,6 +300,22 @@ function dedupeTracksById(items: Track[]): Track[] {
     }
   }
   return Array.from(seen.values());
+}
+
+function stripOversizedInlineDataUrl(value?: string): string | undefined {
+  if (!value) return value;
+  if (value.startsWith('data:') && value.length > 2048) {
+    return undefined;
+  }
+  return value;
+}
+
+function safeCacheSnapshotWrite<T>(key: string, items: T[], maxItems: number, mapItem?: (item: T) => T) {
+  try {
+    const sliced = items.slice(0, maxItems);
+    const payload = mapItem ? sliced.map(mapItem) : sliced;
+    localStorage.setItem(key, JSON.stringify(payload));
+  } catch {}
 }
 
 /**
@@ -737,33 +757,67 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const hasAttemptedResumeRestoreRef = useRef<boolean>(false);
   const artistRemapRef = useRef<Map<string, Artist>>(new Map());
 
-  // Local cache persistence
+  // Debounced, size-bounded local cache persistence (prevents synchronous blocking & QuotaExceededError)
   useEffect(() => {
-    try { localStorage.setItem(TRACKS_STORAGE_KEY, JSON.stringify(tracks)); } catch {}
+    const timer = window.setTimeout(() => {
+      safeCacheSnapshotWrite(TRACKS_STORAGE_KEY, tracks, 100, (t) => ({
+        ...t,
+        coverArt: stripOversizedInlineDataUrl(t.coverArt) || DEFAULT_ARTWORK_SVG,
+        artistAvatar: stripOversizedInlineDataUrl(t.artistAvatar) || DEFAULT_AVATAR_SVG,
+      }));
+    }, 800);
+    return () => window.clearTimeout(timer);
   }, [tracks]);
 
   useEffect(() => {
-    try { localStorage.setItem(ARTISTS_STORAGE_KEY, JSON.stringify(artists)); } catch {}
+    const timer = window.setTimeout(() => {
+      safeCacheSnapshotWrite(ARTISTS_STORAGE_KEY, artists, 100, (a) => ({
+        ...a,
+        avatar: stripOversizedInlineDataUrl(a.avatar) || DEFAULT_AVATAR_SVG,
+        banner: stripOversizedInlineDataUrl(a.banner) || DEFAULT_BANNER_SVG,
+      }));
+    }, 800);
+    return () => window.clearTimeout(timer);
   }, [artists]);
 
   useEffect(() => {
-    try { localStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(events)); } catch {}
+    const timer = window.setTimeout(() => {
+      safeCacheSnapshotWrite(EVENTS_STORAGE_KEY, events, 50);
+    }, 800);
+    return () => window.clearTimeout(timer);
   }, [events]);
 
   useEffect(() => {
-    try { localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(auditLogs)); } catch {}
+    const timer = window.setTimeout(() => {
+      safeCacheSnapshotWrite(AUDIT_STORAGE_KEY, auditLogs, 80);
+    }, 800);
+    return () => window.clearTimeout(timer);
   }, [auditLogs]);
 
   useEffect(() => {
-    try { localStorage.setItem(FEATURED_VIBE_KEY, JSON.stringify(featuredVibe)); } catch {}
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(FEATURED_VIBE_KEY, JSON.stringify(featuredVibe));
+      } catch {}
+    }, 500);
+    return () => window.clearTimeout(timer);
   }, [featuredVibe]);
 
   useEffect(() => {
-    try { localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(playHistory)); } catch {}
+    const timer = window.setTimeout(() => {
+      safeCacheSnapshotWrite(HISTORY_STORAGE_KEY, playHistory, 80);
+    }, 800);
+    return () => window.clearTimeout(timer);
   }, [playHistory]);
 
   useEffect(() => {
-    try { localStorage.setItem('lowervibe_playlists_v3', JSON.stringify(playlists)); } catch {}
+    const timer = window.setTimeout(() => {
+      safeCacheSnapshotWrite('lowervibe_playlists_v3', playlists, 60, (p) => ({
+        ...p,
+        coverArt: stripOversizedInlineDataUrl(p.coverArt) || DEFAULT_ARTWORK_SVG,
+      }));
+    }, 800);
+    return () => window.clearTimeout(timer);
   }, [playlists]);
 
   // Save exact playback track + position so reopen restores cleanly (only while active)
@@ -836,47 +890,48 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       testFirestoreConnection().catch(() => {});
     }
 
+    const mapTrackDoc = (id: string, raw: Track): Track => {
+      const resolvedDuration = Math.max(
+        0,
+        Math.round(raw.metadata?.Duration ?? raw.metadata?.duration ?? raw.durationSeconds ?? 0)
+      );
+      const likedBy = Array.isArray(raw.likedByUserIds)
+        ? Array.from(new Set(raw.likedByUserIds.filter(Boolean)))
+        : undefined;
+      const remappedArtist = artistRemapRef.current.get(raw.artistId);
+      return {
+        ...raw,
+        id,
+        artistId: remappedArtist ? remappedArtist.id : raw.artistId,
+        artistName: remappedArtist ? remappedArtist.name : cleanArtistDisplayName(raw.artistName),
+        coverArt: raw.coverArt || DEFAULT_ARTWORK_SVG,
+        artistAvatar: raw.artistAvatar || DEFAULT_AVATAR_SVG,
+        durationSeconds: resolvedDuration,
+        metadata: {
+          ...(raw.metadata || {}),
+          Duration: resolvedDuration,
+          duration: resolvedDuration,
+          durationFormatted: raw.metadata?.durationFormatted || formatTime(resolvedDuration),
+          bitrate: raw.metadata?.bitrate || raw.bitrate,
+          sampleRate: raw.metadata?.sampleRate || raw.sampleRate,
+          bitDepth: raw.metadata?.bitDepth || raw.bitDepth,
+          fileSize: raw.metadata?.fileSize || raw.fileSize,
+          audioFormat: raw.metadata?.audioFormat || raw.audioFormat || raw.audioQuality,
+          isrcCode: raw.metadata?.isrcCode || raw.isrcCode,
+          bpm: raw.metadata?.bpm ?? raw.bpm,
+          keySignature: raw.metadata?.keySignature || raw.keySignature,
+          composer: raw.metadata?.composer || raw.composer,
+          recordLabel: raw.metadata?.recordLabel || raw.recordLabel,
+        },
+        likedByUserIds: likedBy,
+        likes: likedBy ? likedBy.length : Math.max(0, raw.likes || 0),
+      } as Track;
+    };
+
     const unsubTracks = onSnapshot(
-      collection(db, 'tracks'),
+      query(collection(db, 'tracks'), limit(250)),
       (snap) => {
-        const mapped = snap.docs.map((d) => {
-          const raw = d.data() as Track;
-          const resolvedDuration = Math.max(
-            0,
-            Math.round(raw.metadata?.Duration ?? raw.metadata?.duration ?? raw.durationSeconds ?? 0)
-          );
-          const likedBy = Array.isArray(raw.likedByUserIds)
-            ? Array.from(new Set(raw.likedByUserIds.filter(Boolean)))
-            : undefined;
-          const remappedArtist = artistRemapRef.current.get(raw.artistId);
-          return {
-            ...raw,
-            id: d.id,
-            artistId: remappedArtist ? remappedArtist.id : raw.artistId,
-            artistName: remappedArtist ? remappedArtist.name : cleanArtistDisplayName(raw.artistName),
-            coverArt: raw.coverArt || DEFAULT_ARTWORK_SVG,
-            artistAvatar: raw.artistAvatar || DEFAULT_AVATAR_SVG,
-            durationSeconds: resolvedDuration,
-            metadata: {
-              ...(raw.metadata || {}),
-              Duration: resolvedDuration,
-              duration: resolvedDuration,
-              durationFormatted: raw.metadata?.durationFormatted || formatTime(resolvedDuration),
-              bitrate: raw.metadata?.bitrate || raw.bitrate,
-              sampleRate: raw.metadata?.sampleRate || raw.sampleRate,
-              bitDepth: raw.metadata?.bitDepth || raw.bitDepth,
-              fileSize: raw.metadata?.fileSize || raw.fileSize,
-              audioFormat: raw.metadata?.audioFormat || raw.audioFormat || raw.audioQuality,
-              isrcCode: raw.metadata?.isrcCode || raw.isrcCode,
-              bpm: raw.metadata?.bpm ?? raw.bpm,
-              keySignature: raw.metadata?.keySignature || raw.keySignature,
-              composer: raw.metadata?.composer || raw.composer,
-              recordLabel: raw.metadata?.recordLabel || raw.recordLabel,
-            },
-            likedByUserIds: likedBy,
-            likes: likedBy ? likedBy.length : Math.max(0, raw.likes || 0),
-          } as Track;
-        });
+        const mapped = snap.docs.map((d) => mapTrackDoc(d.id, d.data() as Track));
 
         const loadedTracks = dedupeTracksById(mapped);
         setTracks(loadedTracks);
@@ -901,7 +956,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
 
     const unsubArtists = onSnapshot(
-      collection(db, 'artists'),
+      query(collection(db, 'artists'), limit(200)),
       (snap) => {
         const rawArtists = snap.docs.map((d) => {
           const raw = d.data() as Partial<Artist> & { headerImage?: string; genre?: string; region?: string };
@@ -977,14 +1032,14 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const unsubPlaylists = isVerifiedAdminUser
       ? onSnapshot(
-          collection(db, 'playlists'),
+          query(collection(db, 'playlists'), limit(200)),
           (snap) => {
             setPlaylists(snap.docs.map((d) => ({ ...d.data(), id: d.id } as Playlist)));
           },
           () => {}
         )
       : onSnapshot(
-          query(collection(db, 'playlists'), where('isPublic', '==', true)),
+          query(collection(db, 'playlists'), where('isPublic', '==', true), limit(120)),
           (snap) => {
             publicPlaylistsCache = snap.docs.map((d) => ({ ...d.data(), id: d.id } as Playlist));
             syncMergedPlaylists();
@@ -995,7 +1050,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     let unsubOwnPlaylists = () => {};
     if (activeUid && !isVerifiedAdminUser) {
       unsubOwnPlaylists = onSnapshot(
-        query(collection(db, 'playlists'), where('createdBy', '==', activeUid)),
+        query(collection(db, 'playlists'), where('createdBy', '==', activeUid), limit(80)),
         (snap) => {
           ownPlaylistsCache = snap.docs.map((d) => ({ ...d.data(), id: d.id } as Playlist));
           syncMergedPlaylists();
@@ -1005,7 +1060,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     const unsubEvents = onSnapshot(
-      collection(db, 'events'),
+      query(collection(db, 'events'), limit(100)),
       (snap) => {
         const loadedEvents = snap.docs.map((d) => ({ ...d.data(), id: d.id } as ArtistEvent));
         setEvents(loadedEvents);
@@ -1029,7 +1084,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     if (activeUid) {
       unsubPayoutMethods = onSnapshot(
-        query(collection(db, 'payoutMethods'), where('userId', '==', activeUid)),
+        query(collection(db, 'payoutMethods'), where('userId', '==', activeUid), limit(30)),
         (snap) => {
           setPayoutMethods(snap.docs.map((d) => ({ ...d.data(), id: d.id } as PayoutMethod)));
         },
@@ -1040,8 +1095,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       unsubPayoutRequests = onSnapshot(
         isVerifiedAdminUser
-          ? collection(db, 'payoutRequests')
-          : query(collection(db, 'payoutRequests'), where('userId', '==', activeUid)),
+          ? query(collection(db, 'payoutRequests'), limit(200))
+          : query(collection(db, 'payoutRequests'), where('userId', '==', activeUid), limit(100)),
         (snap) => {
           setPayoutRequests(
             snap.docs
@@ -1056,8 +1111,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       unsubTickets = onSnapshot(
         isVerifiedAdminUser
-          ? collection(db, 'tickets')
-          : query(collection(db, 'tickets'), where('userId', '==', activeUid)),
+          ? query(collection(db, 'tickets'), limit(200))
+          : query(collection(db, 'tickets'), where('userId', '==', activeUid), limit(80)),
         (snap) => {
           setSupportTickets(
             snap.docs
@@ -1076,7 +1131,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     let unsubAudit = () => {};
     if (isVerifiedAdminUser) {
       unsubAudit = onSnapshot(
-        collection(db, 'audit_logs'),
+        query(collection(db, 'audit_logs'), limit(200)),
         (snap) => {
           setAuditLogs(snap.docs.map((d) => ({ ...d.data(), id: d.id } as AuditLogEntry)));
         },
@@ -1097,6 +1152,135 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       unsubAudit();
     };
   }, [authReady, currentUser?.id, currentUser?.email, emailVerified, catalogReloadNonce]);
+
+  const catalogRefreshInFlightRef = useRef<Promise<boolean> | null>(null);
+  const lastCatalogRefreshAtRef = useRef<number>(0);
+
+  const refreshCatalog = async (): Promise<boolean> => {
+    if (catalogRefreshInFlightRef.current) {
+      return catalogRefreshInFlightRef.current;
+    }
+
+    const now = Date.now();
+    if (now - lastCatalogRefreshAtRef.current < 3000) {
+      void flushPendingSyncOperations().catch(() => {});
+      return true;
+    }
+
+    const run = (async () => {
+      lastCatalogRefreshAtRef.current = Date.now();
+      try {
+        await enableNetwork(db).catch(() => {});
+        const [connRes, , tracksRes, artistsRes] = await Promise.allSettled([
+          testFirestoreConnection(),
+          flushPendingSyncOperations(),
+          getDocsFromServer(query(collection(db, 'tracks'), limit(150))),
+          getDocsFromServer(query(collection(db, 'artists'), limit(150))),
+        ]);
+
+        let refreshedAny = false;
+        if (artistsRes.status === 'fulfilled') {
+          refreshedAny = true;
+          const rawArtists = artistsRes.value.docs.map((d) => {
+            const raw = d.data() as Partial<Artist> & { headerImage?: string; genre?: string; region?: string };
+            const safeName = raw.name || 'Artist';
+            const cleanName = cleanArtistDisplayName(safeName);
+            const safeHandle = raw.handle || `@${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'artist'}`;
+            const likedBy = Array.isArray(raw.likedByUserIds)
+              ? Array.from(new Set(raw.likedByUserIds.filter(Boolean)))
+              : undefined;
+            return {
+              ...raw,
+              id: d.id,
+              name: safeName,
+              handle: safeHandle,
+              avatar: raw.avatar || DEFAULT_AVATAR_SVG,
+              banner: raw.banner || raw.headerImage || DEFAULT_BANNER_SVG,
+              bio: raw.bio || '',
+              location: raw.location || raw.region || raw.country || 'Malawi',
+              country: raw.country || raw.location || raw.region || '',
+              followersCount: typeof raw.followersCount === 'number' ? raw.followersCount : 0,
+              likedByUserIds: likedBy,
+              likesCount: likedBy ? likedBy.length : Math.max(0, raw.likesCount || 0),
+              monthlyListeners: typeof raw.monthlyListeners === 'number' ? raw.monthlyListeners : 0,
+              verified: Boolean(raw.verified),
+              joinedDate: raw.joinedDate || new Date().toISOString(),
+              genres: Array.isArray(raw.genres) ? raw.genres : raw.genre ? [raw.genre] : ['Afro-Fusion'],
+              socials: raw.socials && typeof raw.socials === 'object' ? raw.socials : {},
+              gearAndSetup: Array.isArray(raw.gearAndSetup) ? raw.gearAndSetup : [],
+              endorsedBy: Array.isArray(raw.endorsedBy) ? raw.endorsedBy : [],
+            } as Artist;
+          });
+          const { artists: dedupedArtists, idRemap } = dedupeArtistsCatalog(rawArtists);
+          artistRemapRef.current = idRemap;
+          setArtists(dedupedArtists);
+        }
+
+        if (tracksRes.status === 'fulfilled') {
+          refreshedAny = true;
+          const freshTracks = dedupeTracksById(
+            tracksRes.value.docs.map((d) => {
+              const raw = d.data() as Track;
+              const resolvedDuration = Math.max(
+                0,
+                Math.round(raw.metadata?.Duration ?? raw.metadata?.duration ?? raw.durationSeconds ?? 0)
+              );
+              const likedBy = Array.isArray(raw.likedByUserIds)
+                ? Array.from(new Set(raw.likedByUserIds.filter(Boolean)))
+                : undefined;
+              const remappedArtist = artistRemapRef.current.get(raw.artistId);
+              return {
+                ...raw,
+                id: d.id,
+                artistId: remappedArtist ? remappedArtist.id : raw.artistId,
+                artistName: remappedArtist ? remappedArtist.name : cleanArtistDisplayName(raw.artistName),
+                coverArt: raw.coverArt || DEFAULT_ARTWORK_SVG,
+                artistAvatar: raw.artistAvatar || DEFAULT_AVATAR_SVG,
+                durationSeconds: resolvedDuration,
+                metadata: {
+                  ...(raw.metadata || {}),
+                  Duration: resolvedDuration,
+                  duration: resolvedDuration,
+                  durationFormatted: raw.metadata?.durationFormatted || formatTime(resolvedDuration),
+                  bitrate: raw.metadata?.bitrate || raw.bitrate,
+                  sampleRate: raw.metadata?.sampleRate || raw.sampleRate,
+                  bitDepth: raw.metadata?.bitDepth || raw.bitDepth,
+                  fileSize: raw.metadata?.fileSize || raw.fileSize,
+                  audioFormat: raw.metadata?.audioFormat || raw.audioFormat || raw.audioQuality,
+                  isrcCode: raw.metadata?.isrcCode || raw.isrcCode,
+                  bpm: raw.metadata?.bpm ?? raw.bpm,
+                  keySignature: raw.metadata?.keySignature || raw.keySignature,
+                  composer: raw.metadata?.composer || raw.composer,
+                  recordLabel: raw.metadata?.recordLabel || raw.recordLabel,
+                },
+                likedByUserIds: likedBy,
+                likes: likedBy ? likedBy.length : Math.max(0, raw.likes || 0),
+              } as Track;
+            })
+          );
+          setTracks((prev) => {
+            const byId = new Map(prev.map((t) => [t.id, t]));
+            for (const ft of freshTracks) {
+              byId.set(ft.id, ft);
+            }
+            return dedupeTracksById(Array.from(byId.values())).slice(0, 250);
+          });
+          setIsCatalogLoaded(true);
+          setCatalogError(null);
+        }
+
+        const connected = connRes.status === 'fulfilled' && Boolean(connRes.value);
+        return refreshedAny || connected;
+      } catch {
+        return false;
+      } finally {
+        catalogRefreshInFlightRef.current = null;
+      }
+    })();
+
+    catalogRefreshInFlightRef.current = run;
+    return run;
+  };
 
   const retryCatalogLoad = () => {
     setIsCatalogLoaded(false);
@@ -1191,9 +1375,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     try {
-      // Write append-only play doc reliably via durable outbox + increment counters
+      // Write append-only play doc reliably via durable outbox (skip Express mirror to avoid saturating backend at high scale)
       void durableSetDoc('plays', playId, playRecord as unknown as Record<string, unknown>, {
-        mirrorBackup: true,
+        mirrorBackup: false,
       });
 
       void durableUpdateDoc(
@@ -1729,6 +1913,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!currentUser || !auth.currentUser || auth.currentUser.uid !== currentUser.id || !artistId) return false;
     const target = artists.find((a) => a.id === artistId);
     if (!target) return false;
+    if (target.ownerId) {
+      return target.ownerId === currentUser.id;
+    }
     if (target.ownerUserId || target.claimedByUserId) {
       return target.ownerUserId === currentUser.id || target.claimedByUserId === currentUser.id;
     }
@@ -1895,10 +2082,12 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const addNewArtist = (
     artistData: Omit<Artist, 'id' | 'followersCount' | 'monthlyListeners' | 'joinedDate' | 'verified'>
   ): Artist => {
+    const ownerUid = artistData.ownerId || artistData.ownerUserId || currentUser?.id;
     const newArtist: Artist = {
       ...artistData,
-      ownerUserId: artistData.ownerUserId || currentUser?.id,
-      claimedByUserId: artistData.claimedByUserId || currentUser?.id,
+      ownerId: ownerUid,
+      ownerUserId: ownerUid,
+      claimedByUserId: artistData.claimedByUserId || ownerUid,
       name: cleanArtistDisplayName(artistData.name),
       id: `artist-${Date.now()}`,
       followersCount: 0,
@@ -1920,12 +2109,13 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!isUserOwnerOfArtist(artistId)) {
       return {
         success: false,
-        error: 'Permission denied: only the verified owner of this artist profile can edit its details.',
+        error: 'Permission denied: only the artist matching ownerId can edit this profile.',
       };
     }
     const previous = artists.find((a) => a.id === artistId);
     const {
       id: _ignoreId,
+      ownerId: _ignoreOwnerId,
       ownerUserId: _ignoreOwner,
       claimedByUserId: _ignoreClaimed,
       verified: _ignoreVerified,
@@ -1939,6 +2129,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } = updates;
     const cleanUpdates = {
       ...(safeUpdates.name ? { ...safeUpdates, name: cleanArtistDisplayName(safeUpdates.name) } : safeUpdates),
+      ...(previous && !previous.ownerId && currentUser ? { ownerId: currentUser.id } : {}),
       updatedAt: new Date().toISOString(),
     };
     setArtists((prev) => prev.map((a) => (a.id === artistId ? { ...a, ...cleanUpdates } : a)));
@@ -3162,6 +3353,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         clearPlaybackError,
         retryPlayback,
         retryCatalogLoad,
+        refreshCatalog,
         sleepTimerMinutes,
         sleepAtEndOfTrack,
         sleepTimerRemainingSeconds,

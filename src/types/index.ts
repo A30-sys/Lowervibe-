@@ -280,6 +280,8 @@ export interface User {
   bio?: string;
   country?: string;
   city?: string;
+  gender?: 'male' | 'female' | 'non-binary' | 'prefer_not_to_say';
+  age?: number;
   language?: 'en' | 'ny';
   artistId?: string;
   isAdmin?: boolean;
@@ -364,6 +366,7 @@ export interface Artist {
   earningsBalance?: number;
   totalStreams?: number;
   tourEvents?: ArtistEvent[];
+  ownerId?: string;
   ownerUserId?: string;
   claimedByUserId?: string;
   regionStats?: Record<string, number>;

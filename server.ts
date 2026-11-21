@@ -77,6 +77,74 @@ function writeJsonArray<T>(filePath: string, rows: T[]) {
   }
 }
 
+const MAX_SEO_CACHE_ENTRIES = 5000;
+
+function setBoundedMapEntry<K, V>(map: Map<K, V>, key: K, value: V, maxEntries: number = MAX_SEO_CACHE_ENTRIES) {
+  if (map.has(key)) {
+    map.delete(key);
+  } else if (map.size >= maxEntries) {
+    const oldestKey = map.keys().next().value;
+    if (oldestKey !== undefined) {
+      map.delete(oldestKey);
+    }
+  }
+  map.set(key, value);
+}
+
+function createBufferedJsonRingBuffer<T>(filePath: string, maxItems: number, flushIntervalMs: number = 3000) {
+  let buffer: T[] = readJsonArray<T>(filePath).slice(0, maxItems);
+  let dirty = false;
+  let flushing = false;
+  let flushTimer: NodeJS.Timeout | null = null;
+
+  const flush = async () => {
+    if (!dirty || flushing) return;
+    flushing = true;
+    dirty = false;
+    const snapshot = buffer.slice(0, maxItems);
+    const tmpPath = `${filePath}.${process.pid}.tmp`;
+    try {
+      await fs.promises.writeFile(tmpPath, JSON.stringify(snapshot));
+      await fs.promises.rename(tmpPath, filePath);
+    } catch (err) {
+      console.warn('[LOWERVIBE] Async buffered ledger flush failed:', err);
+    } finally {
+      flushing = false;
+      if (dirty) {
+        scheduleFlush();
+      }
+    }
+  };
+
+  const scheduleFlush = () => {
+    if (flushTimer) return;
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      void flush();
+    }, flushIntervalMs);
+    if (typeof flushTimer.unref === 'function') {
+      flushTimer.unref();
+    }
+  };
+
+  return {
+    push(item: T) {
+      buffer.unshift(item);
+      if (buffer.length > maxItems) {
+        buffer.length = maxItems;
+      }
+      dirty = true;
+      scheduleFlush();
+    },
+    getAll(): T[] {
+      return buffer;
+    },
+  };
+}
+
+const syncEventRing = createBufferedJsonRingBuffer<Record<string, unknown>>(SYNC_LEDGER_PATH, 1500, 3000);
+const analyticsEventRing = createBufferedJsonRingBuffer<Record<string, unknown>>(ANALYTICS_LEDGER_PATH, 2000, 3000);
+
 interface VerifiedFirebaseUser {
   uid: string;
   email: string;
@@ -303,7 +371,7 @@ async function lookupPublicArtistForSeo(
     } catch {}
   }
 
-  seoArtistCache.set(cacheKey, {
+  setBoundedMapEntry(seoArtistCache, cacheKey, {
     expiresAt: Date.now() + (artist ? 30_000 : 5_000),
     artist,
     tracksCount,
@@ -473,7 +541,7 @@ async function lookupPublicTrackForSeo(trackId: string): Promise<Record<string, 
   if (track && (track.isDraft || track.isDeranked)) {
     track = null;
   }
-  seoTrackCache.set(cleanId, {
+  setBoundedMapEntry(seoTrackCache, cleanId, {
     expiresAt: Date.now() + (track ? 30_000 : 5_000),
     track,
   });
@@ -809,16 +877,70 @@ function hashOtp(email: string, code: string): string {
 
 async function startServer() {
   const app = express();
+  app.set('trust proxy', 1);
 
-  app.use(express.json());
+  app.use(express.json({ limit: '1mb' }));
+
+  // Sliding-window bounded per-IP rate limiter for API routes
+  const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+  const MAX_RATE_BUCKETS = 25000;
+  const bucketCleanupTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of rateBuckets.entries()) {
+      if (entry.resetAt <= now) {
+        rateBuckets.delete(key);
+      }
+    }
+  }, 60_000);
+  if (typeof bucketCleanupTimer.unref === 'function') {
+    bucketCleanupTimer.unref();
+  }
+
+  app.use('/api', (req, res, next) => {
+    // Allow media chunk streaming / GET fetches high throughput while bounding abuse
+    const isStrictSensitive =
+      req.path.startsWith('/auth/') || req.path.startsWith('/payouts/') || req.path.startsWith('/monetization/');
+    const windowMs = 60_000;
+    const maxReq = isStrictSensitive ? 30 : req.method === 'GET' ? 240 : 120;
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const bucketKey = `${isStrictSensitive ? 'strict' : 'std'}:${clientIp}`;
+    const now = Date.now();
+
+    let bucket = rateBuckets.get(bucketKey);
+    if (!bucket || bucket.resetAt <= now) {
+      bucket = { count: 1, resetAt: now + windowMs };
+      setBoundedMapEntry(rateBuckets, bucketKey, bucket, MAX_RATE_BUCKETS);
+      return next();
+    }
+
+    bucket.count += 1;
+    if (bucket.count > maxReq) {
+      const retryAfterSec = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfterSec));
+      res.status(429).json({
+        ok: false,
+        error: 'Too many requests. Please wait a moment and try again.',
+      });
+      return;
+    }
+    return next();
+  });
 
   // 1. Health check endpoint
   app.get('/health', (_req, res) => {
+    const mem = process.memoryUsage();
     res.status(200).json({
       ok: true,
       status: 'healthy',
       db: 'firestore',
       auth: 'firebase+otp',
+      uptimeSeconds: Math.round(process.uptime()),
+      memoryRssMb: Math.round((mem.rss / (1024 * 1024)) * 10) / 10,
+      cacheEntries: {
+        seoArtists: seoArtistCache.size,
+        seoTracks: seoTrackCache.size,
+        rateBuckets: rateBuckets.size,
+      },
       timestamp: new Date().toISOString(),
     });
   });
@@ -1048,12 +1170,17 @@ async function startServer() {
       }
 
       const code = crypto.randomInt(100000, 1000000).toString();
-      otpStore.set(cleanEmail, {
-        hash: hashOtp(cleanEmail, code),
-        expiresAt: now + OTP_TTL_MS,
-        attempts: 0,
-        lastSentAt: now,
-      });
+      setBoundedMapEntry(
+        otpStore,
+        cleanEmail,
+        {
+          hash: hashOtp(cleanEmail, code),
+          expiresAt: now + OTP_TTL_MS,
+          attempts: 0,
+          lastSentAt: now,
+        },
+        10000
+      );
 
       const { transporter, mode } = await getEmailTransporter();
       const fromAddress = process.env.SMTP_FROM || 'LOWERVIBE <no-reply@lowervibe.fm>';
@@ -1178,7 +1305,9 @@ async function startServer() {
         authUser.emailVerified &&
         authUser.isGoogleProvider;
       const isArtistOwner =
-        artistDoc.ownerUserId === authUser.uid || artistDoc.claimedByUserId === authUser.uid;
+        artistDoc.ownerId === authUser.uid ||
+        artistDoc.ownerUserId === authUser.uid ||
+        artistDoc.claimedByUserId === authUser.uid;
 
       if (!isAdmin && !isArtistOwner) {
         res.status(403).json({
@@ -1315,7 +1444,9 @@ async function startServer() {
         authUser.emailVerified &&
         authUser.isGoogleProvider;
       const isArtistOwner =
-        artistDoc.ownerUserId === authUser.uid || artistDoc.claimedByUserId === authUser.uid;
+        artistDoc.ownerId === authUser.uid ||
+        artistDoc.ownerUserId === authUser.uid ||
+        artistDoc.claimedByUserId === authUser.uid;
       if ((!isArtistOwner && !isAdmin) || (methodDoc.userId !== authUser.uid && !isAdmin)) {
         res.status(403).json({ ok: false, error: 'Forbidden: ownership check failed.' });
         return;
@@ -1482,7 +1613,7 @@ async function startServer() {
     });
   });
 
-  // 4e. Durable Write-Ahead Sync Event Mirror
+  // 4e. Durable Write-Ahead Sync Event Mirror (async buffered for zero event-loop blocking)
   app.post('/api/sync/record', (req, res) => {
     try {
       const collection = String(req.body?.collection || '').slice(0, 64);
@@ -1495,22 +1626,20 @@ async function startServer() {
         return;
       }
 
-      const events = readJsonArray<Record<string, unknown>>(SYNC_LEDGER_PATH);
-      events.unshift({
+      syncEventRing.push({
         collection,
         docId,
         mode,
         timestamp,
         summary: req.body?.summary || null,
       });
-      writeJsonArray(SYNC_LEDGER_PATH, events.slice(0, 1500));
       res.status(200).json({ ok: true });
     } catch {
       res.status(200).json({ ok: true });
     }
   });
 
-  // 4f. First-Party Analytics Event Ingestion & Summary
+  // 4f. First-Party Analytics Event Ingestion & Summary (async buffered)
   app.post('/api/analytics/event', (req, res) => {
     try {
       const eventName = String(req.body?.event || '').trim().slice(0, 64);
@@ -1518,8 +1647,7 @@ async function startServer() {
         res.status(400).json({ ok: false, error: 'Missing event name' });
         return;
       }
-      const events = readJsonArray<Record<string, unknown>>(ANALYTICS_LEDGER_PATH);
-      events.unshift({
+      analyticsEventRing.push({
         event: eventName,
         path: String(req.body?.path || '/').slice(0, 160),
         title: String(req.body?.title || '').slice(0, 140),
@@ -1528,7 +1656,6 @@ async function startServer() {
           req.body?.params && typeof req.body.params === 'object' ? req.body.params : {},
         timestamp: String(req.body?.timestamp || new Date().toISOString()).slice(0, 40),
       });
-      writeJsonArray(ANALYTICS_LEDGER_PATH, events.slice(0, 2000));
       res.status(200).json({ ok: true });
     } catch {
       res.status(200).json({ ok: true });
@@ -1536,9 +1663,11 @@ async function startServer() {
   });
 
   app.get('/api/analytics/summary', (_req, res) => {
-    const events = readJsonArray<{ event?: string; path?: string; sessionId?: string }>(
-      ANALYTICS_LEDGER_PATH
-    );
+    const events = analyticsEventRing.getAll() as Array<{
+      event?: string;
+      path?: string;
+      sessionId?: string;
+    }>;
     const sessions = new Set<string>();
     const byEvent: Record<string, number> = {};
     const byPath: Record<string, number> = {};
@@ -1580,7 +1709,13 @@ async function startServer() {
     try {
       const origin = resolveRequestOrigin(req);
       const xml = await buildDynamicSitemapXml(origin);
-      res.status(200).set({ 'Content-Type': 'application/xml; charset=utf-8' }).send(xml);
+      res
+        .status(200)
+        .set({
+          'Content-Type': 'application/xml; charset=utf-8',
+          'Cache-Control': 'public, max-age=60, stale-while-revalidate=300',
+        })
+        .send(xml);
     } catch {
       const fallbackPath = path.resolve(__dirname, 'public', 'sitemap.xml');
       if (fs.existsSync(fallbackPath)) {
@@ -1652,7 +1787,13 @@ async function startServer() {
           const slug = String(req.params.slug || '').trim();
           const { artist, tracksCount } = await lookupPublicArtistForSeo(slug);
           const seoHtml = injectArtistSeoHtml(rawHtml, artist, tracksCount, req);
-          res.status(200).set({ 'Content-Type': 'text/html' }).end(seoHtml);
+          res
+            .status(200)
+            .set({
+              'Content-Type': 'text/html',
+              'Cache-Control': 'public, max-age=30, stale-while-revalidate=120',
+            })
+            .end(seoHtml);
         } catch {
           res.sendFile(distIndexPath);
         }
@@ -1664,7 +1805,13 @@ async function startServer() {
           const trackId = String(req.params.id || '').trim();
           const track = await lookupPublicTrackForSeo(trackId);
           const seoHtml = injectTrackSeoHtml(rawHtml, track, req);
-          res.status(200).set({ 'Content-Type': 'text/html' }).end(seoHtml);
+          res
+            .status(200)
+            .set({
+              'Content-Type': 'text/html',
+              'Cache-Control': 'public, max-age=30, stale-while-revalidate=120',
+            })
+            .end(seoHtml);
         } catch {
           res.sendFile(distIndexPath);
         }
@@ -1686,6 +1833,14 @@ async function startServer() {
     console.log(`[LOWERVIBE] System status available at http://0.0.0.0:${PORT}/api/status`);
   });
 }
+
+process.on('unhandledRejection', (reason) => {
+  console.warn('[LOWERVIBE] Unhandled rejection captured safely:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[LOWERVIBE] Uncaught exception captured:', err);
+});
 
 startServer().catch(err => {
   console.error('[LOWERVIBE] Failed to start server:', err);

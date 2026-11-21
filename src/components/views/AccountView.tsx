@@ -187,6 +187,12 @@ export const AccountView: React.FC = () => {
   const [editBio, setEditBio] = useState(currentUser?.bio || '');
   const [editCity, setEditCity] = useState(currentUser?.city || '');
   const [editCountry, setEditCountry] = useState(currentUser?.country || 'Malawi');
+  const [editGender, setEditGender] = useState<'' | 'male' | 'female' | 'non-binary' | 'prefer_not_to_say'>(
+    currentUser?.gender || ''
+  );
+  const [editAge, setEditAge] = useState<string>(
+    typeof currentUser?.age === 'number' ? String(currentUser.age) : ''
+  );
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   // Avatar & Cover Photo Uploads
@@ -246,8 +252,10 @@ export const AccountView: React.FC = () => {
       setEditBio(currentUser.bio || '');
       setEditCity(currentUser.city || '');
       setEditCountry(currentUser.country || 'Malawi');
+      setEditGender(currentUser.gender || '');
+      setEditAge(typeof currentUser.age === 'number' ? String(currentUser.age) : '');
     }
-  }, [currentUser?.id]);
+  }, [currentUser?.id, currentUser?.gender, currentUser?.age]);
 
   // Anchor scroll support (#privacy-data, #danger-zone)
   useEffect(() => {
@@ -379,6 +387,12 @@ export const AccountView: React.FC = () => {
       return;
     }
 
+    const parsedAge = editAge.trim() ? Math.floor(Number(editAge)) : undefined;
+    if (editAge.trim() && (!Number.isFinite(parsedAge) || (parsedAge as number) < 13 || (parsedAge as number) > 120)) {
+      showNotice('Age must be between 13 and 120.', 'err');
+      return;
+    }
+
     setIsSavingProfile(true);
     try {
       const cleanedTargetHandle = editUsername.replace(/^@/, '').trim().toLowerCase();
@@ -396,6 +410,8 @@ export const AccountView: React.FC = () => {
         bio: editBio.trim().slice(0, 500),
         city: editCity.trim(),
         country: editCountry || 'Malawi',
+        ...(editGender ? { gender: editGender } : {}),
+        ...(typeof parsedAge === 'number' ? { age: parsedAge } : {}),
       });
       if (!saveRes.success) {
         showNotice(saveRes.error || 'Could not save profile changes.', 'err');
@@ -956,6 +972,41 @@ export const AccountView: React.FC = () => {
                     </option>
                   ))}
                 </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-[var(--text)]">Gender</label>
+                <select
+                  value={editGender}
+                  onChange={(e) =>
+                    setEditGender(
+                      e.target.value as '' | 'male' | 'female' | 'non-binary' | 'prefer_not_to_say'
+                    )
+                  }
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent-text)]"
+                >
+                  <option value="">Not specified</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="non-binary">Non-binary</option>
+                  <option value="prefer_not_to_say">Prefer not to say</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-[var(--text)]">Age</label>
+                <input
+                  type="number"
+                  min={13}
+                  max={120}
+                  inputMode="numeric"
+                  placeholder="13 - 120"
+                  value={editAge}
+                  onChange={(e) => setEditAge(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent-text)]"
+                />
               </div>
             </div>
 

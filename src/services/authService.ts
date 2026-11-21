@@ -25,6 +25,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  increment,
   limit,
   query,
   setDoc,
@@ -292,6 +293,11 @@ export async function registerUserAccount(
     bio?: string;
     handle?: string;
     country?: string;
+    gender?: 'male' | 'female' | 'non-binary' | 'prefer_not_to_say';
+    age?: number;
+    preferredGenres?: string[];
+    favoriteArtistIds?: string[];
+    onboarded?: boolean;
     termsAccepted?: boolean;
     application?: Omit<ArtistApplication, 'id' | 'status' | 'submittedAt'>;
   }
@@ -341,6 +347,13 @@ export async function registerUserAccount(
     const nowIso = new Date().toISOString();
     const currentSession = detectCurrentSessionRecord();
 
+    const cleanPreferredGenres = Array.isArray(extra?.preferredGenres)
+      ? extra.preferredGenres.map((g) => g.trim()).filter(Boolean).slice(0, 30)
+      : [];
+    const cleanFavoriteArtistIds = Array.isArray(extra?.favoriteArtistIds)
+      ? Array.from(new Set(extra.favoriteArtistIds.filter(Boolean))).slice(0, 30)
+      : [];
+
     const newUser: User = {
       id: fbUser.uid,
       name: cleanName,
@@ -352,9 +365,13 @@ export async function registerUserAccount(
       avatar: extra?.avatar || DEFAULT_AVATAR_SVG,
       bio: extra?.bio || '',
       country: extra?.country || 'Malawi',
+      ...(extra?.gender ? { gender: extra.gender } : {}),
+      ...(typeof extra?.age === 'number' && extra.age >= 13 && extra.age <= 120 ? { age: Math.floor(extra.age) } : {}),
+      ...(cleanPreferredGenres.length > 0 ? { preferredGenres: cleanPreferredGenres } : {}),
+      ...(typeof extra?.onboarded === 'boolean' ? { onboarded: extra.onboarded } : {}),
       likedTrackIds: [],
       likedArtistIds: [],
-      followingArtistIds: [],
+      followingArtistIds: cleanFavoriteArtistIds,
       playlists: [],
       applicationStatus,
       termsAcceptedAt: nowIso,
@@ -370,11 +387,14 @@ export async function registerUserAccount(
         doc(db, 'artists', artistId),
         {
           id: artistId,
+          ownerId: fbUser.uid,
+          ownerUserId: fbUser.uid,
+          claimedByUserId: fbUser.uid,
           name: cleanName,
           handle: `@${finalHandle}`,
           country: newUser.country || 'Malawi',
           location: newUser.country || 'Malawi',
-          genres: ['Afro-Fusion'],
+          genres: cleanPreferredGenres.length > 0 ? cleanPreferredGenres.slice(0, 3) : ['Afro-Fusion'],
           bio: extra?.bio || '',
           avatar: newUser.avatar,
           banner: '',
@@ -390,8 +410,6 @@ export async function registerUserAccount(
           joinedDate: nowIso,
           socials: {},
           contactEmail: cleanEmail,
-          ownerUserId: fbUser.uid,
-          claimedByUserId: fbUser.uid,
         },
         { merge: true }
       );
@@ -399,6 +417,15 @@ export async function registerUserAccount(
 
     await syncUserRecord(newUser);
     await claimHandleRecord(finalHandle, fbUser.uid);
+    if (cleanFavoriteArtistIds.length > 0) {
+      await Promise.all(
+        cleanFavoriteArtistIds.map((favArtistId) =>
+          updateDoc(doc(db, 'artists', favArtistId), {
+            followersCount: increment(1),
+          }).catch(() => {})
+        )
+      );
+    }
     clearRateLimit('register');
 
     return {

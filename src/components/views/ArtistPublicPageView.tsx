@@ -144,9 +144,11 @@ export const ArtistPublicPageView: React.FC = () => {
 
   const isOwner = Boolean(
     currentUser &&
-      (artist.ownerUserId === currentUser.id ||
-        artist.claimedByUserId === currentUser.id ||
-        (currentUser.artistId === artist.id && !artist.ownerUserId && !artist.claimedByUserId))
+      (artist.ownerId
+        ? artist.ownerId === currentUser.id
+        : artist.ownerUserId === currentUser.id ||
+          artist.claimedByUserId === currentUser.id ||
+          (currentUser.artistId === artist.id && !artist.ownerUserId && !artist.claimedByUserId))
   );
 
   const handlePlayPopular = () => {

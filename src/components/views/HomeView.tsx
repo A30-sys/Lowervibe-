@@ -306,11 +306,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
       .slice(0, 8);
   }, [playlists, publicTracks]);
 
-  // Personalized Shelf 1: Daily Mix (prefers user's liked/played genres, otherwise varied top tracks; min 3 items)
+  // Personalized Shelf 1: Daily Mix (prefers user's signup/liked/played genres, otherwise varied top tracks; min 3 items)
   const dailyMixTracks = useMemo(() => {
     if (publicTracks.length < 3) return [];
     const likedSet = new Set(currentUser?.likedTrackIds || []);
     const affinityGenres = new Set<string>();
+    for (const g of currentUser?.preferredGenres || []) {
+      if (g) affinityGenres.add(g.trim().toLowerCase());
+    }
     for (const t of publicTracks) {
       if (likedSet.has(t.id) && t.genre) affinityGenres.add(t.genre.toLowerCase());
     }
@@ -324,7 +327,17 @@ export const HomeView: React.FC<HomeViewProps> = ({
         : publicTracks;
     const pool = matching.length >= 3 ? matching : publicTracks;
     return pool.slice(0, 8);
-  }, [publicTracks, currentUser?.likedTrackIds, playHistory]);
+  }, [publicTracks, currentUser?.likedTrackIds, currentUser?.preferredGenres, playHistory]);
+
+  const preferredGenreTracks = useMemo(() => {
+    const picked = (currentUser?.preferredGenres || []).map((g) => g.trim().toLowerCase()).filter(Boolean);
+    if (picked.length === 0) return [];
+    const pickedSet = new Set(picked);
+    return publicTracks
+      .filter((t) => t.genre && pickedSet.has(t.genre.trim().toLowerCase()))
+      .sort((a, b) => (b.plays || 0) - (a.plays || 0))
+      .slice(0, 10);
+  }, [publicTracks, currentUser?.preferredGenres]);
 
   // Personalized Shelf 2: Because you played [LastTrack] (min 3 similar tracks)
   const becauseYouPlayed = useMemo(() => {
@@ -689,6 +702,23 @@ export const HomeView: React.FC<HomeViewProps> = ({
             })}
           </div>
         </section>
+      )}
+
+      {preferredGenreTracks.length > 0 && (
+        <HorizontalTrackShelf
+          title="Picked for your genres"
+          subtitle={`Based on ${(currentUser?.preferredGenres || []).slice(0, 3).join(', ')}`}
+          items={preferredGenreTracks}
+          minItems={1}
+          currentTrackId={currentTrack?.id}
+          isPlaying={isPlaying}
+          onPlayTrack={handleTrackPlay}
+          onPlayAll={(list) => {
+            playTrackList(list, 0);
+            showToast('Playing your genre picks');
+          }}
+          onSelectArtist={onSelectArtist}
+        />
       )}
 
       {/* Personalized Shelves (automatically hidden when < 3 items) */}

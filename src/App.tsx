@@ -8,6 +8,7 @@ import { ReauthModal } from './components/auth/ReauthModal';
 import { AuthModal } from './components/AuthModal';
 import { CelebrationModal } from './components/CelebrationModal';
 import { CookieBanner } from './components/common/CookieBanner';
+import { PullToRefresh } from './components/common/PullToRefresh';
 import { StickyMobileCta } from './components/common/StickyMobileCta';
 import { CrashRecoveryHandler } from './components/CrashRecoveryHandler';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -169,6 +170,35 @@ function AppContent() {
         (window.navigator as unknown as { standalone?: boolean }).standalone === true ||
         searchParams.get('standalone') === 'artist')
   );
+
+  // Prompt incomplete Google / Phone / legacy accounts to pick gender, age, genres & artists before entering
+  useEffect(() => {
+    if (!authReady || !currentUser || isAdmin) {
+      setIsOnboardingOpen(false);
+      return;
+    }
+    let locallyDone = false;
+    try {
+      locallyDone = localStorage.getItem(`lowervibe_onboarded_${currentUser.id}`) === 'true';
+    } catch {}
+    const needsSetup =
+      !currentUser.onboarded &&
+      !locallyDone &&
+      (!currentUser.gender || !currentUser.age || !(currentUser.preferredGenres?.length));
+    if (needsSetup) {
+      setIsOnboardingOpen(true);
+    } else {
+      setIsOnboardingOpen(false);
+    }
+  }, [
+    authReady,
+    currentUser?.id,
+    currentUser?.onboarded,
+    currentUser?.gender,
+    currentUser?.age,
+    currentUser?.preferredGenres?.length,
+    isAdmin,
+  ]);
 
   // When an approved artist launches the standalone WebApp, open straight into Studio / Artist Page
   useEffect(() => {
@@ -537,59 +567,69 @@ function AppContent() {
         </div>
       )}
 
-      {/* Main Content Container with dynamic clearance matching active Mini-Player state */}
-      <main
-        className={`flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 pt-5 mb-0 transition-[padding] duration-200 ${
-          isPlayerMounted && !isPlayerExiting ? 'pb-40 md:pb-28' : 'pb-20 md:pb-0'
-        }`}
+      {/* Main Content Container with interactive Pull-to-Refresh + dynamic Mini-Player clearance */}
+      <PullToRefresh
+        disabled={
+          isOnboardingOpen ||
+          isSearchOpen ||
+          isAuthModalOpen ||
+          authModalOpen ||
+          Boolean(activeDetailTrack || activeShareTrack || selectedArtistModal)
+        }
       >
-        <div key={currentRoute.pathname} className="animate-fadeIn">
-          {currentRoute.route === 'home' && (
-            <HomeView
-              onSelectArtist={handleSelectArtist}
-              onOpenTrackDetails={handleOpenTrackDetails}
-              onOpenLegal={openLegalModal}
-              onOpenStudio={() => handleSelectTab('upload')}
-              onSelectCategory={handleSelectCategory}
-            />
-          )}
+        <main
+          className={`flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 pt-5 mb-0 transition-[padding] duration-200 ${
+            isPlayerMounted && !isPlayerExiting ? 'pb-40 md:pb-28' : 'pb-20 md:pb-0'
+          }`}
+        >
+          <div key={currentRoute.pathname} className="animate-fadeIn">
+            {currentRoute.route === 'home' && (
+              <HomeView
+                onSelectArtist={handleSelectArtist}
+                onOpenTrackDetails={handleOpenTrackDetails}
+                onOpenLegal={openLegalModal}
+                onOpenStudio={() => handleSelectTab('upload')}
+                onSelectCategory={handleSelectCategory}
+              />
+            )}
 
-          {currentRoute.route === 'discover' && (
-            <DiscoverView
-              onSelectArtist={handleSelectArtist}
-              onOpenTrackDetails={handleOpenTrackDetails}
-            />
-          )}
+            {currentRoute.route === 'discover' && (
+              <DiscoverView
+                onSelectArtist={handleSelectArtist}
+                onOpenTrackDetails={handleOpenTrackDetails}
+              />
+            )}
 
-          {currentRoute.route === 'artists' && <ArtistsRosterView />}
+            {currentRoute.route === 'artists' && <ArtistsRosterView />}
 
-          {currentRoute.route === 'artist_detail' && <ArtistPublicPageView />}
+            {currentRoute.route === 'artist_detail' && <ArtistPublicPageView />}
 
-          {currentRoute.route === 'track_detail' && <TrackPublicPageView />}
+            {currentRoute.route === 'track_detail' && <TrackPublicPageView />}
 
-          {currentRoute.route === 'library' && (
-            <LibraryView onOpenTrackDetails={handleOpenTrackDetails} />
-          )}
+            {currentRoute.route === 'library' && (
+              <LibraryView onOpenTrackDetails={handleOpenTrackDetails} />
+            )}
 
-          {currentRoute.route === 'studio' && (
-            <StudioView onOpenTrackDetails={handleOpenTrackDetails} />
-          )}
+            {currentRoute.route === 'studio' && (
+              <StudioView onOpenTrackDetails={handleOpenTrackDetails} />
+            )}
 
-          {currentRoute.route === 'account' && <AccountView />}
+            {currentRoute.route === 'account' && <AccountView />}
 
-          {currentRoute.route === 'search' && (
-            <SearchResultsView onOpenTrackDetails={handleOpenTrackDetails} />
-          )}
+            {currentRoute.route === 'search' && (
+              <SearchResultsView onOpenTrackDetails={handleOpenTrackDetails} />
+            )}
 
-          {currentRoute.route === 'thank_you' && <ThankYouView />}
+            {currentRoute.route === 'thank_you' && <ThankYouView />}
 
-          {currentRoute.route === 'not_found' && <NotFoundView />}
+            {currentRoute.route === 'not_found' && <NotFoundView />}
 
-          {currentRoute.route === 'server_error' && <ServerErrorView />}
-        </div>
+            {currentRoute.route === 'server_error' && <ServerErrorView />}
+          </div>
 
-        <Footer onOpenLegal={openLegalModal} onNavigate={navigate} />
-      </main>
+          <Footer onOpenLegal={openLegalModal} onNavigate={navigate} />
+        </main>
+      </PullToRefresh>
 
       {isPlayerMounted && (
         <BottomPlayer
@@ -684,11 +724,18 @@ function AppContent() {
       <FirstTimeTourModal
         isOpen={Boolean(
           currentUser &&
+            !isOnboardingOpen &&
             !currentUser.hasCompletedTour &&
             !tourDismissedInSession &&
             (() => {
               try {
-                return localStorage.getItem(`lowervibe_tour_completed_${currentUser.id}`) !== 'true';
+                const onboardedDone =
+                  Boolean(currentUser.onboarded) ||
+                  localStorage.getItem(`lowervibe_onboarded_${currentUser.id}`) === 'true';
+                return (
+                  onboardedDone &&
+                  localStorage.getItem(`lowervibe_tour_completed_${currentUser.id}`) !== 'true'
+                );
               } catch {
                 return true;
               }

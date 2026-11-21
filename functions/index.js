@@ -58,6 +58,7 @@ exports.onPlayCreate = onDocumentCreated('plays/{playId}', async (event) => {
 
     const isSelfPlay =
       Boolean(play.isArtistSelfPlay) ||
+      artistData.ownerId === play.userId ||
       artistData.ownerUserId === play.userId ||
       artistData.claimedByUserId === play.userId;
 

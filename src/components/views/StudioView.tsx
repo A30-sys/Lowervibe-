@@ -272,33 +272,42 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
   const [upgradeBio, setUpgradeBio] = useState(currentUser?.bio || '');
   const [isSubmittingApplication, setIsSubmittingApplication] = useState(false);
 
-  // Strict owner-only creator artist profile resolution (never match by display name)
+  // Strict owner-only creator artist profile resolution matching ownerId (or legacy ownerUserId)
   const currentArtist = useMemo(() => {
     if (!currentUser) return null;
+    const ownedByOwnerId = artists.find((a) => a.ownerId === currentUser.id);
+    if (ownedByOwnerId) return ownedByOwnerId;
+
+    const ownedByLegacy = artists.find(
+      (a) =>
+        !a.ownerId &&
+        (a.ownerUserId === currentUser.id || a.claimedByUserId === currentUser.id)
+    );
+    if (ownedByLegacy) return ownedByLegacy;
+
     if (currentUser.artistId) {
       const byId = artists.find(
         (a) =>
           a.id === currentUser.artistId &&
-          (!a.ownerUserId || a.ownerUserId === currentUser.id) &&
-          (!a.claimedByUserId || a.claimedByUserId === currentUser.id)
+          !a.ownerId &&
+          !a.ownerUserId &&
+          !a.claimedByUserId
       );
       if (byId) return byId;
     }
-    return (
-      artists.find(
-        (a) => a.ownerUserId === currentUser.id || a.claimedByUserId === currentUser.id
-      ) || null
-    );
+    return null;
   }, [artists, currentUser]);
 
   const isVerifiedStudioOwner = Boolean(
     currentUser &&
       currentArtist &&
-      (currentArtist.ownerUserId === currentUser.id ||
-        currentArtist.claimedByUserId === currentUser.id ||
-        (!currentArtist.ownerUserId &&
-          !currentArtist.claimedByUserId &&
-          currentUser.artistId === currentArtist.id))
+      (currentArtist.ownerId
+        ? currentArtist.ownerId === currentUser.id
+        : currentArtist.ownerUserId === currentUser.id ||
+          currentArtist.claimedByUserId === currentUser.id ||
+          (!currentArtist.ownerUserId &&
+            !currentArtist.claimedByUserId &&
+            currentUser.artistId === currentArtist.id))
   );
 
   // Sync deep-link shortcuts (?tab=withdrawals or ?view=artist-page from Artist WebApp)
@@ -1025,8 +1034,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
     );
   }
 
-  // Listener Artist Application Wait Page & Submission Gate
-  if (!isArtist && !isAdmin) {
+  // Listener / Non-owner Artist Application Wait Page & Submission Gate
+  // Note: Admin role does NOT bypass artist ownership in Studio; admins manage platform moderation in /administration.
+  if (!isArtist && !isVerifiedStudioOwner) {
     if (currentUser.applicationStatus === 'pending') {
       const app = currentUser.artistApplication;
       return (

@@ -37,12 +37,18 @@ service cloud.firestore {
 
     function isArtistOwner(artistId) {
       return isSignedIn() && (
-        resource.data.get('ownerUserId', '') == request.auth.uid
-        || resource.data.get('claimedByUserId', '') == request.auth.uid
+        resource.data.get('ownerId', '') == request.auth.uid
         || (
-          resource.data.get('ownerUserId', '') == ''
-          && resource.data.get('claimedByUserId', '') == ''
-          && hasLegacyUserArtistLink(artistId, request.auth.uid)
+          resource.data.get('ownerId', '') == ''
+          && (
+            resource.data.get('ownerUserId', '') == request.auth.uid
+            || resource.data.get('claimedByUserId', '') == request.auth.uid
+            || (
+              resource.data.get('ownerUserId', '') == ''
+              && resource.data.get('claimedByUserId', '') == ''
+              && hasLegacyUserArtistLink(artistId, request.auth.uid)
+            )
+          )
         )
       );
     }
@@ -51,12 +57,18 @@ service cloud.firestore {
       return isValidId(artistId)
         && exists(/databases/$(database)/documents/artists/$(artistId))
         && (
-          get(/databases/$(database)/documents/artists/$(artistId)).data.get('ownerUserId', '') == uid
-          || get(/databases/$(database)/documents/artists/$(artistId)).data.get('claimedByUserId', '') == uid
+          get(/databases/$(database)/documents/artists/$(artistId)).data.get('ownerId', '') == uid
           || (
-            get(/databases/$(database)/documents/artists/$(artistId)).data.get('ownerUserId', '') == ''
-            && get(/databases/$(database)/documents/artists/$(artistId)).data.get('claimedByUserId', '') == ''
-            && hasLegacyUserArtistLink(artistId, uid)
+            get(/databases/$(database)/documents/artists/$(artistId)).data.get('ownerId', '') == ''
+            && (
+              get(/databases/$(database)/documents/artists/$(artistId)).data.get('ownerUserId', '') == uid
+              || get(/databases/$(database)/documents/artists/$(artistId)).data.get('claimedByUserId', '') == uid
+              || (
+                get(/databases/$(database)/documents/artists/$(artistId)).data.get('ownerUserId', '') == ''
+                && get(/databases/$(database)/documents/artists/$(artistId)).data.get('claimedByUserId', '') == ''
+                && hasLegacyUserArtistLink(artistId, uid)
+              )
+            )
           )
         );
     }
@@ -65,6 +77,9 @@ service cloud.firestore {
       return data.id == userId
         && data.name is string && data.name.size() > 0 && data.name.size() <= 100
         && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
+        && (!('gender' in data) || data.gender in ['male', 'female', 'non-binary', 'prefer_not_to_say'])
+        && (!('age' in data) || (data.age is number && data.age >= 13 && data.age <= 120))
+        && (!('preferredGenres' in data) || (data.preferredGenres is list && data.preferredGenres.size() <= 30 && (data.preferredGenres.size() == 0 || data.preferredGenres[0] is string)))
         && (!('role' in data) || data.role in ['listener', 'artist'] || isAdmin())
         && (!('isAdmin' in data) || data.isAdmin == false || isAdmin())
         && (!('artistId' in data) || data.artistId == null || data.artistId == '' || isArtistDocOwnedBy(data.artistId, userId));
@@ -82,6 +97,10 @@ service cloud.firestore {
         'bio',
         'city',
         'country',
+        'gender',
+        'age',
+        'preferredGenres',
+        'preferredMoods',
         'role',
         'artistId',
         'applicationStatus',
@@ -107,6 +126,10 @@ service cloud.firestore {
         && data.get('isDeactivated', false) == prev.get('isDeactivated', false)
         && (!('name' in data) || (data.name is string && data.name.size() > 0 && data.name.size() <= 100))
         && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
+        && (!('gender' in data) || data.gender in ['male', 'female', 'non-binary', 'prefer_not_to_say'])
+        && (!('age' in data) || (data.age is number && data.age >= 13 && data.age <= 120))
+        && (!('preferredGenres' in data) || (data.preferredGenres is list && data.preferredGenres.size() <= 30 && (data.preferredGenres.size() == 0 || data.preferredGenres[0] is string)))
+        && (!('preferredMoods' in data) || (data.preferredMoods is list && data.preferredMoods.size() <= 20 && (data.preferredMoods.size() == 0 || data.preferredMoods[0] is string)))
         && (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 4096))
         && (!('banner' in data) || (data.banner is string && data.banner.size() <= 4096))
         && (
@@ -124,7 +147,9 @@ service cloud.firestore {
     }
 
     function isValidArtistCreate(data, uid) {
-      return data.ownerUserId == uid
+      return (data.get('ownerId', '') == uid || data.get('ownerUserId', '') == uid)
+        && (!('ownerId' in data) || data.ownerId == uid)
+        && (!('ownerUserId' in data) || data.ownerUserId == uid)
         && (!('claimedByUserId' in data) || data.claimedByUserId == uid)
         && data.name is string && data.name.size() > 0 && data.name.size() <= 100
         && (!('bio' in data) || (data.bio is string && data.bio.size() <= 1000))
@@ -156,6 +181,7 @@ service cloud.firestore {
         && meetsAutoEligibilityBaseline(prev);
 
       return data.diff(prev).affectedKeys().hasOnly([
+        'ownerId',
         'name',
         'handle',
         'bio',
@@ -199,6 +225,10 @@ service cloud.firestore {
         && data.get('verified', false) == prev.get('verified', false)
         && data.get('isVerified', false) == prev.get('isVerified', false)
         && data.get('earningsBalanceMwk', 0) == prev.get('earningsBalanceMwk', 0)
+        && (
+          data.get('ownerId', '') == prev.get('ownerId', '')
+          || (prev.get('ownerId', '') == '' && data.get('ownerId', '') == request.auth.uid)
+        )
         && data.get('ownerUserId', '') == prev.get('ownerUserId', '')
         && data.get('claimedByUserId', '') == prev.get('claimedByUserId', '');
     }
@@ -313,7 +343,7 @@ service cloud.firestore {
           ])
         )
         || (
-          // 3. Admin moderation ONLY (verification, monetization, strikes) — cannot rewrite artist bio/name/photos
+          // 3. Admin moderation ONLY (verification, monetization, strikes) — ZERO write access to artist profile fields or existing ownerId
           isAdmin()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'verified',
@@ -331,8 +361,21 @@ service cloud.firestore {
             'monetizationRevokedReason',
             'earningsBalanceMwk',
             'copyrightStrikes',
+            'updatedAt'
+          ])
+        )
+        || (
+          // 4. Admin assigning initial ownership ONLY when an artist profile is currently unclaimed
+          isAdmin()
+          && resource.data.get('ownerId', '') == ''
+          && resource.data.get('ownerUserId', '') == ''
+          && resource.data.get('claimedByUserId', '') == ''
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'ownerId',
             'ownerUserId',
             'claimedByUserId',
+            'verified',
+            'isVerified',
             'updatedAt'
           ])
         )

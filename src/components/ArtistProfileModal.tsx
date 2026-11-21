@@ -72,9 +72,11 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
 
   const isOwner = Boolean(
     currentUser &&
-      (artist.ownerUserId === currentUser.id ||
-        artist.claimedByUserId === currentUser.id ||
-        (currentUser.artistId === artist.id && !artist.ownerUserId && !artist.claimedByUserId))
+      (artist.ownerId
+        ? artist.ownerId === currentUser.id
+        : artist.ownerUserId === currentUser.id ||
+          artist.claimedByUserId === currentUser.id ||
+          (currentUser.artistId === artist.id && !artist.ownerUserId && !artist.claimedByUserId))
   );
 
   return (

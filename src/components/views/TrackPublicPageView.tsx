@@ -105,11 +105,13 @@ export const TrackPublicPageView: React.FC = () => {
         ? track.uploadedByUserId === currentUser.id
         : Boolean(
             artistForTrack &&
-              (artistForTrack.ownerUserId === currentUser.id ||
-                artistForTrack.claimedByUserId === currentUser.id ||
-                (!artistForTrack.ownerUserId &&
-                  !artistForTrack.claimedByUserId &&
-                  currentUser.artistId === artistForTrack.id))
+              (artistForTrack.ownerId
+                ? artistForTrack.ownerId === currentUser.id
+                : artistForTrack.ownerUserId === currentUser.id ||
+                  artistForTrack.claimedByUserId === currentUser.id ||
+                  (!artistForTrack.ownerUserId &&
+                    !artistForTrack.claimedByUserId &&
+                    currentUser.artistId === artistForTrack.id))
           ))
   );
 

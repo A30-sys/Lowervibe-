@@ -19,6 +19,8 @@ import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 
+const FIRESTORE_CACHE_BYTES = 50 * 1024 * 1024;
+
 function createFirestoreInstance(): Firestore {
   const databaseId = firebaseConfig.firestoreDatabaseId;
   try {
@@ -28,6 +30,7 @@ function createFirestoreInstance(): Firestore {
         experimentalForceLongPolling: true,
         ignoreUndefinedProperties: true,
         localCache: persistentLocalCache({
+          cacheSizeBytes: FIRESTORE_CACHE_BYTES,
           tabManager: persistentMultipleTabManager(),
         }),
       },
