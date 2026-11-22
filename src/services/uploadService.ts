@@ -24,6 +24,14 @@ export const MAX_RAW_IMAGE_INPUT_BYTES = 25 * 1024 * 1024; // 25 MB raw pre-comp
 // Server chunked upload & Firestore persistent mirror limits
 const MEDIA_CHUNK_BYTES = 384 * 1024; // 384 KB raw (~512 KB base64, well under Firestore 1 MB doc cap)
 const MAX_FIRESTORE_MIRROR_BYTES = 12 * 1024 * 1024; // Persist up to 12 MB directly in Firestore chunks
+const MAX_INLINE_TRACK_COVER_BYTES = 220 * 1024; // Safe inline fallback size for track coverArt on static hosting
+
+function getCloudinaryConfig(): { cloudName: string; uploadPreset: string } | null {
+  const cloudName = String(import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || '').trim();
+  const uploadPreset = String(import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || '').trim();
+  if (!cloudName || !uploadPreset) return null;
+  return { cloudName, uploadPreset };
+}
 
 const ALLOWED_AUDIO_EXTENSIONS = new Set([
   'mp3',
@@ -459,6 +467,165 @@ async function persistMediaToFirestore(params: {
   }
 }
 
+function createCloudinaryUploadController(params: {
+  storagePath: string;
+  fileOrBlob: Blob | File;
+  metadata?: UploadMetadata;
+  onProgress?: (snapshot: UploadProgressSnapshot) => void;
+}): ResumableUploadController {
+  const config = getCloudinaryConfig();
+  const contentType =
+    params.metadata?.contentType || params.fileOrBlob.type || 'application/octet-stream';
+  const totalBytes = Math.max(1, params.fileOrBlob.size);
+
+  let canceled = false;
+  let activeXhr: XMLHttpRequest | null = null;
+
+  const promise = (async (): Promise<ResumableUploadResult> => {
+    if (!config) {
+      throw new Error('Cloudinary upload preset is not configured.');
+    }
+
+    params.onProgress?.({
+      percent: 3,
+      bytesTransferred: 0,
+      totalBytes,
+      state: 'running',
+    });
+
+    const formData = new FormData();
+    const filename =
+      params.fileOrBlob instanceof File && params.fileOrBlob.name
+        ? params.fileOrBlob.name
+        : `upload_${Date.now()}`;
+    formData.append('file', params.fileOrBlob, filename);
+    formData.append('upload_preset', config.uploadPreset);
+
+    return new Promise<ResumableUploadResult>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      activeXhr = xhr;
+      xhr.open(
+        'POST',
+        `https://api.cloudinary.com/v1_1/${encodeURIComponent(config.cloudName)}/auto/upload`,
+        true
+      );
+      xhr.timeout = 180000;
+
+      xhr.upload.onprogress = (evt) => {
+        if (!evt.lengthComputable || canceled) return;
+        const percent = Math.max(2, Math.min(98, Math.round((evt.loaded / evt.total) * 98)));
+        params.onProgress?.({
+          percent,
+          bytesTransferred: evt.loaded,
+          totalBytes: evt.total || totalBytes,
+          state: 'running',
+        });
+      };
+
+      xhr.onload = () => {
+        activeXhr = null;
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const parsed = JSON.parse(xhr.responseText || '{}') as {
+              secure_url?: string;
+              url?: string;
+              public_id?: string;
+              bytes?: number;
+            };
+            const finalUrl = parsed.secure_url || parsed.url;
+            if (!finalUrl) {
+              reject(new Error('Cloudinary response did not include a file URL.'));
+              return;
+            }
+            const finalBytes = parsed.bytes || totalBytes;
+            params.onProgress?.({
+              percent: 100,
+              bytesTransferred: finalBytes,
+              totalBytes: finalBytes,
+              state: 'success',
+            });
+            resolve({
+              downloadUrl: finalUrl,
+              storagePath: `cloudinary/${parsed.public_id || makeAssetId('cld')}`,
+              bytes: finalBytes,
+              contentType,
+            });
+          } catch {
+            reject(new Error('Invalid response received from Cloudinary upload service.'));
+          }
+        } else {
+          let errDetail = xhr.statusText || `HTTP ${xhr.status}`;
+          try {
+            const parsedErr = JSON.parse(xhr.responseText || '{}') as {
+              error?: { message?: string };
+            };
+            if (parsedErr.error?.message) {
+              errDetail = parsedErr.error.message;
+            }
+          } catch {
+            // keep status text
+          }
+          params.onProgress?.({
+            percent: 0,
+            bytesTransferred: 0,
+            totalBytes,
+            state: 'error',
+          });
+          reject(new Error(`Cloudinary upload failed: ${errDetail}`));
+        }
+      };
+
+      xhr.onerror = () => {
+        activeXhr = null;
+        params.onProgress?.({
+          percent: 0,
+          bytesTransferred: 0,
+          totalBytes,
+          state: 'error',
+        });
+        reject(new Error('Network error uploading media to Cloudinary.'));
+      };
+
+      xhr.ontimeout = () => {
+        activeXhr = null;
+        params.onProgress?.({
+          percent: 0,
+          bytesTransferred: 0,
+          totalBytes,
+          state: 'error',
+        });
+        reject(new Error('Cloudinary upload timed out. Please retry on a stronger connection.'));
+      };
+
+      xhr.onabort = () => {
+        activeXhr = null;
+        params.onProgress?.({
+          percent: 0,
+          bytesTransferred: 0,
+          totalBytes,
+          state: 'canceled',
+        });
+        reject(new Error('Upload canceled.'));
+      };
+
+      xhr.send(formData);
+    });
+  })();
+
+  return {
+    task: null,
+    promise,
+    pause: () => false,
+    resume: () => false,
+    cancel: () => {
+      if (canceled) return false;
+      canceled = true;
+      activeXhr?.abort();
+      return true;
+    },
+  };
+}
+
 function createServerChunkedUploadController(params: {
   storagePath: string;
   fileOrBlob: Blob | File;
@@ -519,16 +686,26 @@ function createServerChunkedUploadController(params: {
 
       xhr.onload = () => {
         activeXhr = null;
-        if (xhr.status >= 200 && xhr.status < 300) {
+        const respType = (xhr.getResponseHeader('content-type') || '').toLowerCase();
+        if (xhr.status >= 200 && xhr.status < 300 && respType.includes('application/json')) {
           try {
-            const parsed = JSON.parse(xhr.responseText || '{}') as { url?: string };
-            resolve(parsed.url || `/api/media/${assetId}`);
+            const parsed = JSON.parse(xhr.responseText || '{}') as {
+              ok?: boolean;
+              url?: string;
+            };
+            if (parsed.ok && typeof parsed.url === 'string' && parsed.url.startsWith('/api/media/')) {
+              resolve(parsed.url);
+              return;
+            }
           } catch {
-            resolve(`/api/media/${assetId}`);
+            // fall through to unavailable error
           }
-        } else {
-          reject(new Error(`Server upload failed (${xhr.status}): ${xhr.statusText || 'Error'}`));
         }
+        if (respType.includes('text/html') || xhr.status === 404 || xhr.status === 405) {
+          reject(new Error('MEDIA_SERVER_UNAVAILABLE'));
+          return;
+        }
+        reject(new Error(`Server upload failed (${xhr.status}): ${xhr.statusText || 'Error'}`));
       };
 
       xhr.onerror = () => {
@@ -600,6 +777,9 @@ function createServerChunkedUploadController(params: {
             serverUrl = await uploadSingleChunk(chunkIndex, slice, start);
             break;
           } catch (err) {
+            if (err instanceof Error && err.message === 'MEDIA_SERVER_UNAVAILABLE') {
+              throw err;
+            }
             if (canceled) throw err;
             if (paused) {
               await waitWhilePaused();
@@ -634,57 +814,85 @@ function createServerChunkedUploadController(params: {
       throw new Error('Upload canceled.');
     }
 
-    let firestoreSaved = false;
-    if (smallAssetMirrorPromise) {
-      firestoreSaved = await Promise.race([
-        smallAssetMirrorPromise,
-        new Promise<boolean>((resolve) =>
-          window.setTimeout(() => resolve(false), serverSucceeded ? 3500 : 12000)
-        ),
-      ]);
-    } else if (!serverSucceeded) {
-      // Only push large chunked audio to Firestore if Express media endpoint could not save it
-      firestoreSaved = await persistMediaToFirestore({
-        assetId,
-        fileOrBlob: params.fileOrBlob,
-        contentType,
-        ownerId,
+    if (serverSucceeded) {
+      if (smallAssetMirrorPromise) {
+        await Promise.race([
+          smallAssetMirrorPromise,
+          new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), 3500)),
+        ]);
+      } else if (params.fileOrBlob.size <= 4 * 1024 * 1024) {
+        // Non-blocking gentle backup after server upload succeeded so Firestore listeners never stall
+        void persistMediaToFirestore({
+          assetId,
+          fileOrBlob: params.fileOrBlob,
+          contentType,
+          ownerId,
+        });
+      }
+
+      params.onProgress?.({
+        percent: 100,
+        bytesTransferred: totalBytes,
+        totalBytes,
+        state: 'success',
       });
-    } else if (params.fileOrBlob.size <= 4 * 1024 * 1024) {
-      // Non-blocking gentle backup after server upload succeeded so Firestore listeners never stall
-      void persistMediaToFirestore({
-        assetId,
-        fileOrBlob: params.fileOrBlob,
+
+      return {
+        downloadUrl: serverUrl,
+        storagePath: `mediaAssets/${assetId}`,
+        bytes: totalBytes,
         contentType,
-        ownerId,
-      });
+      };
     }
 
-    if (!serverSucceeded && !firestoreSaved) {
+    // Static hosting (no Express /api/media server) and no Firebase Storage / Cloudinary configured:
+    // Allow compact track cover art to embed cleanly as a data URI without needing a paid bucket.
+    const isTrackCover =
+      params.storagePath.includes('/cover/') &&
+      contentType.startsWith('image/') &&
+      params.fileOrBlob.size <= MAX_INLINE_TRACK_COVER_BYTES;
+
+    if (isTrackCover) {
+      if (smallAssetMirrorPromise) {
+        void smallAssetMirrorPromise;
+      }
+      const b64 = await blobToBase64(params.fileOrBlob);
       params.onProgress?.({
-        percent: 0,
-        bytesTransferred: 0,
+        percent: 100,
+        bytesTransferred: totalBytes,
         totalBytes,
-        state: 'error',
+        state: 'success',
       });
-      throw serverError instanceof Error
-        ? serverError
-        : new Error('Upload could not complete. Check your internet connection and retry.');
+      return {
+        downloadUrl: `data:${contentType};base64,${b64}`,
+        storagePath: `inline/${assetId}`,
+        bytes: totalBytes,
+        contentType,
+      };
     }
 
     params.onProgress?.({
-      percent: 100,
-      bytesTransferred: totalBytes,
+      percent: 0,
+      bytesTransferred: 0,
       totalBytes,
-      state: 'success',
+      state: 'error',
     });
 
-    return {
-      downloadUrl: serverUrl,
-      storagePath: `mediaAssets/${assetId}`,
-      bytes: totalBytes,
-      contentType,
-    };
+    if (serverError instanceof Error && serverError.message === 'MEDIA_SERVER_UNAVAILABLE') {
+      const isAudio = contentType.startsWith('audio/') || params.storagePath.includes('/audio/');
+      if (isAudio) {
+        throw new Error(
+          'Free file storage is not connected yet. Add free Cloudinary (VITE_CLOUDINARY_CLOUD_NAME & VITE_CLOUDINARY_UPLOAD_PRESET) or paste a direct HTTPS audio link (e.g. Archive.org or Supabase Storage).'
+        );
+      }
+      throw new Error(
+        'Image upload storage is not connected yet. Add free Cloudinary (VITE_CLOUDINARY_CLOUD_NAME & VITE_CLOUDINARY_UPLOAD_PRESET) in .env.local before building.'
+      );
+    }
+
+    throw serverError instanceof Error
+      ? serverError
+      : new Error('Upload could not complete. Check your internet connection and retry.');
   })();
 
   return {
@@ -746,8 +954,13 @@ export function createResumableUpload(params: {
       throw new Error('Upload canceled.');
     }
 
+    const createFallbackController = () =>
+      getCloudinaryConfig()
+        ? createCloudinaryUploadController(params)
+        : createServerChunkedUploadController(params);
+
     if (!bucketReady) {
-      activeFallback = createServerChunkedUploadController(params);
+      activeFallback = createFallbackController();
       if (paused) activeFallback.pause();
       if (canceled) activeFallback.cancel();
       return activeFallback.promise;
@@ -852,7 +1065,9 @@ export function createResumableUpload(params: {
       if (err instanceof Error && err.message === 'STORAGE_STALL_FALLBACK' && !canceled) {
         cachedStorageBucketAvailable = false;
         activeFirebaseTask = null;
-        activeFallback = createServerChunkedUploadController(params);
+        activeFallback = getCloudinaryConfig()
+          ? createCloudinaryUploadController(params)
+          : createServerChunkedUploadController(params);
         if (paused) activeFallback.pause();
         return activeFallback.promise;
       }
@@ -1027,6 +1242,9 @@ export async function deleteUploadedStoragePaths(
   await Promise.all(
     validPaths.map(async (storagePath) => {
       try {
+        if (storagePath.startsWith('cloudinary/') || storagePath.startsWith('inline/')) {
+          return;
+        }
         if (storagePath.startsWith('mediaAssets/')) {
           const assetId = storagePath.slice('mediaAssets/'.length);
           if (assetId) {
