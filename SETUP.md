@@ -7,7 +7,7 @@ Follow these steps to run LOWERVIBE with live Firebase Auth, Storage, Firestore 
 ## 1. Prerequisites
 - Node.js 20+
 - Firebase CLI: `npm install -g firebase-tools`
-- Logged-in Firebase account owning project `intelligent-exchange-x3rp2`
+- Logged-in Firebase account owning project `lowervibemusic`
 
 ---
 
@@ -27,7 +27,7 @@ Under **Authentication → Settings → Authorized domains**, add:
 From the project root:
 ```bash
 firebase login
-firebase use intelligent-exchange-x3rp2
+firebase use lowervibemusic
 firebase deploy --only firestore:rules,storage
 ```
 

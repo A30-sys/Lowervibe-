@@ -27,7 +27,7 @@ const SIGNING_KEY_PATH = path.join(LEDGER_DIR, '.server_signing_key');
 const PRIMARY_ADMIN_EMAIL = 'odulamw@gmail.com';
 
 let FIREBASE_API_KEY = '';
-let FIREBASE_PROJECT_ID = 'intelligent-exchange-x3rp2';
+let FIREBASE_PROJECT_ID = 'lowervibemusic';
 let FIRESTORE_DATABASE_ID = 'ai-studio-lowervibe-b2e45d28-38e1-4e03-bbe9-11eddd11a756';
 try {
   const cfgPath = path.resolve(__dirname, 'firebase-applet-config.json');
