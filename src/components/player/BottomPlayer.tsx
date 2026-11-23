@@ -1,6 +1,7 @@
 import {
   AlertCircle,
   Heart,
+  ListMusic,
   Maximize2,
   Pause,
   Play,
@@ -14,14 +15,15 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { audioEngine } from '../../services/audioEngine';
-import { DEFAULT_ARTWORK_SVG } from '../../utils/artworkFallback';
+import { LOWERVIBE_ICON_ARTWORK } from '../../utils/artworkFallback';
 import { formatTime, isTrackLikedByUser } from '../../utils/formatters';
 import { triggerHaptic } from '../../utils/haptics';
+import { usePinnedPlayerSession } from '../../utils/playerSessionStore';
 
 interface DynamicVolumeCanvasProps {
   volume: number;
@@ -30,7 +32,7 @@ interface DynamicVolumeCanvasProps {
   onChangeVolume: (val: number) => void;
 }
 
-const DynamicVolumeCanvas: React.FC<DynamicVolumeCanvasProps> = ({
+const DynamicVolumeCanvas: React.FC<DynamicVolumeCanvasProps> = memo(({
   volume,
   isMuted,
   isPlaying,
@@ -225,7 +227,9 @@ const DynamicVolumeCanvas: React.FC<DynamicVolumeCanvasProps> = ({
       />
     </div>
   );
-};
+});
+
+DynamicVolumeCanvas.displayName = 'DynamicVolumeCanvas';
 
 interface BottomPlayerProps {
   onOpenDetails: () => void;
@@ -236,7 +240,7 @@ interface BottomPlayerProps {
   fallbackTrack?: import('../../types').Track | null;
 }
 
-export const BottomPlayer: React.FC<BottomPlayerProps> = ({
+const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
   onOpenArtist,
   onOpenFullscreen,
   onClosePlayer,
@@ -268,6 +272,7 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
     clearActiveTrack,
   } = useAudio();
 
+  const pinnedSession = usePinnedPlayerSession();
   const { currentUser, toggleLikeTrack } = useAuth();
   const { showToast } = useToast();
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
@@ -282,9 +287,28 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubTime, setScrubTime] = useState<number | null>(null);
 
-  const displayTrack = currentTrack || (isExiting ? fallbackTrack : null);
+  const displayTrack =
+    currentTrack ||
+    (isExiting ? fallbackTrack : null) ||
+    (pinnedSession.pinned ? pinnedSession.track : null);
+
+  const effectiveTime = currentTrack ? currentTime : pinnedSession.currentTime;
+  const effectiveDuration =
+    duration > 0
+      ? duration
+      : pinnedSession.duration || displayTrack?.durationSeconds || 0;
+  const effectiveVolume = currentTrack ? volume : pinnedSession.volume;
+  const effectiveMuted = currentTrack ? isMuted : pinnedSession.isMuted;
+  const effectiveRepeatMode = currentTrack ? repeatMode : pinnedSession.repeatMode;
+  const effectiveShuffling = currentTrack ? isShuffling : pinnedSession.isShuffling;
+
   const isPlayerActive = Boolean(
-    displayTrack && (isExiting || isPlaying || isMiniPlayerVisible || playbackState !== 'idle')
+    displayTrack &&
+      (isExiting ||
+        isPlaying ||
+        isMiniPlayerVisible ||
+        pinnedSession.pinned ||
+        playbackState !== 'idle')
   );
 
   useEffect(() => {
@@ -296,21 +320,24 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
   if (!isPlayerActive || !displayTrack) return null;
 
   const isLiked = isTrackLikedByUser(displayTrack, currentUser);
-  const activeTime = isScrubbing && scrubTime !== null ? scrubTime : currentTime;
-  const progressPercent = duration > 0 ? Math.min(100, Math.max(0, (activeTime / duration) * 100)) : 0;
+  const activeTime = isScrubbing && scrubTime !== null ? scrubTime : effectiveTime;
+  const progressPercent =
+    effectiveDuration > 0
+      ? Math.min(100, Math.max(0, (activeTime / effectiveDuration) * 100))
+      : 0;
 
   const computeTimeFromClientX = (clientX: number): number => {
     const el = scrubTrackRef.current;
-    if (!el || duration <= 0) return 0;
+    if (!el || effectiveDuration <= 0) return 0;
     const rect = el.getBoundingClientRect();
     if (rect.width <= 0) return 0;
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    return ratio * duration;
+    return ratio * effectiveDuration;
   };
 
   const handleScrubPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
-    if (duration <= 0 || isExiting) return;
+    if (effectiveDuration <= 0 || isExiting) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
 
     activePointerIdRef.current = e.pointerId;
@@ -319,7 +346,7 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
     } catch {}
 
     const nextTime = computeTimeFromClientX(e.clientX);
-    lastScrubTickPercentRef.current = (nextTime / duration) * 100;
+    lastScrubTickPercentRef.current = (nextTime / effectiveDuration) * 100;
     lastScrubTickAtRef.current = performance.now();
     triggerHaptic('tap');
     setIsScrubbing(true);
@@ -330,8 +357,8 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
     if (!isScrubbing || activePointerIdRef.current !== e.pointerId) return;
     e.stopPropagation();
     const nextTime = computeTimeFromClientX(e.clientX);
-    if (duration > 0) {
-      const nextPercent = (nextTime / duration) * 100;
+    if (effectiveDuration > 0) {
+      const nextPercent = (nextTime / effectiveDuration) * 100;
       const now = performance.now();
       if (
         Math.abs(nextPercent - lastScrubTickPercentRef.current) >= 2 &&
@@ -349,7 +376,7 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
     if (activePointerIdRef.current !== pointerId) return;
     activePointerIdRef.current = null;
 
-    if (shouldCommit && duration > 0) {
+    if (shouldCommit && effectiveDuration > 0) {
       const targetTime = clientX !== null ? computeTimeFromClientX(clientX) : scrubTime;
       if (targetTime !== null) {
         triggerHaptic('confirm');
@@ -377,16 +404,16 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
   };
 
   const handleScrubKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (duration <= 0) return;
+    if (effectiveDuration <= 0) return;
     const step = 5;
     if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
       e.preventDefault();
       triggerHaptic('tick');
-      seekTo(Math.min(duration, currentTime + step));
+      seekTo(Math.min(effectiveDuration, effectiveTime + step));
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
       e.preventDefault();
       triggerHaptic('tick');
-      seekTo(Math.max(0, currentTime - step));
+      seekTo(Math.max(0, effectiveTime - step));
     } else if (e.key === 'Home') {
       e.preventDefault();
       triggerHaptic('confirm');
@@ -394,7 +421,7 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
     } else if (e.key === 'End') {
       e.preventDefault();
       triggerHaptic('confirm');
-      seekTo(duration);
+      seekTo(effectiveDuration);
     }
   };
 
@@ -452,42 +479,42 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
 
   return (
     <div
-      className="fixed bottom-[68px] md:bottom-4 left-0 right-0 z-30 px-2 sm:px-4 pb-[env(safe-area-inset-bottom,0px)] pointer-events-none"
-      aria-label="Mini audio player"
+      className="fixed bottom-[64px] md:bottom-3 left-0 right-0 z-30 px-2 sm:px-4 pb-[env(safe-area-inset-bottom,0px)] pointer-events-none"
+      aria-label="Main audio player"
     >
-      <div className="relative max-w-4xl mx-auto">
+      <div className="relative max-w-5xl mx-auto">
         {/* Live floating scrub timestamp preview */}
-        {isScrubbing && scrubTime !== null && duration > 0 && (
+        {isScrubbing && scrubTime !== null && effectiveDuration > 0 && (
           <div
-            className="pointer-events-none absolute -top-9 z-40 -translate-x-1/2 px-2.5 py-1 rounded-full bg-[var(--lv-surface)] border border-[var(--lv-border-strong)] shadow-xl text-[11px] font-mono font-bold text-[var(--lv-text)] whitespace-nowrap"
+            className="pointer-events-none absolute -top-9 z-40 -translate-x-1/2 px-2.5 py-1 rounded-lg bg-[var(--lv-surface)] border border-[var(--lv-border-strong)] shadow-xl text-[11px] font-mono font-bold text-[var(--lv-text)] whitespace-nowrap tabular-nums"
             style={{
               left: `clamp(48px, ${progressPercent}%, calc(100% - 48px))`,
             }}
           >
             <span className="text-[var(--lv-accent-text)]">{formatTime(scrubTime)}</span>
-            <span className="text-[var(--lv-muted)]"> / {formatTime(duration)}</span>
+            <span className="text-[var(--lv-muted)]"> / {formatTime(effectiveDuration)}</span>
           </div>
         )}
 
         <div
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
-          className={`rounded-[20px] bg-[var(--lv-surface)]/95 backdrop-blur-2xl border border-[var(--lv-border-strong)] shadow-2xl ${
+          className={`rounded-2xl bg-[var(--lv-surface)]/95 backdrop-blur-2xl border border-[var(--lv-border-strong)] shadow-2xl ${
             isExiting
               ? 'animate-player-slide-down pointer-events-none'
               : 'animate-player-pop-up pointer-events-auto'
           }`}
         >
-          {/* Touch & pointer-enabled progress scrubber (isolated from swipe gestures) */}
+          {/* Touch & pointer-enabled progress scrubber */}
           <div
             ref={scrubTrackRef}
             role="slider"
             tabIndex={0}
             aria-label="Seek track position"
             aria-valuemin={0}
-            aria-valuemax={Math.round(duration)}
+            aria-valuemax={Math.round(effectiveDuration)}
             aria-valuenow={Math.round(activeTime)}
-            aria-valuetext={`${formatTime(activeTime)} of ${formatTime(duration)}`}
+            aria-valuetext={`${formatTime(activeTime)} of ${formatTime(effectiveDuration)}`}
             onPointerDown={handleScrubPointerDown}
             onPointerMove={handleScrubPointerMove}
             onPointerUp={handleScrubPointerUp}
@@ -496,14 +523,14 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
             onTouchStart={(e) => e.stopPropagation()}
             onTouchMove={(e) => e.stopPropagation()}
             onTouchEnd={(e) => e.stopPropagation()}
-            className="relative w-full pt-0 pb-3 -mb-2.5 touch-none select-none cursor-pointer group focus:outline-none"
+            className="relative w-full pt-0 pb-2.5 -mb-2 touch-none select-none cursor-pointer group focus:outline-none"
           >
             <div
-              className={`relative w-full rounded-t-[20px] bg-[var(--lv-elevated)] transition-[height] duration-150 ${
+              className={`relative w-full rounded-t-2xl bg-[var(--lv-elevated)] transition-[height] duration-150 ${
                 isScrubbing ? 'h-1.5' : 'h-[3px] group-hover:h-1.5'
               }`}
             >
-              <div className="w-full h-full rounded-t-[20px] overflow-hidden">
+              <div className="w-full h-full rounded-t-2xl overflow-hidden">
                 <div
                   className={`h-full bg-[var(--lv-accent)] ${
                     isScrubbing ? 'transition-none' : 'transition-[width] duration-150 ease-linear'
@@ -511,7 +538,7 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
-              {duration > 0 && (
+              {effectiveDuration > 0 && (
                 <div
                   className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 rounded-full bg-[var(--lv-accent)] shadow-md ring-2 ring-[var(--lv-surface)] transition-all duration-150 pointer-events-none ${
                     isScrubbing
@@ -524,98 +551,256 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
             </div>
           </div>
 
-        {/* Playback error alert bar */}
-        {playbackError && (
-          <div className="px-3 py-2 bg-[var(--lv-danger)]/10 border-b border-[var(--lv-danger)]/25 flex items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2 min-w-0 text-[var(--lv-danger)] font-medium">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span className="truncate">{playbackError}</span>
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
-              <button
-                type="button"
-                onClick={retryPlayback}
-                className="px-2.5 py-1 rounded-lg bg-[var(--lv-elevated)] text-[var(--lv-text)] font-semibold hover:opacity-90 cursor-pointer flex items-center gap-1"
-              >
-                <RefreshCw className="w-3 h-3" />
-                <span>Retry</span>
-              </button>
-              <button
-                type="button"
-                onClick={clearPlaybackError}
-                className="p-1 text-[var(--lv-muted)] hover:text-[var(--lv-text)] cursor-pointer"
-                aria-label="Dismiss error"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Controls row */}
-        <div className="flex items-center justify-between gap-1.5 sm:gap-4 px-2 sm:px-3.5 py-2">
-          {/* Cover + Title + Artist (tapping expands Fullscreen Player) */}
-          <div
-            onClick={onOpenFullscreen}
-            className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 cursor-pointer group"
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onOpenFullscreen();
-              }
-            }}
-            aria-label={`Open full player for ${displayTrack.title}`}
-          >
-            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl overflow-hidden shrink-0 border border-[var(--lv-border)] bg-[var(--lv-elevated)]">
-              <img
-                src={displayTrack.coverArt || DEFAULT_ARTWORK_SVG}
-                alt={displayTrack.title}
-                referrerPolicy="no-referrer"
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).src = DEFAULT_ARTWORK_SVG;
-                }}
-                className="w-full h-full object-cover"
-              />
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <p className="text-xs sm:text-sm font-bold text-[var(--lv-text)] line-clamp-1">
-                {displayTrack.title}
-              </p>
-              <div className="flex items-center gap-1.5 text-[11px] text-[var(--lv-muted)] mt-0.5">
+          {/* Playback error alert bar */}
+          {playbackError && (
+            <div className="px-3 py-2 bg-[var(--lv-danger)]/10 border-b border-[var(--lv-danger)]/25 flex items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 min-w-0 text-[var(--lv-danger)] font-medium">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span className="truncate">{playbackError}</span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onOpenArtist(displayTrack.artistId);
-                  }}
-                  className="hover:text-[var(--lv-text)] truncate font-medium cursor-pointer text-left"
+                  onClick={retryPlayback}
+                  className="px-2.5 py-1 rounded-lg bg-[var(--lv-elevated)] text-[var(--lv-text)] font-semibold hover:opacity-90 cursor-pointer flex items-center gap-1"
                 >
-                  {displayTrack.artistName}
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Retry</span>
                 </button>
-                <span className="hidden sm:inline font-mono text-[10px]">
-                  · {formatTime(activeTime)} / {formatTime(duration)}
-                </span>
+                <button
+                  type="button"
+                  onClick={clearPlaybackError}
+                  className="p-1 text-[var(--lv-muted)] hover:text-[var(--lv-text)] cursor-pointer"
+                  aria-label="Dismiss error"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
               </div>
+            </div>
+          )}
+
+          {/* Primary sticky controls row */}
+          <div className="flex items-center justify-between gap-2 sm:gap-4 px-2.5 sm:px-3.5 py-2">
+            {/* Cover + Title + Artist (tapping expands Fullscreen Player) */}
+            <div
+              onClick={onOpenFullscreen}
+              className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1 cursor-pointer group"
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onOpenFullscreen();
+                }
+              }}
+              aria-label={`Open full player for ${displayTrack.title}`}
+            >
+              <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl overflow-hidden shrink-0 border border-[var(--lv-border)] bg-[var(--lv-elevated)]">
+                <img
+                  src={displayTrack.coverArt || LOWERVIBE_ICON_ARTWORK}
+                  alt={displayTrack.title}
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = LOWERVIBE_ICON_ARTWORK;
+                  }}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <p className="text-xs sm:text-sm font-bold text-[var(--lv-text)] line-clamp-1">
+                  {displayTrack.title}
+                </p>
+                <div className="flex items-center gap-1.5 text-[11px] text-[var(--lv-muted)] mt-0.5">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenArtist(displayTrack.artistId);
+                    }}
+                    className="hover:text-[var(--lv-text)] truncate font-medium cursor-pointer text-left"
+                  >
+                    {displayTrack.artistName}
+                  </button>
+                  <span className="font-mono text-[10px] tabular-nums shrink-0 opacity-85">
+                    · {formatTime(activeTime)} / {formatTime(effectiveDuration)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Primary Transport Controls */}
+            <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic('tap');
+                  toggleShuffle();
+                }}
+                className={`hidden md:flex items-center justify-center rounded-xl min-h-[44px] min-w-[40px] transition active:scale-95 cursor-pointer ${
+                  effectiveShuffling
+                    ? 'text-[var(--lv-accent-text)]'
+                    : 'text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
+                }`}
+                title={effectiveShuffling ? 'Shuffle on' : 'Shuffle off'}
+                aria-label="Toggle shuffle"
+              >
+                <Shuffle className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic('tap');
+                  playPrevTrack();
+                }}
+                className="flex items-center justify-center rounded-xl text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition active:scale-95 min-h-[44px] min-w-[36px] sm:min-w-[44px] cursor-pointer"
+                title="Previous track"
+                aria-label="Previous track"
+              >
+                <SkipBack className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic('confirm');
+                  togglePlayPause();
+                }}
+                className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] flex items-center justify-center active:scale-95 transition-transform cursor-pointer shadow-md shrink-0"
+                title={isPlaying ? 'Pause' : 'Play'}
+                aria-label={isPlaying ? 'Pause' : 'Play'}
+              >
+                {isPlaying ? (
+                  <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
+                ) : (
+                  <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current ml-0.5" />
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic('tap');
+                  playNextTrack();
+                }}
+                className="flex items-center justify-center rounded-xl text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition active:scale-95 min-h-[44px] min-w-[36px] sm:min-w-[44px] cursor-pointer"
+                title="Next track"
+                aria-label="Next track"
+              >
+                <SkipForward className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic('tap');
+                  cycleRepeatMode();
+                }}
+                className={`hidden md:flex items-center justify-center rounded-xl min-h-[44px] min-w-[40px] transition active:scale-95 cursor-pointer ${
+                  effectiveRepeatMode !== 'off'
+                    ? 'text-[var(--lv-accent-text)]'
+                    : 'text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
+                }`}
+                title={`Repeat: ${effectiveRepeatMode}`}
+                aria-label={`Repeat: ${effectiveRepeatMode}`}
+              >
+                {effectiveRepeatMode === 'one' ? (
+                  <Repeat1 className="w-4 h-4" />
+                ) : (
+                  <Repeat className="w-4 h-4" />
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleLike}
+                className={`hidden sm:flex items-center justify-center rounded-xl transition active:scale-90 min-h-[44px] min-w-[40px] cursor-pointer ${
+                  isLiked ? 'text-rose-500' : 'text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
+                }`}
+                title={isLiked ? 'Unlike song' : 'Like song'}
+                aria-label={isLiked ? 'Unlike song' : 'Like song'}
+              >
+                <Heart
+                  className={`w-4 h-4 sm:w-5 sm:h-5 ${isLiked ? 'fill-rose-500' : ''} ${
+                    likePopping ? 'animate-heart-pop' : ''
+                  }`}
+                />
+              </button>
+
+              {/* Volume meter & mute on sm+ */}
+              <div className="hidden sm:flex items-center gap-1 px-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic('tap');
+                    toggleMute();
+                  }}
+                  className="flex p-2 text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition cursor-pointer min-h-[44px] min-w-[38px] items-center justify-center"
+                  title={effectiveMuted ? 'Unmute' : 'Mute'}
+                  aria-label={effectiveMuted ? 'Unmute' : 'Mute'}
+                >
+                  {effectiveMuted || effectiveVolume === 0 ? (
+                    <VolumeX className="w-4 h-4 text-[var(--lv-danger)]" />
+                  ) : (
+                    <Volume2 className="w-4 h-4" />
+                  )}
+                </button>
+                <DynamicVolumeCanvas
+                  volume={effectiveVolume}
+                  isMuted={effectiveMuted}
+                  isPlaying={isPlaying}
+                  onChangeVolume={setVolume}
+                />
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.02"
+                  value={effectiveMuted ? 0 : effectiveVolume}
+                  onChange={(e) => setVolume(parseFloat(e.target.value))}
+                  className="hidden lg:block w-16 h-1 bg-[var(--lv-elevated)] rounded-full appearance-none cursor-pointer accent-[var(--lv-violet)]"
+                  aria-label="Volume"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic('tap');
+                  onOpenFullscreen();
+                }}
+                className="flex items-center justify-center rounded-xl text-[var(--text-muted)] hover:text-[var(--text)] transition active:scale-95 min-h-[44px] min-w-[36px] sm:min-w-[42px] cursor-pointer"
+                title="Expand player & queue"
+                aria-label="Expand player & queue"
+              >
+                <Maximize2 className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={handleClose}
+                className="hidden sm:flex items-center justify-center rounded-xl text-[var(--text-muted)] hover:text-[var(--text)] transition active:scale-95 min-h-[44px] min-w-[40px] cursor-pointer"
+                title="Close player"
+                aria-label="Close player"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
-          {/* Transport Controls (min 48px touch targets) */}
-          <div className="flex items-center gap-0.5 sm:gap-1.5 shrink-0">
+          {/* Mobile quick player strip so Shuffle, Repeat, Like, Mute, Queue, and Close stay within thumb reach */}
+          <div className="flex sm:hidden items-center justify-between px-2.5 py-1 border-t border-[var(--lv-border)]/70">
             <button
               type="button"
               onClick={() => {
                 triggerHaptic('tap');
                 toggleShuffle();
               }}
-              className={`hidden md:flex items-center justify-center rounded-xl min-h-[48px] min-w-[48px] transition active:scale-95 cursor-pointer ${
-                isShuffling
-                  ? 'text-[var(--lv-accent-text)]'
-                  : 'text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
+              className={`min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center transition cursor-pointer ${
+                effectiveShuffling ? 'text-[var(--lv-accent-text)]' : 'text-[var(--lv-muted)]'
               }`}
-              title={isShuffling ? 'Shuffle on' : 'Shuffle off'}
+              title={effectiveShuffling ? 'Shuffle on' : 'Shuffle off'}
               aria-label="Toggle shuffle"
             >
               <Shuffle className="w-4 h-4" />
@@ -625,26 +810,32 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
               type="button"
               onClick={() => {
                 triggerHaptic('tap');
-                playPrevTrack();
+                cycleRepeatMode();
               }}
-              className="hidden sm:flex items-center justify-center rounded-xl text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition active:scale-95 min-h-[48px] min-w-[48px] cursor-pointer"
-              title="Previous track"
-              aria-label="Previous track"
+              className={`min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center transition cursor-pointer ${
+                effectiveRepeatMode !== 'off' ? 'text-[var(--lv-accent-text)]' : 'text-[var(--lv-muted)]'
+              }`}
+              title={`Repeat: ${effectiveRepeatMode}`}
+              aria-label={`Repeat: ${effectiveRepeatMode}`}
             >
-              <SkipBack className="w-5 h-5 fill-current" />
+              {effectiveRepeatMode === 'one' ? (
+                <Repeat1 className="w-4 h-4" />
+              ) : (
+                <Repeat className="w-4 h-4" />
+              )}
             </button>
 
             <button
               type="button"
               onClick={handleLike}
-              className={`flex items-center justify-center rounded-xl transition active:scale-90 min-h-[44px] min-w-[36px] sm:min-h-[48px] sm:min-w-[48px] cursor-pointer ${
-                isLiked ? 'text-rose-500' : 'text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
+              className={`min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center transition cursor-pointer ${
+                isLiked ? 'text-rose-500' : 'text-[var(--lv-muted)]'
               }`}
               title={isLiked ? 'Unlike song' : 'Like song'}
               aria-label={isLiked ? 'Unlike song' : 'Like song'}
             >
               <Heart
-                className={`w-4 h-4 sm:w-5 sm:h-5 ${isLiked ? 'fill-rose-500' : ''} ${
+                className={`w-4 h-4 ${isLiked ? 'fill-rose-500' : ''} ${
                   likePopping ? 'animate-heart-pop' : ''
                 }`}
               />
@@ -653,89 +844,19 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
             <button
               type="button"
               onClick={() => {
-                triggerHaptic('confirm');
-                togglePlayPause();
+                triggerHaptic('tap');
+                toggleMute();
               }}
-              className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] flex items-center justify-center active:scale-95 transition-transform cursor-pointer shadow-md shrink-0"
-              title={isPlaying ? 'Pause' : 'Play'}
-              aria-label={isPlaying ? 'Pause' : 'Play'}
+              className="min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] transition cursor-pointer"
+              title={effectiveMuted ? 'Unmute' : 'Mute'}
+              aria-label={effectiveMuted ? 'Unmute' : 'Mute'}
             >
-              {isPlaying ? (
-                <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
+              {effectiveMuted || effectiveVolume === 0 ? (
+                <VolumeX className="w-4 h-4 text-[var(--lv-danger)]" />
               ) : (
-                <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current ml-0.5" />
+                <Volume2 className="w-4 h-4" />
               )}
             </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                triggerHaptic('tap');
-                playNextTrack();
-              }}
-              className="flex items-center justify-center rounded-xl text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition active:scale-95 min-h-[44px] min-w-[36px] sm:min-h-[48px] sm:min-w-[48px] cursor-pointer"
-              title="Next track"
-              aria-label="Next track"
-            >
-              <SkipForward className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                triggerHaptic('tap');
-                cycleRepeatMode();
-              }}
-              className={`hidden md:flex items-center justify-center rounded-xl min-h-[48px] min-w-[48px] transition active:scale-95 cursor-pointer ${
-                repeatMode !== 'off'
-                  ? 'text-[var(--lv-accent-text)]'
-                  : 'text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
-              }`}
-              title={`Repeat: ${repeatMode}`}
-              aria-label={`Repeat: ${repeatMode}`}
-            >
-              {repeatMode === 'one' ? (
-                <Repeat1 className="w-4 h-4" />
-              ) : (
-                <Repeat className="w-4 h-4" />
-              )}
-            </button>
-
-            {/* Dynamic Canvas Volume Level Indicator + Mute + Desktop Slider */}
-            <div className="flex items-center gap-1 sm:gap-1.5 px-0.5 sm:px-1">
-              <button
-                type="button"
-                onClick={() => {
-                  triggerHaptic('tap');
-                  toggleMute();
-                }}
-                className="hidden sm:flex p-2 text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition cursor-pointer min-h-[44px] min-w-[40px] items-center justify-center"
-                title={isMuted ? 'Unmute' : 'Mute'}
-                aria-label={isMuted ? 'Unmute' : 'Mute'}
-              >
-                {isMuted || volume === 0 ? (
-                  <VolumeX className="w-4 h-4 text-[var(--lv-danger)]" />
-                ) : (
-                  <Volume2 className="w-4 h-4" />
-                )}
-              </button>
-              <DynamicVolumeCanvas
-                volume={volume}
-                isMuted={isMuted}
-                isPlaying={isPlaying}
-                onChangeVolume={setVolume}
-              />
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.02"
-                value={isMuted ? 0 : volume}
-                onChange={(e) => setVolume(parseFloat(e.target.value))}
-                className="hidden lg:block w-16 h-1 bg-[var(--lv-elevated)] rounded-full appearance-none cursor-pointer accent-[var(--lv-violet)]"
-                aria-label="Volume"
-              />
-            </div>
 
             <button
               type="button"
@@ -743,17 +864,17 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
                 triggerHaptic('tap');
                 onOpenFullscreen();
               }}
-              className="hidden sm:flex items-center justify-center rounded-xl text-[var(--text-muted)] hover:text-[var(--text)] transition active:scale-95 min-h-[48px] min-w-[48px] cursor-pointer"
-              title="Expand player"
-              aria-label="Expand player"
+              className="min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] transition cursor-pointer"
+              title="Up next & lyrics"
+              aria-label="Up next and lyrics"
             >
-              <Maximize2 className="w-4 h-4" />
+              <ListMusic className="w-4 h-4" />
             </button>
 
             <button
               type="button"
               onClick={handleClose}
-              className="flex items-center justify-center rounded-xl text-[var(--text-muted)] hover:text-[var(--text)] transition active:scale-95 min-h-[44px] min-w-[36px] sm:min-h-[48px] sm:min-w-[44px] cursor-pointer"
+              className="min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] transition cursor-pointer"
               title="Close player"
               aria-label="Close player"
             >
@@ -761,8 +882,10 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
             </button>
           </div>
         </div>
-        </div>
       </div>
     </div>
   );
 };
+
+export const BottomPlayer = memo(BottomPlayerInner);
+BottomPlayer.displayName = 'BottomPlayer';

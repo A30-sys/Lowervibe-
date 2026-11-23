@@ -1,0 +1,61 @@
+{
+  "id": "/artistcreator?standalone=artist",
+  "name": "LOWERVIBE Creator",
+  "short_name": "LV Creator",
+  "description": "Dedicated LOWERVIBE Creator Studio app for approved artists — upload tracks, view analytics, manage your Artist Page, and request withdrawals.",
+  "start_url": "/artistcreator?standalone=artist",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#0A0B0A",
+  "background_color": "#0A0B0A",
+  "icons": [
+    {
+      "src": "/icons/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["music", "productivity", "entertainment"],
+  "shortcuts": [
+    {
+      "name": "Creator Studio",
+      "url": "/artistcreator?standalone=artist",
+      "description": "Open LOWERVIBE Creator Studio"
+    },
+    {
+      "name": "My Artist Page",
+      "url": "/artistcreator?standalone=artist&view=artist-page",
+      "description": "Open your public artist profile"
+    },
+    {
+      "name": "Upload Song",
+      "url": "/artistcreator?standalone=artist&tab=upload",
+      "description": "Publish a new song to LOWERVIBE"
+    },
+    {
+      "name": "Withdrawals",
+      "url": "/artistcreator?standalone=artist&tab=withdrawals",
+      "description": "Check earnings and withdraw funds"
+    }
+  ]
+}

@@ -12,7 +12,6 @@ import {
   RotateCcw,
   Search,
   Share2,
-  Sparkles,
   Trash2,
   TrendingUp,
   Volume2
@@ -153,7 +152,7 @@ export const HistoryView: React.FC = () => {
 
         {savedPlaylistSuccess && (
           <div className="mt-4 p-3 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-xs flex items-center gap-2 animate-fadeIn">
-            <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+            <ListPlus className="w-4 h-4 text-amber-400 shrink-0" />
             <span>{savedPlaylistSuccess}</span>
           </div>
         )}

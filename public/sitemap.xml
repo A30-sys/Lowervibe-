@@ -1,37 +1,37 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://lowervibe.web.app/</loc>
+    <loc>https://lowervibemusic.web.app/</loc>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://lowervibe.web.app/discover</loc>
+    <loc>https://lowervibemusic.web.app/discover</loc>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://lowervibe.web.app/artists</loc>
+    <loc>https://lowervibemusic.web.app/artists</loc>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://lowervibe.web.app/search</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
+    <loc>https://lowervibemusic.web.app/search</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://lowervibe.web.app/terms</loc>
+    <loc>https://lowervibemusic.web.app/terms</loc>
     <changefreq>monthly</changefreq>
     <priority>0.4</priority>
   </url>
   <url>
-    <loc>https://lowervibe.web.app/privacy</loc>
+    <loc>https://lowervibemusic.web.app/privacy</loc>
     <changefreq>monthly</changefreq>
     <priority>0.4</priority>
   </url>
   <url>
-    <loc>https://lowervibe.web.app/copyright</loc>
+    <loc>https://lowervibemusic.web.app/copyright</loc>
     <changefreq>monthly</changefreq>
     <priority>0.4</priority>
   </url>

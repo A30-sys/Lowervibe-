@@ -10,6 +10,11 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
 import { NotificationItem, NotificationType, PayoutRequest } from '../types';
+import {
+  initNotificationAudioUnlock,
+  playNotificationSound,
+  showDeviceNotification,
+} from '../utils/notificationSound';
 import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
 
@@ -37,9 +42,10 @@ interface NotificationContextType {
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
 const NOTIF_STORAGE_KEY = 'lowervibe_notifications_v1';
+const LAST_SEEN_TS_PREFIX = 'lowervibe_last_notif_seen_at_';
 
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, userSettings } = useAuth();
   const { showToast } = useToast();
 
   const [allNotifications, setAllNotifications] = useState<NotificationItem[]>(() => {
@@ -55,6 +61,17 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const knownIdsRef = useRef<Set<string>>(new Set());
   const initialLoadRef = useRef<boolean>(true);
+  const soundEnabledRef = useRef<boolean>(userSettings.notifications.soundEnabled !== false);
+  const pushPrefsRef = useRef(userSettings.notifications);
+
+  useEffect(() => {
+    soundEnabledRef.current = userSettings.notifications.soundEnabled !== false;
+    pushPrefsRef.current = userSettings.notifications;
+  }, [userSettings.notifications]);
+
+  useEffect(() => {
+    return initNotificationAudioUnlock();
+  }, []);
 
   useEffect(() => {
     try {
@@ -65,8 +82,97 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   useEffect(() => {
     const fbUser = auth.currentUser;
     if (!currentUser || !fbUser || fbUser.uid !== currentUser.id) {
+      initialLoadRef.current = true;
+      knownIdsRef.current = new Set();
       return;
     }
+
+    const lastSeenKey = `${LAST_SEEN_TS_PREFIX}${currentUser.id}`;
+    let lastSeenMs = 0;
+    try {
+      const rawTs = localStorage.getItem(lastSeenKey);
+      if (rawTs) lastSeenMs = Number(rawTs) || 0;
+      else localStorage.setItem(lastSeenKey, String(Date.now()));
+    } catch {}
+
+    const triggerAlertForItem = (item: NotificationItem) => {
+      const isArtistUpdate = item.type === 'new_release';
+      showToast(`${item.title}: ${item.message}`);
+
+      if (soundEnabledRef.current) {
+        void playNotificationSound(isArtistUpdate ? 'artist' : 'admin');
+      }
+
+      const prefs = pushPrefsRef.current;
+      const pushAllowed = isArtistUpdate
+        ? prefs.newReleasesPush !== false
+        : prefs.payoutUpdatesPush !== false || prefs.productNewsPush !== false;
+
+      if (pushAllowed) {
+        void showDeviceNotification({
+          title: item.title,
+          body: item.message,
+          url: item.actionRoute || '/',
+          tag: `lv-${item.id}`,
+        });
+      }
+    };
+
+    const userEmail = currentUser.email?.toLowerCase();
+    const isItemForCurrentUser = (item: NotificationItem): boolean =>
+      item.userId === 'all' ||
+      item.userId === currentUser.id ||
+      Boolean(item.userEmail && userEmail && item.userEmail.toLowerCase() === userEmail);
+
+    let latestItemsSnapshot: NotificationItem[] = [];
+
+    const checkAndAlertLatest = (items: NotificationItem[], isFirstLoad: boolean) => {
+      const latestItem = items.find((item) => {
+        if (!isItemForCurrentUser(item)) return false;
+        const isUnread = !(item.readBy || []).includes(currentUser.id);
+        if (!isUnread) return false;
+
+        if (!isFirstLoad) {
+          return !knownIdsRef.current.has(item.id);
+        }
+
+        if (lastSeenMs > 0) {
+          const createdMs = new Date(item.createdAt).getTime();
+          return createdMs > lastSeenMs && !knownIdsRef.current.has(item.id);
+        }
+        return false;
+      });
+
+      if (latestItem) {
+        triggerAlertForItem(latestItem);
+        try {
+          const latestMs = Math.max(Date.now(), new Date(latestItem.createdAt).getTime());
+          localStorage.setItem(lastSeenKey, String(latestMs));
+          lastSeenMs = latestMs;
+        } catch {}
+      }
+    };
+
+    const handleVisibilityCatchup = () => {
+      if (document.visibilityState !== 'visible' || latestItemsSnapshot.length === 0) return;
+      const pendingUnseen = latestItemsSnapshot.find((item) => {
+        if (!isItemForCurrentUser(item)) return false;
+        const isUnread = !(item.readBy || []).includes(currentUser.id);
+        if (!isUnread) return false;
+        const createdMs = new Date(item.createdAt).getTime();
+        return createdMs > lastSeenMs;
+      });
+      if (pendingUnseen) {
+        triggerAlertForItem(pendingUnseen);
+        try {
+          const latestMs = Math.max(Date.now(), new Date(pendingUnseen.createdAt).getTime());
+          localStorage.setItem(lastSeenKey, String(latestMs));
+          lastSeenMs = latestMs;
+        } catch {}
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityCatchup);
 
     const unsub = onSnapshot(
       collection(db, 'notifications'),
@@ -75,25 +181,10 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           .map((d) => ({ ...d.data(), id: d.id } as NotificationItem))
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+        latestItemsSnapshot = items;
         setAllNotifications(items);
 
-        // Toast incoming real-time notifications for the active user after initial hydration
-        if (!initialLoadRef.current) {
-          const userEmail = currentUser.email?.toLowerCase();
-          for (const item of items) {
-            if (!knownIdsRef.current.has(item.id)) {
-              const isForUser =
-                item.userId === 'all' ||
-                item.userId === currentUser.id ||
-                (item.userEmail && userEmail && item.userEmail.toLowerCase() === userEmail);
-              const isUnread = !(item.readBy || []).includes(currentUser.id);
-              if (isForUser && isUnread) {
-                showToast(`${item.title}: ${item.message}`);
-                break;
-              }
-            }
-          }
-        }
+        checkAndAlertLatest(items, initialLoadRef.current);
 
         knownIdsRef.current = new Set(items.map((i) => i.id));
         initialLoadRef.current = false;
@@ -103,7 +194,10 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
     );
 
-    return () => unsub();
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityCatchup);
+      unsub();
+    };
   }, [currentUser?.id, currentUser?.email]);
 
   const notifications = useMemo(() => {

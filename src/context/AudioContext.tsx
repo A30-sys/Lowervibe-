@@ -44,7 +44,19 @@ import {
   TrackComment,
 } from '../types';
 import { formatTime } from '../utils/formatters';
-import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG, DEFAULT_BANNER_SVG } from '../utils/artworkFallback';
+import {
+  DEFAULT_ARTWORK_SVG,
+  DEFAULT_AVATAR_SVG,
+  DEFAULT_BANNER_SVG,
+  LOWERVIBE_ICON_ARTWORK,
+} from '../utils/artworkFallback';
+import {
+  clearPinnedPlayerSession,
+  flushPinnedPlayerSession,
+  getPinnedPlayerSession,
+  pinPlayerSession,
+  updatePinnedPlayerPosition,
+} from '../utils/playerSessionStore';
 import { useAuth } from './AuthContext';
 import { useRouter } from './RouterContext';
 import { isVerifiedAdminGoogleSession, PRIMARY_ADMIN_EMAIL } from '../services/authService';
@@ -93,6 +105,7 @@ interface AudioContextType {
   playHistory: PlayHistoryItem[];
   isFullscreenPlayerOpen: boolean;
   activeShareTrack: Track | null;
+  activeShareArtist: Artist | null;
   activeDetailTrack: Track | null;
   selectedArtistModal: Artist | null;
   isArtistSubmitModalOpen: boolean;
@@ -259,6 +272,7 @@ interface AudioContextType {
   // UI state setters
   setIsFullscreenPlayerOpen: (open: boolean) => void;
   setActiveShareTrack: (track: Track | null) => void;
+  setActiveShareArtist: (artist: Artist | null) => void;
   setActiveDetailTrack: (track: Track | null) => void;
   setSelectedArtistModal: (artist: Artist | null) => void;
   setIsArtistSubmitModalOpen: (open: boolean) => void;
@@ -310,6 +324,98 @@ function stripOversizedInlineDataUrl(value?: string): string | undefined {
     return undefined;
   }
   return value;
+}
+
+function inferMediaImageMimeType(url: string): string | undefined {
+  const lower = url.toLowerCase();
+  if (lower.startsWith('data:image/png')) return 'image/png';
+  if (lower.startsWith('data:image/jpeg') || lower.startsWith('data:image/jpg')) return 'image/jpeg';
+  if (lower.startsWith('data:image/webp')) return 'image/webp';
+  if (/\.(png)(\?|$|#)/i.test(lower)) return 'image/png';
+  if (/\.(jpe?g)(\?|$|#)/i.test(lower)) return 'image/jpeg';
+  if (/\.(webp)(\?|$|#)/i.test(lower)) return 'image/webp';
+  return undefined;
+}
+
+function buildMediaSessionArtwork(coverArt?: string): MediaImage[] {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const fallbackIcons: MediaImage[] = origin
+    ? [
+        { src: `${origin}/icons/pwa-192x192.png`, sizes: '192x192', type: 'image/png' },
+        { src: `${origin}/icons/pwa-512x512.png`, sizes: '512x512', type: 'image/png' },
+      ]
+    : [
+        { src: '/icons/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+        { src: '/icons/pwa-512x512.png', sizes: '512x512', type: 'image/png' },
+      ];
+
+  const rawCover = (coverArt || '').trim();
+  const isDefaultFallbackPath =
+    !rawCover ||
+    rawCover === LOWERVIBE_ICON_ARTWORK ||
+    rawCover.endsWith('/icons/pwa-512x512.png') ||
+    rawCover.startsWith('data:image/svg+xml');
+
+  if (isDefaultFallbackPath) {
+    return fallbackIcons;
+  }
+
+  let absoluteCover = rawCover;
+  if (!rawCover.startsWith('http://') && !rawCover.startsWith('https://') && !rawCover.startsWith('data:')) {
+    try {
+      absoluteCover = origin ? new URL(rawCover, origin).href : rawCover;
+    } catch {
+      return fallbackIcons;
+    }
+  }
+
+  const mimeType = inferMediaImageMimeType(absoluteCover);
+  const trackArtwork: MediaImage[] = ['96x96', '128x128', '192x192', '256x256', '384x384', '512x512'].map(
+    (sizes) => (mimeType ? { src: absoluteCover, sizes, type: mimeType } : { src: absoluteCover, sizes })
+  );
+
+  return [...trackArtwork, ...fallbackIcons];
+}
+
+function syncMediaSessionPositionState(position: number, duration: number, playbackRate: number) {
+  if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+  if (typeof navigator.mediaSession.setPositionState !== 'function') return;
+  if (!Number.isFinite(duration) || duration <= 0) return;
+
+  try {
+    const safeRate = Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;
+    const clampedPos = Math.max(0, Math.min(duration, Number.isFinite(position) ? position : 0));
+    navigator.mediaSession.setPositionState({
+      duration,
+      playbackRate: safeRate,
+      position: clampedPos,
+    });
+  } catch {}
+}
+
+function clearMediaSessionMetadata() {
+  if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+  try {
+    navigator.mediaSession.metadata = null;
+  } catch {}
+  try {
+    navigator.mediaSession.playbackState = 'none';
+  } catch {}
+  const actions: MediaSessionAction[] = [
+    'play',
+    'pause',
+    'previoustrack',
+    'nexttrack',
+    'seekbackward',
+    'seekforward',
+    'seekto',
+    'stop',
+  ];
+  actions.forEach((action) => {
+    try {
+      navigator.mediaSession.setActionHandler(action, null);
+    } catch {}
+  });
 }
 
 const REMOVED_DEMO_ARTIST_KEYS = new Set(['dontoliver', 'zezekingston', 'emkay']);
@@ -579,19 +685,34 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return [];
   });
 
-  const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [hasPlayedInSession, setHasPlayedInSession] = useState<boolean>(false);
-  const [resumedFromStorage, setResumedFromStorage] = useState<boolean>(false);
-  const [pendingResumeSeekSeconds, setPendingResumeSeekSeconds] = useState<number>(0);
+  const initialPinnedSessionRef = useRef(getPinnedPlayerSession());
+  const initialPinned = initialPinnedSessionRef.current;
 
-  const [currentTime, setCurrentTime] = useState<number>(0);
-  const [duration, setDuration] = useState<number>(0);
-  const [volume, setVolumeState] = useState<number>(0.85);
-  const [isMuted, setIsMuted] = useState<boolean>(false);
-  const [repeatMode, setRepeatMode] = useState<RepeatMode>('off');
-  const [isShuffling, setIsShuffling] = useState<boolean>(false);
-  const [queue, setQueue] = useState<Track[]>([]);
+  const [currentTrack, setCurrentTrack] = useState<Track | null>(() =>
+    initialPinned.pinned ? initialPinned.track : null
+  );
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [hasPlayedInSession, setHasPlayedInSession] = useState<boolean>(() =>
+    Boolean(initialPinned.pinned && initialPinned.track)
+  );
+  const [resumedFromStorage, setResumedFromStorage] = useState<boolean>(() =>
+    Boolean(initialPinned.pinned && initialPinned.track)
+  );
+  const [pendingResumeSeekSeconds, setPendingResumeSeekSeconds] = useState<number>(() =>
+    initialPinned.pinned ? initialPinned.currentTime : 0
+  );
+
+  const [currentTime, setCurrentTime] = useState<number>(() =>
+    initialPinned.pinned ? initialPinned.currentTime : 0
+  );
+  const [duration, setDuration] = useState<number>(() =>
+    initialPinned.pinned ? initialPinned.duration || initialPinned.track?.durationSeconds || 0 : 0
+  );
+  const [volume, setVolumeState] = useState<number>(() => initialPinned.volume);
+  const [isMuted, setIsMuted] = useState<boolean>(() => initialPinned.isMuted);
+  const [repeatMode, setRepeatMode] = useState<RepeatMode>(() => initialPinned.repeatMode);
+  const [isShuffling, setIsShuffling] = useState<boolean>(() => initialPinned.isShuffling);
+  const [queue, setQueue] = useState<Track[]>(() => initialPinned.queue);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
 
   const [crossfadeSeconds, setCrossfadeSecondsState] = useState<number>(() => {
@@ -603,7 +724,15 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   });
 
-  const [playbackRate, setPlaybackRateState] = useState<number>(1);
+  const [playbackRate, setPlaybackRateState] = useState<number>(() => initialPinned.playbackRate || 1);
+
+  // Sync audioEngine with hydrated session audio preferences once on mount
+  useEffect(() => {
+    audioEngine.setVolume(initialPinnedSessionRef.current.volume);
+    audioEngine.setMute(initialPinnedSessionRef.current.isMuted);
+    audioEngine.setPlaybackRate(initialPinnedSessionRef.current.playbackRate || 1);
+  }, []);
+
   const [audioQuality, setAudioQualityState] = useState<AudioQualityPreference>(() => {
     try {
       const saved = localStorage.getItem(QUALITY_PREF_KEY);
@@ -644,6 +773,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const clamped = Math.max(0.5, Math.min(2, rate));
     setPlaybackRateState(clamped);
     audioEngine.setPlaybackRate(clamped);
+    pinPlayerSession({ playbackRate: clamped });
+    syncMediaSessionPositionState(currentTime, duration, clamped);
   };
 
   const setAudioQuality = (q: AudioQualityPreference) => {
@@ -773,6 +904,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Modals & Drawers
   const [isFullscreenPlayerOpen, setIsFullscreenPlayerOpen] = useState<boolean>(false);
   const [activeShareTrack, setActiveShareTrack] = useState<Track | null>(null);
+  const [activeShareArtist, setActiveShareArtist] = useState<Artist | null>(null);
   const [activeDetailTrack, setActiveDetailTrack] = useState<Track | null>(null);
   const [selectedArtistModal, setSelectedArtistModal] = useState<Artist | null>(null);
   const [isArtistSubmitModalOpen, setIsArtistSubmitModalOpen] = useState<boolean>(false);
@@ -866,21 +998,30 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return () => window.clearTimeout(timer);
   }, [playlists]);
 
+  // Flush pinned session store immediately on pagehide or background transition
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleFlush = () => flushPinnedPlayerSession();
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        flushPinnedPlayerSession();
+      }
+    };
+    window.addEventListener('pagehide', handleFlush);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('pagehide', handleFlush);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, []);
+
   // Save exact playback track + position so reopen restores cleanly (only while active)
   useEffect(() => {
     if (!currentTrack) {
       return;
     }
-    try {
-      const state: ResumePlaybackState = {
-        trackId: currentTrack.id,
-        positionSeconds: Math.floor(currentTime),
-        playbackRate,
-        updatedAt: Date.now(),
-      };
-      localStorage.setItem(RESUME_PLAYBACK_KEY, JSON.stringify(state));
-    } catch {}
-  }, [currentTrack?.id, Math.floor(currentTime / 2), playbackRate]);
+    updatePinnedPlayerPosition(currentTime, duration);
+  }, [currentTrack?.id, Math.floor(currentTime / 2), duration, playbackRate]);
 
   // Update playHistory listened progress periodically for "Continue listening" bar
   useEffect(() => {
@@ -899,10 +1040,21 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
   }, [currentTrack?.id, Math.floor(currentTime / 5), duration]);
 
-  // Restore saved track + position once catalog loads (ONLY if it wasn't finished / dismissed)
+  // Restore saved track + position once catalog loads (for cold new tabs where sessionStorage wasn't populated)
   useEffect(() => {
     if (hasAttemptedResumeRestoreRef.current || tracks.length === 0) return;
     hasAttemptedResumeRestoreRef.current = true;
+    if (initialPinnedSessionRef.current.pinned && initialPinnedSessionRef.current.track) {
+      // Refresh metadata snapshot from authoritative Firestore catalog without disturbing position
+      const fresh = tracks.find(
+        (t) => t.id === initialPinnedSessionRef.current.track?.id && !t.isDraft && !t.isDeranked
+      );
+      if (fresh) {
+        setCurrentTrack(fresh);
+        pinPlayerSession({ pinned: true, track: fresh });
+      }
+      return;
+    }
     try {
       const raw = localStorage.getItem(RESUME_PLAYBACK_KEY);
       if (!raw) return;
@@ -910,19 +1062,30 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (!saved?.trackId) return;
       const found = tracks.find((t) => t.id === saved.trackId && !t.isDraft && !t.isDeranked);
       if (!found) return;
+      const resolvedDur = found.metadata?.Duration ?? found.metadata?.duration ?? found.durationSeconds ?? 0;
       const maxPos = Math.max(
         0,
-        Math.min(saved.positionSeconds || 0, Math.max(0, (found.durationSeconds || 0) - 2))
+        Math.min(saved.positionSeconds || 0, Math.max(0, resolvedDur - 2))
       );
+      const restoredRate = saved.playbackRate || 1;
       setCurrentTrack(found);
-      setDuration(found.durationSeconds || 0);
+      setDuration(resolvedDur);
       setCurrentTime(maxPos);
       setPendingResumeSeekSeconds(maxPos);
+      setHasPlayedInSession(true);
       if (saved.playbackRate) {
-        setPlaybackRateState(saved.playbackRate);
-        audioEngine.setPlaybackRate(saved.playbackRate);
+        setPlaybackRateState(restoredRate);
+        audioEngine.setPlaybackRate(restoredRate);
       }
       setResumedFromStorage(true);
+      pinPlayerSession({
+        pinned: true,
+        track: found,
+        currentTime: maxPos,
+        duration: resolvedDur,
+        isPlaying: false,
+        playbackRate: restoredRate,
+      });
     } catch {}
   }, [tracks]);
 
@@ -1381,12 +1544,27 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [currentTrack?.id, queue, tracks, effectiveAudioQuality]);
 
+  const isAuthenticatedListener = Boolean(
+    currentUser && auth.currentUser && auth.currentUser.uid === currentUser.id
+  );
+
+  // Reset per-track play validation when listener signs in so post-signup streams count
+  useEffect(() => {
+    if (isAuthenticatedListener) {
+      hasStreamBeenValidated.current = false;
+    }
+  }, [currentUser?.id, isAuthenticatedListener]);
+
   /**
    * Append-only real play event recording (30s minimum listen, 30-min dedupe window per user+track,
    * anti-self-play flag for payout calculations).
+   * Unauthenticated / guest listening plays freely without counting as a real play until signup/login.
    */
   const recordValidatedPlay = (playedTrack: Track, listenedSeconds: number) => {
-    const userId = currentUser?.id || 'guest';
+    if (!currentUser || !auth.currentUser || auth.currentUser.uid !== currentUser.id) {
+      return;
+    }
+    const userId = currentUser.id;
     const windowKey = Math.floor(Date.now() / (30 * 60 * 1000));
     const dedupeToken = `${userId}_${playedTrack.id}_${windowKey}`;
 
@@ -1491,23 +1669,24 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     audioEngine.onTimeUpdate = (curr, dur) => {
       setCurrentTime(curr);
-      if (dur > 0 && Math.round(dur) !== duration) {
-        setDuration(Math.round(dur));
+      const effectiveDur = dur > 0 ? Math.round(dur) : duration;
+      if (dur > 0 && effectiveDur !== duration) {
+        setDuration(effectiveDur);
       }
+      updatePinnedPlayerPosition(curr, effectiveDur);
       sessionListenedSeconds.current = Math.floor(curr);
-      if (sessionListenedSeconds.current >= 30 && !hasStreamBeenValidated.current && currentTrack) {
+      if (
+        isAuthenticatedListener &&
+        sessionListenedSeconds.current >= 30 &&
+        !hasStreamBeenValidated.current &&
+        currentTrack
+      ) {
         hasStreamBeenValidated.current = true;
         recordValidatedPlay(currentTrack, sessionListenedSeconds.current);
       }
 
-      if (typeof navigator !== 'undefined' && 'mediaSession' in navigator && dur > 0) {
-        try {
-          navigator.mediaSession.setPositionState({
-            duration: dur,
-            playbackRate,
-            position: Math.min(curr, dur),
-          });
-        } catch {}
+      if (dur > 0) {
+        syncMediaSessionPositionState(curr, dur, playbackRate);
       }
     };
 
@@ -1515,6 +1694,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (sleepAtEndOfTrack) {
         setSleepAtEndOfTrackState(false);
         setIsPlaying(false);
+        pinPlayerSession({ isPlaying: false });
         return;
       }
       if (repeatMode === 'one') {
@@ -1527,6 +1707,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const curIdx = available.findIndex((t) => t.id === currentTrack?.id);
         if (curIdx >= 0 && curIdx === available.length - 1) {
           setIsPlaying(false);
+          pinPlayerSession({ isPlaying: false, currentTime: 0 });
           return;
         }
       }
@@ -1536,6 +1717,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     audioEngine.onError = (message: string) => {
       setPlaybackError(message);
       setIsPlaying(false);
+      pinPlayerSession({ isPlaying: false });
     };
 
     return () => {
@@ -1543,7 +1725,18 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       audioEngine.onEnded = null;
       audioEngine.onError = null;
     };
-  }, [repeatMode, sleepAtEndOfTrack, currentTrack, duration, selectedCountry, playbackRate, queue, tracks]);
+  }, [
+    repeatMode,
+    sleepAtEndOfTrack,
+    currentTrack,
+    duration,
+    selectedCountry,
+    playbackRate,
+    queue,
+    tracks,
+    currentUser?.id,
+    isAuthenticatedListener,
+  ]);
 
   const logTrackToHistory = (trackToLog: Track, startSeconds: number = 0) => {
     const newEntry: PlayHistoryItem = {
@@ -1565,10 +1758,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     track: Track,
     options?: { crossfade?: boolean; startAtSeconds?: number; expandFullscreen?: boolean }
   ) => {
-    if (!currentUser) {
-      requireAuth(() => playTrack(track, options), `Sign in to play "${track.title}"`);
-      return;
-    }
+    // Allow anyone (including unauthenticated / guest visitors) to stream tracks immediately.
+    // Real play counts remain gated until the listener signs up / logs in.
 
     // Check Wi-Fi-only streaming setting if offline blob isn't cached
     const offlineBlobUrl = await getAudioBlobUrl(track.id);
@@ -1611,8 +1802,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     const startPos = options?.startAtSeconds ?? 0;
+    const resolvedDuration = track.metadata?.Duration ?? track.metadata?.duration ?? track.durationSeconds;
     setCurrentTrack(track);
-    setDuration(track.metadata?.Duration ?? track.metadata?.duration ?? track.durationSeconds);
+    setDuration(resolvedDuration);
     setCurrentTime(startPos);
     setPendingResumeSeekSeconds(0);
     setHasPlayedInSession(true);
@@ -1621,22 +1813,40 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setIsFullscreenPlayerOpen(true);
     }
 
-    setQueue((prev) => {
-      if (prev.length > 0) return prev;
+    let nextQueueSnapshot = queue;
+    if (queue.length === 0) {
       const available = tracks.filter((t) => !t.isDraft && !t.isDeranked && t.id !== track.id);
       const curIdx = tracks.findIndex((t) => t.id === track.id);
       if (curIdx >= 0) {
         const after = tracks.slice(curIdx + 1).filter((t) => !t.isDraft && !t.isDeranked);
         const before = tracks.slice(0, curIdx).filter((t) => !t.isDraft && !t.isDeranked);
-        return [...after, ...before];
+        nextQueueSnapshot = [...after, ...before];
+      } else {
+        nextQueueSnapshot = available;
       }
-      return available;
+      setQueue(nextQueueSnapshot);
+    }
+
+    pinPlayerSession({
+      pinned: true,
+      track,
+      currentTime: startPos,
+      duration: resolvedDuration,
+      isPlaying: true,
+      volume,
+      isMuted,
+      repeatMode,
+      isShuffling,
+      playbackRate,
+      queue: nextQueueSnapshot,
     });
+    syncMediaSessionPositionState(startPos, resolvedDuration, playbackRate);
 
     const resolvedAudioUrl = offlineBlobUrl || track.audioUrl;
 
     if (!resolvedAudioUrl) {
       setIsPlaying(false);
+      pinPlayerSession({ isPlaying: false });
       setPlaybackError('This track does not have an audio file uploaded yet.');
       return;
     }
@@ -1653,6 +1863,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const head = playable[safeIdx];
     const upcoming = [...playable.slice(safeIdx + 1), ...playable.slice(0, safeIdx)];
     setQueue(upcoming);
+    pinPlayerSession({ queue: upcoming });
     playTrack(head);
   };
 
@@ -1666,9 +1877,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setDuration(0);
     setPlaybackError(null);
     setIsFullscreenPlayerOpen(false);
-    try {
-      localStorage.removeItem(RESUME_PLAYBACK_KEY);
-    } catch {}
+    clearPinnedPlayerSession();
+    clearMediaSessionMetadata();
   };
 
   const isMiniPlayerVisible = Boolean(
@@ -1694,6 +1904,13 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (isPlaying) {
       audioEngine.pause();
       setIsPlaying(false);
+      pinPlayerSession({
+        pinned: true,
+        track: currentTrack,
+        currentTime,
+        duration,
+        isPlaying: false,
+      });
     } else {
       setHasPlayedInSession(true);
       if (!audioEngine.getIsActive()) {
@@ -1702,6 +1919,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         if (!resolvedAudioUrl) {
           setIsPlaying(false);
+          pinPlayerSession({ isPlaying: false });
           setPlaybackError('This track does not have an audio file available.');
           return;
         }
@@ -1711,9 +1929,23 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         audioEngine.setPlaybackRate(playbackRate);
         audioEngine.playCustomAudio(resolvedAudioUrl, 0, seekStart);
         setIsPlaying(true);
+        pinPlayerSession({
+          pinned: true,
+          track: currentTrack,
+          currentTime: seekStart,
+          duration,
+          isPlaying: true,
+        });
       } else {
         audioEngine.resume();
         setIsPlaying(true);
+        pinPlayerSession({
+          pinned: true,
+          track: currentTrack,
+          currentTime,
+          duration,
+          isPlaying: true,
+        });
       }
     }
   };
@@ -1731,14 +1963,20 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCurrentTime(clamped);
     setPendingResumeSeekSeconds(0);
     audioEngine.seek(clamped);
+    updatePinnedPlayerPosition(clamped, duration, true);
+    syncMediaSessionPositionState(clamped, duration, playbackRate);
   };
 
   const setVolume = (val: number) => {
-    setVolumeState(val);
-    audioEngine.setVolume(val);
-    if (val > 0 && isMuted) {
+    const safeVal = Math.max(0, Math.min(1, val));
+    setVolumeState(safeVal);
+    audioEngine.setVolume(safeVal);
+    if (safeVal > 0 && isMuted) {
       setIsMuted(false);
       audioEngine.setMute(false);
+      pinPlayerSession({ volume: safeVal, isMuted: false });
+    } else {
+      pinPlayerSession({ volume: safeVal });
     }
   };
 
@@ -1746,14 +1984,25 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const next = !isMuted;
     setIsMuted(next);
     audioEngine.setMute(next);
+    pinPlayerSession({ isMuted: next });
   };
 
   const cycleRepeatMode = () => {
-    setRepeatMode((prev) => (prev === 'off' ? 'all' : prev === 'all' ? 'one' : 'off'));
+    setRepeatMode((prev) => {
+      const next = prev === 'off' ? 'all' : prev === 'all' ? 'one' : 'off';
+      pinPlayerSession({ repeatMode: next });
+      return next;
+    });
   };
 
   const toggleLoop = cycleRepeatMode;
-  const toggleShuffle = () => setIsShuffling((prev) => !prev);
+  const toggleShuffle = () => {
+    setIsShuffling((prev) => {
+      const next = !prev;
+      pinPlayerSession({ isShuffling: next });
+      return next;
+    });
+  };
 
   const playNextTrack = () => {
     const available = tracks.filter((t) => !t.isDraft && !t.isDeranked);
@@ -1791,11 +2040,19 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const addToQueue = (track: Track) => {
-    setQueue((prev) => [...prev.filter((t) => t.id !== track.id), track]);
+    setQueue((prev) => {
+      const next = [...prev.filter((t) => t.id !== track.id), track];
+      pinPlayerSession({ queue: next });
+      return next;
+    });
   };
 
   const playNextInQueue = (track: Track) => {
-    setQueue((prev) => [track, ...prev.filter((t) => t.id !== track.id)]);
+    setQueue((prev) => {
+      const next = [track, ...prev.filter((t) => t.id !== track.id)];
+      pinPlayerSession({ queue: next });
+      return next;
+    });
   };
 
   const reorderQueue = (startIndex: number, endIndex: number) => {
@@ -1806,51 +2063,178 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       const [removed] = result.splice(startIndex, 1);
       result.splice(endIndex, 0, removed);
+      pinPlayerSession({ queue: result });
       return result;
     });
   };
 
   const removeFromQueue = (index: number) => {
-    setQueue((prev) => prev.filter((_, i) => i !== index));
+    setQueue((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      pinPlayerSession({ queue: next });
+      return next;
+    });
   };
 
-  const clearQueue = () => setQueue([]);
+  const clearQueue = () => {
+    setQueue([]);
+    pinPlayerSession({ queue: [] });
+  };
+
+  const mediaControlRef = useRef({
+    currentTime: 0,
+    duration: 0,
+    playbackRate: 1,
+    isPlaying: false,
+    togglePlayPause: () => {},
+    playPrevTrack: () => {},
+    playNextTrack: () => {},
+    seekTo: (_pos: number) => {},
+    clearActiveTrack: () => {},
+  });
+
+  mediaControlRef.current = {
+    currentTime,
+    duration,
+    playbackRate,
+    isPlaying,
+    togglePlayPause,
+    playPrevTrack,
+    playNextTrack,
+    seekTo,
+    clearActiveTrack,
+  };
+
+  // Device / lockscreen Media Session metadata, position state & hardware controls
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
+    if (!currentTrack) {
+      clearMediaSessionMetadata();
+      return;
+    }
+
+    const artwork = buildMediaSessionArtwork(currentTrack.coverArt);
+    const albumLabel =
+      currentTrack.recordLabel?.trim() ||
+      currentTrack.genre?.trim() ||
+      'LOWERVIBE';
+
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentTrack.title || 'Untitled Track',
+        artist: currentTrack.artistName || 'LOWERVIBE Artist',
+        album: albumLabel,
+        artwork,
+      });
+    } catch {}
+
+    syncMediaSessionPositionState(
+      mediaControlRef.current.currentTime,
+      duration || currentTrack.durationSeconds || 0,
+      mediaControlRef.current.playbackRate
+    );
+
+    const registerHandler = <T extends MediaSessionAction>(
+      action: T,
+      handler: MediaSessionActionHandler
+    ) => {
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+      } catch {}
+    };
+
+    registerHandler('play', () => {
+      if (!audioEngine.getIsActive()) {
+        mediaControlRef.current.togglePlayPause();
+      } else {
+        audioEngine.resume();
+        setIsPlaying(true);
+        pinPlayerSession({ isPlaying: true });
+      }
+      try {
+        navigator.mediaSession.playbackState = 'playing';
+      } catch {}
+    });
+
+    registerHandler('pause', () => {
+      audioEngine.pause();
+      setIsPlaying(false);
+      pinPlayerSession({
+        isPlaying: false,
+        currentTime: mediaControlRef.current.currentTime,
+      });
+      try {
+        navigator.mediaSession.playbackState = 'paused';
+      } catch {}
+    });
+
+    registerHandler('previoustrack', () => {
+      mediaControlRef.current.playPrevTrack();
+    });
+
+    registerHandler('nexttrack', () => {
+      mediaControlRef.current.playNextTrack();
+    });
+
+    registerHandler('seekbackward', (details) => {
+      const { currentTime: t, duration: d, playbackRate: r } = mediaControlRef.current;
+      const target = Math.max(0, t - (details?.seekOffset || 10));
+      mediaControlRef.current.seekTo(target);
+      syncMediaSessionPositionState(target, d, r);
+    });
+
+    registerHandler('seekforward', (details) => {
+      const { currentTime: t, duration: d, playbackRate: r } = mediaControlRef.current;
+      const target = Math.min(d || 0, t + (details?.seekOffset || 10));
+      mediaControlRef.current.seekTo(target);
+      syncMediaSessionPositionState(target, d, r);
+    });
+
+    registerHandler('seekto', (details) => {
+      if (details?.seekTime !== undefined) {
+        const { duration: d, playbackRate: r } = mediaControlRef.current;
+        mediaControlRef.current.seekTo(details.seekTime);
+        syncMediaSessionPositionState(details.seekTime, d, r);
+      }
+    });
+
+    registerHandler('stop', () => {
+      mediaControlRef.current.clearActiveTrack();
+    });
+  }, [
+    currentTrack?.id,
+    currentTrack?.title,
+    currentTrack?.artistName,
+    currentTrack?.coverArt,
+    currentTrack?.recordLabel,
+    currentTrack?.genre,
+    currentTrack?.durationSeconds,
+    duration,
+  ]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator) || !currentTrack) return;
-    try {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: currentTrack.title,
-        artist: currentTrack.artistName,
-        album: currentTrack.recordLabel || currentTrack.genre || 'LOWERVIBE',
-        artwork: currentTrack.coverArt
-          ? [
-              { src: currentTrack.coverArt, sizes: '256x256', type: 'image/jpeg' },
-              { src: currentTrack.coverArt, sizes: '512x512', type: 'image/jpeg' },
-            ]
-          : [],
-      });
-      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    const syncState = () => {
+      try {
+        navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+      } catch {}
+      syncMediaSessionPositionState(
+        mediaControlRef.current.currentTime,
+        mediaControlRef.current.duration,
+        mediaControlRef.current.playbackRate
+      );
+    };
 
-      navigator.mediaSession.setActionHandler('play', () => {
-        if (!isPlaying) togglePlayPause();
-      });
-      navigator.mediaSession.setActionHandler('pause', () => {
-        if (isPlaying) togglePlayPause();
-      });
-      navigator.mediaSession.setActionHandler('previoustrack', () => playPrevTrack());
-      navigator.mediaSession.setActionHandler('nexttrack', () => playNextTrack());
-      navigator.mediaSession.setActionHandler('seekbackward', (details) => {
-        seekTo(Math.max(0, currentTime - (details.seekOffset || 10)));
-      });
-      navigator.mediaSession.setActionHandler('seekforward', (details) => {
-        seekTo(Math.min(duration || 0, currentTime + (details.seekOffset || 10)));
-      });
-      navigator.mediaSession.setActionHandler('seekto', (details) => {
-        if (details.seekTime !== undefined) seekTo(details.seekTime);
-      });
-    } catch {}
-  }, [currentTrack, isPlaying, currentTime, duration]);
+    syncState();
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        syncState();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [currentTrack?.id, isPlaying]);
 
   // Synchronize 1-person-per-like optimistic counts
   const prevLikedIds = useRef<string[]>(currentUser?.likedTrackIds || []);
@@ -2020,6 +2404,20 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         isDraft: nextDraft,
         updatedAt: new Date().toISOString(),
       });
+      if (previousDraft && !nextDraft) {
+        const notifId = `notif-release-${target.id}-${Date.now()}`;
+        setDoc(doc(db, 'notifications', notifId), {
+          id: notifId,
+          userId: 'all',
+          type: 'new_release',
+          title: `New release: ${target.title}`,
+          message: `${target.artistName} just published "${target.title}" on LOWERVIBE.`,
+          readBy: currentUser?.id ? [currentUser.id] : [],
+          createdAt: new Date().toISOString(),
+          createdBy: currentUser?.email || target.artistName,
+          actionRoute: `/tracks/${target.id}`,
+        }).catch(() => {});
+      }
       return { success: true };
     } catch (err) {
       setTracks((prev) => prev.map((t) => (t.id === trackId ? { ...t, isDraft: previousDraft } : t)));
@@ -2151,6 +2549,20 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       await setDoc(doc(db, 'tracks', newTrack.id), newTrack, { merge: true });
       setTracks((prev) => dedupeTracksById([newTrack, ...prev]));
       addAuditLog('UPLOAD_TRACK', 'track', newTrack.id, `Uploaded ${newTrack.title} by ${newTrack.artistName}`);
+      if (!newTrack.isDraft) {
+        const notifId = `notif-release-${newTrack.id}-${Date.now()}`;
+        setDoc(doc(db, 'notifications', notifId), {
+          id: notifId,
+          userId: 'all',
+          type: 'new_release',
+          title: `New release: ${newTrack.title}`,
+          message: `${newTrack.artistName} just released "${newTrack.title}" on LOWERVIBE.`,
+          readBy: currentUser?.id ? [currentUser.id] : [],
+          createdAt: new Date().toISOString(),
+          createdBy: currentUser?.email || newTrack.artistName,
+          actionRoute: `/tracks/${newTrack.id}`,
+        }).catch(() => {});
+      }
       return newTrack;
     } catch (err) {
       throw new Error(formatFirebaseError(err, 'Could not save track'));
@@ -3473,6 +3885,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const dismissAllModals = () => {
     setActiveShareTrack(null);
+    setActiveShareArtist(null);
     setActiveDetailTrack(null);
     setSelectedArtistModal(null);
     setIsArtistSubmitModalOpen(false);
@@ -3518,6 +3931,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         playHistory,
         isFullscreenPlayerOpen,
         activeShareTrack,
+        activeShareArtist,
         activeDetailTrack,
         selectedArtistModal,
         isArtistSubmitModalOpen,
@@ -3620,6 +4034,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         closeAnalyticsModal,
         setIsFullscreenPlayerOpen,
         setActiveShareTrack,
+        setActiveShareArtist,
         setActiveDetailTrack,
         setSelectedArtistModal,
         setIsArtistSubmitModalOpen,

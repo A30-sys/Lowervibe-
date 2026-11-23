@@ -1,7 +1,10 @@
 import { initializeApp } from 'firebase/app';
 import {
+  browserLocalPersistence,
   GoogleAuthProvider,
   getAuth,
+  indexedDBLocalPersistence,
+  setPersistence,
 } from 'firebase/auth';
 import {
   doc,
@@ -58,6 +61,11 @@ function createFirestoreInstance(): Firestore {
  */
 export const db = createFirestoreInstance();
 export const auth = getAuth(app);
+if (typeof window !== 'undefined') {
+  setPersistence(auth, indexedDBLocalPersistence).catch(() => {
+    setPersistence(auth, browserLocalPersistence).catch(() => {});
+  });
+}
 export const storage = getStorage(app);
 export const googleAuthProvider = new GoogleAuthProvider();
 export const adminGoogleAuthProvider = new GoogleAuthProvider();

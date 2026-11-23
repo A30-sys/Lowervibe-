@@ -9,7 +9,7 @@ import { Artist } from '../../types';
 import { SafeImage } from '../SafeImage';
 
 export const ArtistsRosterView: React.FC = () => {
-  const { artists, tracks } = useAudio();
+  const { artists, tracks, setActiveShareArtist } = useAudio();
   const { currentUser, toggleFollowArtist, toggleLikeArtist } = useAuth();
   const { navigate } = useRouter();
   const { showToast } = useToast();
@@ -43,13 +43,7 @@ export const ArtistsRosterView: React.FC = () => {
 
   const handleShare = (artist: Artist, e: React.MouseEvent) => {
     e.stopPropagation();
-    const url = `${window.location.origin}/artists/${artist.slug || artist.id}`;
-    if (navigator.share) {
-      navigator.share({ title: artist.name, url }).catch(() => {});
-    } else {
-      navigator.clipboard.writeText(url);
-      showToast(`Link to ${artist.name} copied`);
-    }
+    setActiveShareArtist(artist);
   };
 
   const handleFollow = (artistId: string, artistName: string, e: React.MouseEvent) => {

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import {
   browserLocalPersistence,
   ConfirmationResult,
+  indexedDBLocalPersistence,
   onAuthStateChanged,
   setPersistence,
   signInWithPopup,
@@ -187,6 +188,40 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const SETTINGS_STORAGE_KEY = 'lowervibe_user_settings_v1';
 const GUEST_MODE_KEY = 'lowervibe_guest_mode_v1';
+const CACHED_USER_STORAGE_KEY = 'lowervibe_cached_user_v1';
+
+function readCachedUser(): User | null {
+  try {
+    const raw = localStorage.getItem(CACHED_USER_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as User;
+    if (parsed && typeof parsed.id === 'string' && parsed.id.length > 0) {
+      return parsed;
+    }
+  } catch {}
+  return null;
+}
+
+function writeCachedUser(user: User | null): void {
+  try {
+    if (!user) {
+      localStorage.removeItem(CACHED_USER_STORAGE_KEY);
+      return;
+    }
+    const safeUser: User = {
+      ...user,
+      avatar:
+        user.avatar && user.avatar.startsWith('data:') && user.avatar.length > 4096
+          ? DEFAULT_AVATAR_SVG
+          : user.avatar,
+      banner:
+        user.banner && user.banner.startsWith('data:') && user.banner.length > 4096
+          ? ''
+          : user.banner,
+    };
+    localStorage.setItem(CACHED_USER_STORAGE_KEY, JSON.stringify(safeUser));
+  } catch {}
+}
 
 function mergeSettings(base: UserSettings, incoming?: Partial<UserSettings>): UserSettings {
   return {
@@ -202,9 +237,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const { themeMode, setThemeMode } = useTheme();
   const { setLanguage } = useLanguage();
 
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => readCachedUser());
   const [firebaseProviders, setFirebaseProviders] = useState<string[]>([]);
-  const [emailVerified, setEmailVerified] = useState<boolean>(false);
+  const [emailVerified, setEmailVerified] = useState<boolean>(() => Boolean(readCachedUser()?.emailVerified));
   const [authReady, setAuthReady] = useState(false);
 
   const [isGuestMode, setIsGuestMode] = useState<boolean>(() => {
@@ -255,12 +290,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {}
   };
 
-  // Sync settings to localStorage
+  // Sync settings & persistent device login cache
   useEffect(() => {
     try {
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(userSettings));
     } catch {}
   }, [userSettings]);
+
+  useEffect(() => {
+    if (currentUser) {
+      writeCachedUser(currentUser);
+    }
+  }, [currentUser]);
 
   // Firestore Real-time Applications (only when signed in and auth matches)
   useEffect(() => {
@@ -294,10 +335,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let userDocUnsub: (() => void) | null = null;
     let settingsDocUnsub: (() => void) | null = null;
     let didResolve = false;
+    let isMounted = true;
 
     const timer = window.setTimeout(() => {
-      if (!didResolve) setAuthReady(true);
-    }, 900);
+      if (!didResolve && isMounted) setAuthReady(true);
+    }, 6000);
+
+    if (typeof (auth as unknown as { authStateReady?: () => Promise<void> }).authStateReady === 'function') {
+      (auth as unknown as { authStateReady: () => Promise<void> })
+        .authStateReady()
+        .then(() => {
+          if (isMounted && !didResolve) {
+            didResolve = true;
+            setAuthReady(true);
+          }
+        })
+        .catch(() => {});
+    }
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (fbUser) => {
       if (userDocUnsub) {
@@ -425,16 +479,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.warn('Bootstrap user profile note:', err);
         }
       } else {
-        setFirebaseProviders([]);
-        setEmailVerified(false);
-        setCurrentUser(null);
+        try {
+          if (typeof (auth as unknown as { authStateReady?: () => Promise<void> }).authStateReady === 'function') {
+            await (auth as unknown as { authStateReady: () => Promise<void> }).authStateReady();
+          }
+        } catch {}
+        if (!auth.currentUser && isMounted) {
+          setFirebaseProviders([]);
+          setEmailVerified(false);
+          setCurrentUser(null);
+          writeCachedUser(null);
+        }
       }
 
       didResolve = true;
-      setAuthReady(true);
+      if (isMounted) setAuthReady(true);
     });
 
     return () => {
+      isMounted = false;
       window.clearTimeout(timer);
       unsubscribeAuth();
       if (userDocUnsub) userDocUnsub();
@@ -483,7 +546,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     termsAccepted?: boolean
   ): Promise<{ success: boolean; error?: string; errorCode?: string }> => {
     try {
-      await setPersistence(auth, browserLocalPersistence);
+      await setPersistence(auth, indexedDBLocalPersistence).catch(() =>
+        setPersistence(auth, browserLocalPersistence)
+      );
       const cred = await signInWithPopup(auth, googleAuthProvider);
       const fbUser = cred.user;
       if (!fbUser) return { success: false, error: 'Google sign-in returned no user.' };
@@ -567,7 +632,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     termsAccepted: boolean = true
   ): Promise<{ success: boolean; error?: string; errorCode?: string }> => {
     try {
-      await setPersistence(auth, browserLocalPersistence);
+      await setPersistence(auth, indexedDBLocalPersistence).catch(() =>
+        setPersistence(auth, browserLocalPersistence)
+      );
       const cred = await confirmation.confirm(code);
       const fbUser = cred.user;
       const userRef = doc(db, 'users', fbUser.uid);
@@ -814,6 +881,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const deleteAccount = async () => {
     const res = await deleteCurrentUserAccount();
     if (res.success) {
+      writeCachedUser(null);
       setCurrentUser(null);
       exitGuestMode();
     }
@@ -825,91 +893,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     country?: string
   ): Promise<{ success: boolean; artistId?: string; error?: string }> => {
     if (!currentUser) return { success: false, error: 'Please sign in first.' };
-    const cleanStage = (stageName || currentUser.name || 'Artist').trim();
-    const assignedArtistId = currentUser.artistId || `artist-${currentUser.id.slice(0, 10)}`;
-    const nowIso = new Date().toISOString();
 
-    try {
-      const artistRef = doc(db, 'artists', assignedArtistId);
-      const existingSnap = await getDoc(artistRef);
-      if (existingSnap.exists()) {
-        const existingData = existingSnap.data() as {
-          ownerId?: string;
-          ownerUserId?: string;
-          claimedByUserId?: string;
-        };
-        const owned = existingData.ownerId
-          ? existingData.ownerId === currentUser.id
-          : existingData.ownerUserId === currentUser.id ||
-            existingData.claimedByUserId === currentUser.id;
-        if (!owned) {
-          return {
-            success: false,
-            error: 'Permission denied: that artist profile belongs to another account.',
-          };
-        }
-        await updateDoc(artistRef, {
-          ...(existingData.ownerId ? {} : { ownerId: currentUser.id }),
-          name: cleanStage,
-          country: country || currentUser.country || 'Malawi',
-          city: currentUser.city || '',
-          location: currentUser.city
-            ? `${currentUser.city}, ${country || currentUser.country || 'Malawi'}`
-            : country || currentUser.country || 'Malawi',
-          updatedAt: nowIso,
-        });
-      } else {
-        await setDoc(artistRef, {
-          id: assignedArtistId,
-          ownerId: currentUser.id,
-          ownerUserId: currentUser.id,
-          claimedByUserId: currentUser.id,
-          name: cleanStage,
-          handle: `@${currentUser.username || cleanStage.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
-          country: country || currentUser.country || 'Malawi',
-          city: currentUser.city || '',
-          location: currentUser.city
-            ? `${currentUser.city}, ${country || currentUser.country || 'Malawi'}`
-            : country || currentUser.country || 'Malawi',
-          genres: ['Afro-Fusion'],
-          bio: currentUser.bio || '',
-          avatar: currentUser.avatar || DEFAULT_AVATAR_SVG,
-          banner: '',
-          followersCount: 0,
-          likesCount: 0,
-          likedByUserIds: [],
-          monthlyListeners: 0,
-          verified: false,
-          isCertified: false,
-          isMonetized: false,
-          monetizationStatus: 'locked',
-          earningsBalanceMwk: 0,
-          joinedDate: nowIso,
-          socials: {},
-          contactEmail: currentUser.email || '',
-        });
-      }
-
-      const nextRole: UserRole = currentUser.isAdmin ? 'admin' : 'artist';
-      const updated: User = {
-        ...currentUser,
-        role: nextRole,
-        artistId: assignedArtistId,
-        applicationStatus: 'approved',
-      };
-      const syncRes = await updateUserProfileFields(currentUser.id, {
-        ...(currentUser.isAdmin ? {} : { role: 'artist' }),
-        artistId: assignedArtistId,
-        applicationStatus: 'approved',
-      });
-      if (!syncRes.success) {
-        return { success: false, error: syncRes.error };
-      }
-      setCurrentUser(updated);
-      return { success: true, artistId: assignedArtistId };
-    } catch (err) {
-      return { success: false, error: formatFirebaseError(err, 'Could not open Studio') };
+    // Only already-approved artists or admin can enter Studio directly; listeners must apply & await admin approval.
+    if (currentUser.isAdmin || currentUser.role === 'artist' || currentUser.applicationStatus === 'approved') {
+      return { success: true, artistId: currentUser.artistId };
     }
+
+    if (currentUser.applicationStatus === 'pending') {
+      return {
+        success: false,
+        error: 'Your Creator Studio application is currently awaiting Admin approval.',
+      };
+    }
+
+    const cleanStage = (stageName || currentUser.name || 'Artist').trim();
+    submitArtistApplication({
+      userId: currentUser.id,
+      userEmail: currentUser.email,
+      stageName: cleanStage,
+      legalName: currentUser.name || cleanStage,
+      country: country || currentUser.country || 'Malawi',
+      primaryGenre: currentUser.preferredGenres?.[0] || 'Afro-Fusion',
+      bio: currentUser.bio || '',
+      avatarUrl: currentUser.avatar || DEFAULT_AVATAR_SVG,
+      rightsConfirmed: true,
+    });
+    return {
+      success: false,
+      error: 'Your Creator Studio application has been submitted for Admin approval.',
+    };
   };
 
   const requireAuth = (action: () => void, reason: string = 'Sign in to continue'): boolean => {
@@ -1148,6 +1160,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await signOut(auth);
     } catch {}
+    writeCachedUser(null);
     setCurrentUser(null);
     exitGuestMode();
     pendingActionRef.current = null;
@@ -1354,12 +1367,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     errorCode?: string;
   }> => {
     try {
-      await setPersistence(auth, browserLocalPersistence);
+      await setPersistence(auth, indexedDBLocalPersistence).catch(() =>
+        setPersistence(auth, browserLocalPersistence)
+      );
       const cred = await signInWithPopup(auth, adminGoogleAuthProvider);
       const fbUser = cred.user;
       if (!fbUser || !isVerifiedAdminGoogleSession(fbUser)) {
         const attemptedEmail = fbUser?.email || 'another account';
         await signOut(auth).catch(() => {});
+        writeCachedUser(null);
         setCurrentUser(null);
         return {
           success: false,

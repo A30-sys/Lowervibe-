@@ -1,9 +1,11 @@
+import { doc, getDoc } from 'firebase/firestore';
 import {
   ArrowLeft,
   Download,
   Edit3,
   FolderHeart,
   Heart,
+  Loader2,
   Moon,
   Music,
   Pause,
@@ -16,6 +18,8 @@ import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
 import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
+import { db } from '../../services/firebase';
+import { Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../../utils/artworkFallback';
 import {
   formatTime,
@@ -33,6 +37,7 @@ export const TrackPublicPageView: React.FC = () => {
   const {
     tracks,
     artists,
+    isCatalogLoaded,
     currentTrack,
     isPlaying,
     playTrack,
@@ -45,6 +50,7 @@ export const TrackPublicPageView: React.FC = () => {
     toggleSaveTrack,
     addCommentToTrack,
     setActiveDetailTrack,
+    setActiveShareTrack,
   } = useAudio();
 
   const { currentUser, toggleLikeTrack } = useAuth();
@@ -52,25 +58,73 @@ export const TrackPublicPageView: React.FC = () => {
 
   const [commentText, setCommentText] = useState('');
   const [audioError, setAudioError] = useState(false);
+  const [fetchedTrack, setFetchedTrack] = useState<Track | null>(null);
+  const [isResolvingTrack, setIsResolvingTrack] = useState(false);
 
-  const track = tracks.find((t) => t.id === trackId);
+  const contextTrack =
+    tracks.find((t) => t.id === trackId && !t.isDraft && !t.isDeranked) ||
+    tracks.find((t) => t.id === trackId);
+  const track = contextTrack || (fetchedTrack?.id === trackId ? fetchedTrack : undefined);
   const artistForTrack = track ? artists.find((a) => a.id === track.artistId) : undefined;
 
   useEffect(() => {
+    let active = true;
+    if (!trackId || contextTrack) {
+      setIsResolvingTrack(false);
+      return;
+    }
+    setIsResolvingTrack(true);
+    getDoc(doc(db, 'tracks', trackId))
+      .then((snap) => {
+        if (!active) return;
+        if (snap.exists()) {
+          const data = snap.data() as Omit<Track, 'id'>;
+          if (!data.isDraft && !data.isDeranked) {
+            setFetchedTrack({ ...data, id: snap.id });
+          } else {
+            setFetchedTrack(null);
+          }
+        } else {
+          setFetchedTrack(null);
+        }
+      })
+      .catch(() => {
+        if (active) setFetchedTrack(null);
+      })
+      .finally(() => {
+        if (active) setIsResolvingTrack(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [trackId, contextTrack]);
+
+  useEffect(() => {
     if (!track) {
-      if (tracks.length > 0) {
+      if (isCatalogLoaded && !isResolvingTrack) {
         resetDefaultSeoMeta();
       }
       return;
     }
     applyTrackSeoMeta(track, artistForTrack);
-  }, [track, artistForTrack, tracks.length]);
+  }, [track, artistForTrack, isCatalogLoaded, isResolvingTrack]);
 
   useEffect(() => {
     return () => {
       resetDefaultSeoMeta();
     };
   }, []);
+
+  if (!track && (!isCatalogLoaded || isResolvingTrack)) {
+    return (
+      <div className="py-20 px-4 text-center max-w-md mx-auto space-y-4 animate-fadeIn">
+        <div className="w-12 h-12 rounded-2xl bg-[var(--surface)] border border-[var(--border)] text-[var(--accent-text)] flex items-center justify-center mx-auto">
+          <Loader2 className="w-6 h-6 animate-spin" />
+        </div>
+        <p className="text-xs font-semibold text-[var(--text-muted)]">Loading song...</p>
+      </div>
+    );
+  }
 
   if (!track) {
     return (
@@ -134,15 +188,7 @@ export const TrackPublicPageView: React.FC = () => {
   };
 
   const handleShare = () => {
-    const url = window.location.href;
-    if (navigator.share) {
-      navigator
-        .share({ title: track.title, text: `${track.title} by ${track.artistName} on LOWERVIBE`, url })
-        .catch(() => {});
-    } else {
-      navigator.clipboard.writeText(url);
-      showToast(`Link to "${track.title}" copied`);
-    }
+    setActiveShareTrack(track);
   };
 
   const handleCommentSubmit = (e: React.FormEvent) => {

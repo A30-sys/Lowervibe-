@@ -1,3 +1,4 @@
+import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
 import {
   ArrowLeft,
   Check,
@@ -5,6 +6,7 @@ import {
   ExternalLink,
   Flag,
   Heart,
+  Loader2,
   MapPin,
   MoreHorizontal,
   Music,
@@ -20,6 +22,8 @@ import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
 import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
+import { db } from '../../services/firebase';
+import { Artist } from '../../types';
 import {
   formatNumber,
   formatTime,
@@ -38,12 +42,13 @@ export const ArtistPublicPageView: React.FC = () => {
   const {
     tracks,
     artists,
+    isCatalogLoaded,
     playTrack,
     currentTrack,
     isPlaying,
     togglePlayPause,
     addToQueue,
-    setActiveShareTrack,
+    setActiveShareArtist,
     setActiveDetailTrack,
     submitContentReportRecord,
   } = useAudio();
@@ -55,13 +60,63 @@ export const ArtistPublicPageView: React.FC = () => {
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [reportReason, setReportReason] = useState('');
   const [reportSending, setReportSending] = useState(false);
+  const [fetchedArtist, setFetchedArtist] = useState<Artist | null>(null);
+  const [isResolvingArtist, setIsResolvingArtist] = useState(false);
 
-  const artist = artists.find(
+  const normalizedSlug = (slug || '').trim().toLowerCase();
+  const contextArtist = artists.find(
     (a) =>
-      (a.slug && a.slug.toLowerCase() === slug?.toLowerCase()) ||
-      a.id.toLowerCase() === slug?.toLowerCase() ||
-      (a.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-') === slug?.toLowerCase()
+      (a.slug && a.slug.toLowerCase() === normalizedSlug) ||
+      a.id.toLowerCase() === normalizedSlug ||
+      (a.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-') === normalizedSlug
   );
+  const artist =
+    contextArtist ||
+    (fetchedArtist &&
+    ((fetchedArtist.slug && fetchedArtist.slug.toLowerCase() === normalizedSlug) ||
+      fetchedArtist.id.toLowerCase() === normalizedSlug)
+      ? fetchedArtist
+      : undefined);
+
+  useEffect(() => {
+    let active = true;
+    const rawSlug = (slug || '').trim();
+    if (!rawSlug || contextArtist) {
+      setIsResolvingArtist(false);
+      return;
+    }
+
+    setIsResolvingArtist(true);
+    const resolveArtist = async () => {
+      try {
+        const directSnap = await getDoc(doc(db, 'artists', rawSlug));
+        if (!active) return;
+        if (directSnap.exists()) {
+          setFetchedArtist({ ...(directSnap.data() as Omit<Artist, 'id'>), id: directSnap.id });
+          return;
+        }
+        const slugQuery = await getDocs(
+          query(collection(db, 'artists'), where('slug', '==', rawSlug), limit(1))
+        );
+        if (!active) return;
+        if (!slugQuery.empty) {
+          const matched = slugQuery.docs[0];
+          setFetchedArtist({ ...(matched.data() as Omit<Artist, 'id'>), id: matched.id });
+          return;
+        }
+        setFetchedArtist(null);
+      } catch {
+        if (active) setFetchedArtist(null);
+      } finally {
+        if (active) setIsResolvingArtist(false);
+      }
+    };
+
+    void resolveArtist();
+    return () => {
+      active = false;
+    };
+  }, [slug, contextArtist]);
 
   const artistTracks = useMemo(() => {
     if (!artist) return [];
@@ -93,19 +148,30 @@ export const ArtistPublicPageView: React.FC = () => {
 
   useEffect(() => {
     if (!artist) {
-      if (artists.length > 0) {
+      if (isCatalogLoaded && !isResolvingArtist) {
         resetDefaultSeoMeta();
       }
       return;
     }
     applyArtistSeoMeta(artist, artistTracks.length);
-  }, [artist, artistTracks.length, artists.length]);
+  }, [artist, artistTracks.length, isCatalogLoaded, isResolvingArtist]);
 
   useEffect(() => {
     return () => {
       resetDefaultSeoMeta();
     };
   }, []);
+
+  if (!artist && (!isCatalogLoaded || isResolvingArtist)) {
+    return (
+      <div className="py-20 px-4 text-center max-w-md mx-auto space-y-4 animate-fadeIn">
+        <div className="w-12 h-12 rounded-2xl bg-[var(--surface)] border border-[var(--border)] flex items-center justify-center mx-auto text-[var(--accent-text)]">
+          <Loader2 className="w-6 h-6 animate-spin" />
+        </div>
+        <p className="text-xs font-semibold text-[var(--text-muted)]">Loading artist profile...</p>
+      </div>
+    );
+  }
 
   if (!artist) {
     return (
@@ -178,18 +244,8 @@ export const ArtistPublicPageView: React.FC = () => {
     showToast(`Playing ${safeName} on shuffle`);
   };
 
-  const handleShareProfile = async () => {
-    const url = window.location.href;
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: `${safeName} on LOWERVIBE`, url });
-        return;
-      } catch {}
-    }
-    try {
-      await navigator.clipboard.writeText(url);
-      showToast('Profile link copied');
-    } catch {}
+  const handleShareProfile = () => {
+    setActiveShareArtist(artist);
   };
 
   const handleReportSubmit = async (e: React.FormEvent) => {

@@ -22,7 +22,6 @@ import {
   Settings,
   ShieldAlert,
   ShieldCheck,
-  Sparkles,
   Trash2,
   TrendingUp,
   Upload,
@@ -37,7 +36,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
 import { useRouter } from '../context/RouterContext';
 import { useToast } from '../context/ToastContext';
-import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG, DEFAULT_BANNER_SVG } from '../utils/artworkFallback';
+import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG, DEFAULT_BANNER_SVG, LOWERVIBE_ICON_ARTWORK } from '../utils/artworkFallback';
 import {
   AdminConfig,
   DEFAULT_MONETIZATION_CONFIG,
@@ -312,8 +311,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
       showToast('Enter a track title.');
       return;
     }
-    if (!artworkRightsChecked) {
-      showToast('Confirm that your artwork has no third-party platform logos and you own the rights.');
+    if (coverFile && !artworkRightsChecked) {
+      showToast('Confirm that your uploaded cover artwork has no third-party logos and you own the rights.');
       return;
     }
     const cleanArtist = uploadArtist.trim() || 'Independent Artist';
@@ -342,7 +341,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
 
       setUploadProgress(75);
 
-      let finalArtwork = DEFAULT_ARTWORK_SVG;
+      let finalArtwork = LOWERVIBE_ICON_ARTWORK;
       let storageCoverPath: string | undefined;
       if (coverFile) {
         const uploadedCover = await uploadTrackCoverToFirebaseStorage({
@@ -838,7 +837,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="p-6 rounded-3xl bg-[var(--surface)] border border-[var(--border)] space-y-4">
               <h3 className="text-base font-bold font-heading text-[var(--text)] flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-[var(--accent-text)]" />
+                <CheckCircle2 className="w-4 h-4 text-[var(--accent-text)]" />
                 <span>Action Items</span>
               </h3>
 
@@ -2182,12 +2181,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
 
               <div className="space-y-2">
                 <label className="text-xs font-mono font-bold text-[var(--text)] block">
-                  Cover artwork (square 1400x1400 recommended)
+                  Cover artwork (Optional · Auto-uses LOWERVIBE icon if skipped)
                 </label>
                 <div className="flex items-center gap-3">
                   <label className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)] cursor-pointer">
                     <ImageIcon className="w-4 h-4 text-[var(--text-muted)]" />
-                    <span>Upload Cover Image</span>
+                    <span>{coverPreview ? 'Change Cover Image' : 'Upload Cover Image'}</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -2197,9 +2196,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
                       className="sr-only"
                     />
                   </label>
-                  {coverPreview && (
-                    <img src={coverPreview} alt="Cover preview" className="w-12 h-12 rounded-xl object-cover border border-[var(--border)]" />
-                  )}
+                  <img
+                    src={coverPreview || LOWERVIBE_ICON_ARTWORK}
+                    alt={coverPreview ? 'Cover preview' : 'Default LOWERVIBE icon cover'}
+                    className="w-12 h-12 rounded-xl object-cover border border-[var(--border)]"
+                  />
                 </div>
                 {coverWarning && (
                   <p className="text-[11px] text-amber-500 flex items-center gap-1.5">
@@ -2220,15 +2221,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
               </div>
 
               <div className="space-y-2">
-                <label className="flex items-center gap-2.5 px-3 py-2 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] cursor-pointer text-xs text-[var(--text)]">
-                  <input
-                    type="checkbox"
-                    checked={artworkRightsChecked}
-                    onChange={(e) => setArtworkRightsChecked(e.target.checked)}
-                    className="accent-[var(--accent)]"
-                  />
-                  <span>This artwork has no other platform&apos;s logo and I own the rights *</span>
-                </label>
+                {coverFile && (
+                  <label className="flex items-center gap-2.5 px-3 py-2 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] cursor-pointer text-xs text-[var(--text)]">
+                    <input
+                      type="checkbox"
+                      checked={artworkRightsChecked}
+                      onChange={(e) => setArtworkRightsChecked(e.target.checked)}
+                      className="accent-[var(--accent)]"
+                    />
+                    <span>This artwork has no other platform&apos;s logo and I own the rights *</span>
+                  </label>
+                )}
 
                 <label className="flex items-center gap-2.5 px-3 py-2 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] cursor-pointer text-xs text-[var(--text)]">
                   <input

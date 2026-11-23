@@ -8,7 +8,6 @@ import {
   Pause,
   Play,
   Search,
-  Sparkles,
   Trash2,
   UserCheck,
   X,

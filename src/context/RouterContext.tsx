@@ -110,11 +110,27 @@ export function parseRoute(pathname: string, search: string, hash: string = ''):
     return { route: 'artists', params: {}, pathname: cleanPath, searchQuery, hash };
   }
   if (cleanPath.startsWith('/artists/')) {
-    const slug = cleanPath.replace('/artists/', '');
+    const slug = decodeURIComponent(cleanPath.slice('/artists/'.length));
+    return { route: 'artist_detail', params: { slug }, pathname: cleanPath, searchQuery, hash };
+  }
+  if (cleanPath.startsWith('/a/')) {
+    const slug = decodeURIComponent(cleanPath.slice('/a/'.length));
+    return { route: 'artist_detail', params: { slug }, pathname: cleanPath, searchQuery, hash };
+  }
+  if (cleanPath.startsWith('/artist/')) {
+    const slug = decodeURIComponent(cleanPath.slice('/artist/'.length));
     return { route: 'artist_detail', params: { slug }, pathname: cleanPath, searchQuery, hash };
   }
   if (cleanPath.startsWith('/tracks/')) {
-    const id = cleanPath.replace('/tracks/', '');
+    const id = decodeURIComponent(cleanPath.slice('/tracks/'.length));
+    return { route: 'track_detail', params: { id }, pathname: cleanPath, searchQuery, hash };
+  }
+  if (cleanPath.startsWith('/s/')) {
+    const id = decodeURIComponent(cleanPath.slice('/s/'.length));
+    return { route: 'track_detail', params: { id }, pathname: cleanPath, searchQuery, hash };
+  }
+  if (cleanPath.startsWith('/song/')) {
+    const id = decodeURIComponent(cleanPath.slice('/song/'.length));
     return { route: 'track_detail', params: { id }, pathname: cleanPath, searchQuery, hash };
   }
   if (cleanPath === '/library') {

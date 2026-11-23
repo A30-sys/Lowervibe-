@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Music } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { LOWERVIBE_ICON_ARTWORK } from '../../utils/artworkFallback';
 
 interface LazySlideImageProps {
   src: string;
@@ -16,8 +16,13 @@ export const LazySlideImage: React.FC<LazySlideImageProps> = ({
   containerClassName = '',
   aspectRatio = 'square',
 }) => {
+  const [resolvedSrc, setResolvedSrc] = useState(src || LOWERVIBE_ICON_ARTWORK);
   const [isLoaded, setIsLoaded] = useState(false);
-  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setResolvedSrc(src || LOWERVIBE_ICON_ARTWORK);
+    setIsLoaded(false);
+  }, [src]);
 
   const aspectClass =
     aspectRatio === 'square'
@@ -30,32 +35,28 @@ export const LazySlideImage: React.FC<LazySlideImageProps> = ({
 
   return (
     <div
-      className={`relative overflow-hidden bg-[#121218] ${aspectClass} ${containerClassName}`}
+      className={`relative overflow-hidden bg-[var(--surface-2)] ${aspectClass} ${containerClassName}`}
     >
-      {/* Shimmer Placeholder while loading */}
-      {!isLoaded && !hasError && (
-        <div className="absolute inset-0 shimmer-placeholder pointer-events-none" />
+      {!isLoaded && (
+        <div className="absolute inset-0 bg-[var(--surface-2)] pointer-events-none" />
       )}
-
-      {/* Fallback if error */}
-      {hasError ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#1A1A24] text-[#A0A0A8]">
-          <Music className="w-6 h-6 opacity-40" />
-        </div>
-      ) : (
-        <img
-          src={src}
-          alt={alt}
-          loading="lazy"
-          onLoad={() => setIsLoaded(true)}
-          onError={() => setHasError(true)}
-          className={`w-full h-full object-cover transform-gpu transition-all duration-500 ease-out ${
-            isLoaded
-              ? 'opacity-100 scale-100 filter-none'
-              : 'opacity-0 scale-105 filter blur-xs'
-          } ${className}`}
-        />
-      )}
+      <img
+        src={resolvedSrc}
+        alt={alt}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onLoad={() => setIsLoaded(true)}
+        onError={() => {
+          if (resolvedSrc !== LOWERVIBE_ICON_ARTWORK) {
+            setResolvedSrc(LOWERVIBE_ICON_ARTWORK);
+          } else {
+            setIsLoaded(true);
+          }
+        }}
+        className={`w-full h-full object-cover transform-gpu transition-opacity duration-300 ease-out ${
+          isLoaded ? 'opacity-100' : 'opacity-0'
+        } ${className}`}
+      />
     </div>
   );
 };

@@ -41,6 +41,7 @@ export interface UserSettings {
     payoutUpdatesPush: boolean;
     productNewsInApp: boolean;
     productNewsPush: boolean;
+    soundEnabled: boolean;
   };
   privacy: {
     publicProfile: boolean;
@@ -76,7 +77,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   },
   notifications: {
     newReleasesInApp: true,
-    newReleasesPush: false,
+    newReleasesPush: true,
     likesFollowsInApp: true,
     likesFollowsPush: false,
     weeklyRecapInApp: true,
@@ -84,7 +85,8 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     payoutUpdatesInApp: true,
     payoutUpdatesPush: true,
     productNewsInApp: true,
-    productNewsPush: false,
+    productNewsPush: true,
+    soundEnabled: true,
   },
   privacy: {
     publicProfile: true,
@@ -609,6 +611,7 @@ export interface AdminConfig {
 }
 
 export type NotificationType =
+  | 'new_release'
   | 'artist_approved'
   | 'artist_rejected'
   | 'withdrawal_status'

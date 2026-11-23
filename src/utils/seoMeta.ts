@@ -3,10 +3,56 @@ import { Artist, Track } from '../types';
 const DEFAULT_TITLE = 'LOWERVIBE — African Independent Music';
 const DEFAULT_DESCRIPTION =
   'Stream independent music from Malawi, Nigeria, and across Africa. Discover new artists, save tracks offline, and support creators directly.';
+const DEFAULT_KEYWORDS =
+  'LOWERVIBE, African music streaming, independent African artists, Malawi music, Nigerian music, Afrobeats, Amapiano, Afro-fusion, offline music player, artist studio';
+const PRODUCTION_ORIGIN = 'https://lowervibemusic.web.app';
+
+const NOINDEX_ROUTES = new Set([
+  'admin',
+  'admin_dashboard',
+  'admin_login',
+  'admin_access_denied',
+  'login',
+  'register',
+  'forgot_password',
+  'account',
+  'thank_you',
+  'not_found',
+  'server_error',
+]);
+
+function getPublicOrigin(): string {
+  if (typeof window === 'undefined') return PRODUCTION_ORIGIN;
+  const { origin, hostname } = window.location;
+  if (hostname === 'lowervibemusic.web.app' || hostname === 'lowervibemusic.firebaseapp.com') {
+    return PRODUCTION_ORIGIN;
+  }
+  return origin || PRODUCTION_ORIGIN;
+}
+
+function getNormalizedCanonicalUrl(): string {
+  const origin = getPublicOrigin();
+  if (typeof window === 'undefined') return `${origin}/`;
+  const rawPath = window.location.pathname.replace(/\/+$/, '') || '/';
+
+  const shortTrack = rawPath.match(/^\/(?:s|song)\/([^/]+)$/);
+  if (shortTrack) {
+    return `${origin}/tracks/${shortTrack[1]}`;
+  }
+  const shortArtist = rawPath.match(/^\/(?:a|artist)\/([^/]+)$/);
+  if (shortArtist) {
+    return `${origin}/artists/${shortArtist[1]}`;
+  }
+  if (rawPath === '/studio') {
+    return `${origin}/artistcreator`;
+  }
+  return `${origin}${rawPath}`;
+}
 
 function setMetaTag(attr: 'name' | 'property', key: string, content: string): void {
   if (typeof document === 'undefined') return;
-  let el = document.head.querySelector(`meta[${attr}="${key}"]`) as HTMLMetaElement | null;
+  const escapedKey = typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(key) : key.replace(/"/g, '\\"');
+  let el = document.head.querySelector(`meta[${attr}="${escapedKey}"]`) as HTMLMetaElement | null;
   if (!el) {
     el = document.createElement('meta');
     el.setAttribute(attr, key);
@@ -17,7 +63,8 @@ function setMetaTag(attr: 'name' | 'property', key: string, content: string): vo
 
 function removeMetaTag(attr: 'name' | 'property', key: string): void {
   if (typeof document === 'undefined') return;
-  const el = document.head.querySelector(`meta[${attr}="${key}"]`);
+  const escapedKey = typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(key) : key.replace(/"/g, '\\"');
+  const el = document.head.querySelector(`meta[${attr}="${escapedKey}"]`);
   if (el) el.remove();
 }
 
@@ -27,6 +74,7 @@ function clearDynamicMediaMetaTags(): void {
   removeMetaTag('property', 'music:duration');
   removeMetaTag('property', 'og:audio');
   removeMetaTag('property', 'og:audio:type');
+  removeMetaTag('property', 'og:image:secure_url');
 }
 
 function setCanonicalLink(href: string): void {
@@ -176,8 +224,11 @@ export function buildArtistSeoPayload(
 
 export function applyArtistSeoMeta(artist: Artist, tracksCount = 0): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
-  const origin = window.location.origin;
-  const canonicalUrl = `${origin}${window.location.pathname}`;
+  const origin = getPublicOrigin();
+  const canonicalHandle = (artist.slug || artist.id || '').trim();
+  const canonicalUrl = canonicalHandle
+    ? `${origin}/artists/${encodeURIComponent(canonicalHandle)}`
+    : getNormalizedCanonicalUrl();
   const seo = buildArtistSeoPayload(artist, {
     origin,
     canonicalUrl,
@@ -188,6 +239,16 @@ export function applyArtistSeoMeta(artist: Artist, tracksCount = 0): void {
   document.title = seo.title;
   setCanonicalLink(seo.canonicalUrl);
   setMetaTag('name', 'description', seo.description);
+  setMetaTag(
+    'name',
+    'robots',
+    'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1'
+  );
+  setMetaTag(
+    'name',
+    'keywords',
+    `${artist.name}, ${(artist.genres || []).join(', ')}, LOWERVIBE artist, African independent music`
+  );
 
   setMetaTag('property', 'og:type', 'profile');
   setMetaTag('property', 'og:locale', 'en_US');
@@ -195,6 +256,11 @@ export function applyArtistSeoMeta(artist: Artist, tracksCount = 0): void {
   setMetaTag('property', 'og:title', seo.title);
   setMetaTag('property', 'og:description', seo.description);
   setMetaTag('property', 'og:image', seo.image);
+  if (seo.image.startsWith('https://')) {
+    setMetaTag('property', 'og:image:secure_url', seo.image);
+  }
+  setMetaTag('property', 'og:image:width', '512');
+  setMetaTag('property', 'og:image:height', '512');
   setMetaTag('property', 'og:image:alt', seo.imageAlt);
   setMetaTag('property', 'og:url', seo.canonicalUrl);
   setMetaTag('property', 'profile:username', seo.username);
@@ -281,14 +347,24 @@ export function buildTrackSeoPayload(
 
 export function applyTrackSeoMeta(track: Track, artist?: Artist | null): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
-  const origin = window.location.origin;
-  const canonicalUrl = `${origin}${window.location.pathname}`;
+  const origin = getPublicOrigin();
+  const canonicalUrl = `${origin}/tracks/${encodeURIComponent(track.id)}`;
   const seo = buildTrackSeoPayload(track, { origin, canonicalUrl, artist });
 
   clearDynamicMediaMetaTags();
   document.title = seo.title;
   setCanonicalLink(seo.canonicalUrl);
   setMetaTag('name', 'description', seo.description);
+  setMetaTag(
+    'name',
+    'robots',
+    'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1'
+  );
+  setMetaTag(
+    'name',
+    'keywords',
+    `${track.title}, ${track.artistName}, ${track.genre || 'African music'}, LOWERVIBE`
+  );
 
   setMetaTag('property', 'og:type', 'music.song');
   setMetaTag('property', 'og:locale', 'en_US');
@@ -296,6 +372,11 @@ export function applyTrackSeoMeta(track: Track, artist?: Artist | null): void {
   setMetaTag('property', 'og:title', seo.title);
   setMetaTag('property', 'og:description', seo.description);
   setMetaTag('property', 'og:image', seo.image);
+  if (seo.image.startsWith('https://')) {
+    setMetaTag('property', 'og:image:secure_url', seo.image);
+  }
+  setMetaTag('property', 'og:image:width', '512');
+  setMetaTag('property', 'og:image:height', '512');
   setMetaTag('property', 'og:image:alt', seo.imageAlt);
   setMetaTag('property', 'og:url', seo.canonicalUrl);
   if (seo.artistUrl) {
@@ -323,8 +404,8 @@ export function applyRouteSeoMeta(route: string, searchQuery = ''): void {
   if (route === 'artist_detail' || route === 'track_detail') return;
   clearDynamicMediaMetaTags();
 
-  const origin = window.location.origin;
-  const canonicalUrl = `${origin}${window.location.pathname}`;
+  const origin = getPublicOrigin();
+  const canonicalUrl = getNormalizedCanonicalUrl();
   const defaultImage = `${origin}/icons/pwa-512x512.png`;
 
   const routeMetaMap: Record<string, { title: string; description: string }> = {
@@ -427,10 +508,19 @@ export function applyRouteSeoMeta(route: string, searchQuery = ''): void {
   };
 
   const meta = routeMetaMap[route] || routeMetaMap.home;
+  const isNoindex = NOINDEX_ROUTES.has(route);
 
   document.title = meta.title;
   setCanonicalLink(canonicalUrl);
   setMetaTag('name', 'description', meta.description);
+  setMetaTag(
+    'name',
+    'robots',
+    isNoindex
+      ? 'noindex, nofollow'
+      : 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1'
+  );
+  setMetaTag('name', 'keywords', DEFAULT_KEYWORDS);
 
   setMetaTag('property', 'og:type', 'website');
   setMetaTag('property', 'og:locale', 'en_US');
@@ -438,6 +528,11 @@ export function applyRouteSeoMeta(route: string, searchQuery = ''): void {
   setMetaTag('property', 'og:title', meta.title);
   setMetaTag('property', 'og:description', meta.description);
   setMetaTag('property', 'og:image', defaultImage);
+  if (defaultImage.startsWith('https://')) {
+    setMetaTag('property', 'og:image:secure_url', defaultImage);
+  }
+  setMetaTag('property', 'og:image:width', '512');
+  setMetaTag('property', 'og:image:height', '512');
   setMetaTag('property', 'og:image:alt', meta.title);
   setMetaTag('property', 'og:url', canonicalUrl);
 
@@ -447,15 +542,63 @@ export function applyRouteSeoMeta(route: string, searchQuery = ''): void {
   setMetaTag('name', 'twitter:image', defaultImage);
   setMetaTag('name', 'twitter:image:alt', meta.title);
 
-  setStructuredData({
-    '@context': 'https://schema.org',
-    '@type': 'WebApplication',
-    name: 'LOWERVIBE',
-    applicationCategory: 'MusicApplication',
-    operatingSystem: 'All',
-    url: canonicalUrl,
-    description: meta.description,
-  });
+  if (route === 'home' || route === 'discover' || route === 'artists') {
+    setStructuredData({
+      '@context': 'https://schema.org',
+      '@graph': [
+        {
+          '@type': 'WebSite',
+          '@id': `${origin}/#website`,
+          name: 'LOWERVIBE',
+          url: `${origin}/`,
+          description: DEFAULT_DESCRIPTION,
+          potentialAction: {
+            '@type': 'SearchAction',
+            target: {
+              '@type': 'EntryPoint',
+              urlTemplate: `${origin}/search?q={search_term_string}`,
+            },
+            'query-input': 'required name=search_term_string',
+          },
+        },
+        {
+          '@type': 'Organization',
+          '@id': `${origin}/#organization`,
+          name: 'LOWERVIBE',
+          url: `${origin}/`,
+          logo: {
+            '@type': 'ImageObject',
+            url: defaultImage,
+            width: 512,
+            height: 512,
+          },
+        },
+        {
+          '@type': 'WebApplication',
+          name: 'LOWERVIBE',
+          applicationCategory: 'MusicApplication',
+          operatingSystem: 'All',
+          url: canonicalUrl,
+          description: meta.description,
+          offers: {
+            '@type': 'Offer',
+            price: '0',
+            priceCurrency: 'USD',
+          },
+        },
+      ],
+    });
+  } else {
+    setStructuredData({
+      '@context': 'https://schema.org',
+      '@type': 'WebApplication',
+      name: 'LOWERVIBE',
+      applicationCategory: 'MusicApplication',
+      operatingSystem: 'All',
+      url: canonicalUrl,
+      description: meta.description,
+    });
+  }
 }
 
 export function resetDefaultSeoMeta(): void {

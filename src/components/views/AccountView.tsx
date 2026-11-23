@@ -35,13 +35,13 @@ import {
   Shield,
   Sliders,
   Smartphone,
-  Sparkles,
   Star,
   Sun,
   Trash2,
   Upload,
   User as UserIcon,
   Users,
+  Volume2,
   Wifi,
   X,
 } from 'lucide-react';
@@ -65,6 +65,8 @@ import {
 } from '../../services/uploadService';
 import { EqPreset } from '../../types';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG, DEFAULT_BANNER_SVG } from '../../utils/artworkFallback';
+import { playNotificationSound } from '../../utils/notificationSound';
+import { openPwaInstallPrompt } from '../../utils/pwaManifest';
 
 function maskEmailAddress(email?: string): string {
   if (!email || !email.includes('@')) return 'Not added';
@@ -1402,41 +1404,132 @@ export const AccountView: React.FC = () => {
           isOpen={openSection === 'notifications'}
           onToggle={() => setOpenSection(openSection === 'notifications' ? '' : 'notifications')}
         >
-          <div className="space-y-2">
-            {[
-              { title: 'New releases from followed artists', inApp: 'newReleasesInApp' as const, push: 'newReleasesPush' as const },
-              { title: 'Likes & new followers', inApp: 'likesFollowsInApp' as const, push: 'likesFollowsPush' as const },
-              { title: 'Weekly listening recap', inApp: 'weeklyRecapInApp' as const, push: 'weeklyRecapPush' as const },
-              { title: 'Artist monetization & payout updates', inApp: 'payoutUpdatesInApp' as const, push: 'payoutUpdatesPush' as const },
-              { title: 'Platform news & tips', inApp: 'productNewsInApp' as const, push: 'productNewsPush' as const },
-            ].map((row) => (
-              <div
-                key={row.inApp}
-                className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-              >
-                <span className="text-xs font-semibold text-[var(--text)]">{row.title}</span>
-                <div className="flex items-center gap-4 text-xs">
-                  <label className="flex items-center gap-1.5 cursor-pointer text-[var(--text-muted)]">
-                    <input
-                      type="checkbox"
-                      checked={userSettings.notifications[row.inApp]}
-                      onChange={(e) => updateUserSettings({ notifications: { [row.inApp]: e.target.checked } })}
-                      className="accent-[var(--accent)]"
-                    />
-                    <span>In-App</span>
-                  </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer text-[var(--text-muted)]">
-                    <input
-                      type="checkbox"
-                      checked={userSettings.notifications[row.push]}
-                      onChange={(e) => handleRequestPushPermission(row.push, e.target.checked)}
-                      className="accent-[var(--accent)]"
-                    />
-                    <span>Push</span>
-                  </label>
+          <div className="space-y-3">
+            <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2 text-xs font-bold text-[var(--text)]">
+                  <Volume2 className="w-4 h-4 text-[var(--accent-text)]" />
+                  <span>Real-time notification sound</span>
                 </div>
+                <p className="text-[11px] text-[var(--text-muted)]">
+                  Play an instant chime inside the installed app for artist releases &amp; administration updates.
+                </p>
               </div>
-            ))}
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void playNotificationSound('artist').then((played) => {
+                      showNotice(
+                        played
+                          ? 'Notification chime played.'
+                          : 'Tap anywhere in the app first to unlock audio playback.',
+                        played ? 'ok' : 'err'
+                      );
+                    });
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[11px] font-semibold text-[var(--text)] hover:border-[var(--accent)] cursor-pointer"
+                >
+                  Test Sound
+                </button>
+                <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-[var(--text)] px-2.5 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
+                  <input
+                    type="checkbox"
+                    checked={userSettings.notifications.soundEnabled !== false}
+                    onChange={(e) =>
+                      updateUserSettings({ notifications: { soundEnabled: e.target.checked } })
+                    }
+                    className="accent-[var(--accent)]"
+                  />
+                  <span>{userSettings.notifications.soundEnabled !== false ? 'On' : 'Muted'}</span>
+                </label>
+              </div>
+            </div>
+
+            {typeof Notification !== 'undefined' && (
+              <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="space-y-0.5">
+                  <div className="text-xs font-semibold text-[var(--text)]">
+                    Device alerts:{' '}
+                    <span
+                      className={
+                        Notification.permission === 'granted'
+                          ? 'text-[var(--accent-text)] font-bold'
+                          : Notification.permission === 'denied'
+                          ? 'text-[var(--danger)] font-bold'
+                          : 'text-[var(--text-muted)] font-bold'
+                      }
+                    >
+                      {Notification.permission === 'granted'
+                        ? 'Enabled'
+                        : Notification.permission === 'denied'
+                        ? 'Blocked in browser'
+                        : 'Not enabled'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[var(--text-muted)]">
+                    Receive system banners on your phone or computer when artists drop music or admin updates your account.
+                  </p>
+                </div>
+                {Notification.permission !== 'granted' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      Notification.requestPermission()
+                        .then((perm) => {
+                          showNotice(
+                            perm === 'granted'
+                              ? 'Device alerts enabled!'
+                              : 'Enable notifications in your browser/app settings to receive alerts.',
+                            perm === 'granted' ? 'ok' : 'err'
+                          );
+                        })
+                        .catch(() => {});
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer self-start sm:self-auto shrink-0"
+                  >
+                    Enable Device Alerts
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {[
+                { title: 'New releases from followed artists', inApp: 'newReleasesInApp' as const, push: 'newReleasesPush' as const },
+                { title: 'Likes & new followers', inApp: 'likesFollowsInApp' as const, push: 'likesFollowsPush' as const },
+                { title: 'Weekly listening recap', inApp: 'weeklyRecapInApp' as const, push: 'weeklyRecapPush' as const },
+                { title: 'Artist monetization & payout updates', inApp: 'payoutUpdatesInApp' as const, push: 'payoutUpdatesPush' as const },
+                { title: 'Platform news & tips', inApp: 'productNewsInApp' as const, push: 'productNewsPush' as const },
+              ].map((row) => (
+                <div
+                  key={row.inApp}
+                  className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                >
+                  <span className="text-xs font-semibold text-[var(--text)]">{row.title}</span>
+                  <div className="flex items-center gap-4 text-xs">
+                    <label className="flex items-center gap-1.5 cursor-pointer text-[var(--text-muted)]">
+                      <input
+                        type="checkbox"
+                        checked={userSettings.notifications[row.inApp]}
+                        onChange={(e) => updateUserSettings({ notifications: { [row.inApp]: e.target.checked } })}
+                        className="accent-[var(--accent)]"
+                      />
+                      <span>In-App</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer text-[var(--text-muted)]">
+                      <input
+                        type="checkbox"
+                        checked={userSettings.notifications[row.push]}
+                        onChange={(e) => handleRequestPushPermission(row.push, e.target.checked)}
+                        className="accent-[var(--accent)]"
+                      />
+                      <span>Push</span>
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </SettingsGroup>
 
@@ -1759,21 +1852,33 @@ export const AccountView: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => window.dispatchEvent(new Event('lowervibe:open-install-prompt'))}
+              onClick={() => openPwaInstallPrompt('main')}
               className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-left hover:border-[var(--border-strong)] transition cursor-pointer flex items-center justify-between sm:col-span-2"
             >
               <span className="text-xs font-semibold text-[var(--text)] flex items-center gap-2">
                 <Smartphone className="w-4 h-4 text-[var(--accent-text)]" />
-                {isArtist
-                  ? 'Install Artist WebApp (Android & iPhone)'
-                  : 'Artist WebApp (Unlocks on Artist Approval)'}
+                Install LOWERVIBE Main App (Android, iPhone &amp; Desktop)
+              </span>
+              <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => openPwaInstallPrompt('creator')}
+              className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-left hover:border-[var(--border-strong)] transition cursor-pointer flex items-center justify-between sm:col-span-2"
+            >
+              <span className="text-xs font-semibold text-[var(--text)] flex items-center gap-2">
+                <Music className="w-4 h-4 text-[var(--violet)]" />
+                {isArtist || isAdmin
+                  ? 'Install LOWERVIBE Creator App (Standalone Studio)'
+                  : 'LOWERVIBE Creator App (Unlocks After Artist Approval)'}
               </span>
               <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
             </button>
           </div>
 
-          <div className="pt-2 text-center text-[11px] font-mono text-[var(--text-muted)]">
-            LOWERVIBE v2.0.0
+          <div className="pt-2 text-center text-xs text-[var(--text-muted)]">
+            LOWERVIBE Web Platform
           </div>
         </SettingsGroup>
       </div>
@@ -2005,7 +2110,7 @@ export const AccountView: React.FC = () => {
               className="w-full px-3.5 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
             />
             <p className="text-[11px] text-[var(--text-muted)]">
-              Includes basic browser &amp; app version (v2.0.0) so we can fix it faster.
+              Includes basic browser and device context so we can investigate faster.
             </p>
             <div className="flex justify-end gap-2">
               <button

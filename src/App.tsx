@@ -1,5 +1,5 @@
 import { CheckCircle2, Download, FileText, Lock } from 'lucide-react';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AdminAccessDeniedView } from './components/admin/AdminAccessDeniedView';
 import { AdminLoginView } from './components/admin/AdminLoginView';
 import { AdminPortal } from './components/AdminPortal';
@@ -55,6 +55,8 @@ import {
 } from './services/analyticsService';
 import { isVerifiedAdminGoogleSession, PRIMARY_ADMIN_EMAIL } from './services/authService';
 import { Track } from './types';
+import { usePinnedPlayerSession } from './utils/playerSessionStore';
+import { setActivePwaManifest } from './utils/pwaManifest';
 import { applyArtistSeoMeta, applyRouteSeoMeta, applyTrackSeoMeta } from './utils/seoMeta';
 
 function AppContent() {
@@ -75,6 +77,8 @@ function AppContent() {
     isMiniPlayerVisible,
     activeShareTrack,
     setActiveShareTrack,
+    activeShareArtist,
+    setActiveShareArtist,
     activeDetailTrack,
     setActiveDetailTrack,
     selectedArtistModal,
@@ -89,20 +93,30 @@ function AppContent() {
     clearActiveTrack,
   } = useAudio();
 
+  const pinnedSession = usePinnedPlayerSession();
+  const activeSessionTrack = currentTrack || (pinnedSession.pinned ? pinnedSession.track : null);
   const isBottomPlayerActive = Boolean(
-    currentTrack && (isPlaying || isMiniPlayerVisible || playbackState !== 'idle')
+    activeSessionTrack &&
+      (isPlaying || isMiniPlayerVisible || pinnedSession.pinned || playbackState !== 'idle')
   );
 
   const [isPlayerMounted, setIsPlayerMounted] = useState(isBottomPlayerActive);
   const [isPlayerExiting, setIsPlayerExiting] = useState(false);
-  const lastPlayerTrackRef = useRef<Track | null>(currentTrack);
+  const lastPlayerTrackRef = useRef<Track | null>(activeSessionTrack);
   const playerExitTimerRef = useRef<number | null>(null);
+  const artistsRef = useRef(artists);
+  const tracksRef = useRef(tracks);
+  const currentTrackRef = useRef(activeSessionTrack);
+
+  artistsRef.current = artists;
+  tracksRef.current = tracks;
+  currentTrackRef.current = activeSessionTrack;
 
   useEffect(() => {
-    if (currentTrack) {
-      lastPlayerTrackRef.current = currentTrack;
+    if (activeSessionTrack) {
+      lastPlayerTrackRef.current = activeSessionTrack;
     }
-  }, [currentTrack]);
+  }, [activeSessionTrack]);
 
   useEffect(() => {
     if (isBottomPlayerActive) {
@@ -130,7 +144,7 @@ function AppContent() {
     };
   }, []);
 
-  const handleCloseBottomPlayer = () => {
+  const handleCloseBottomPlayer = useCallback(() => {
     if (playerExitTimerRef.current) {
       window.clearTimeout(playerExitTimerRef.current);
     }
@@ -141,7 +155,11 @@ function AppContent() {
       setIsPlayerExiting(false);
       playerExitTimerRef.current = null;
     }, 240);
-  };
+  }, [clearActiveTrack]);
+
+  const handleOpenFullscreenPlayer = useCallback(() => {
+    setIsFullscreenPlayerOpen(true);
+  }, [setIsFullscreenPlayerOpen]);
 
   const {
     currentUser,
@@ -165,11 +183,15 @@ function AppContent() {
   );
 
   const isStandaloneArtistApp = Boolean(
-    !standaloneGateBypassed &&
-      (window.matchMedia('(display-mode: standalone)').matches ||
-        (window.navigator as unknown as { standalone?: boolean }).standalone === true ||
-        searchParams.get('standalone') === 'artist')
+    !standaloneGateBypassed && searchParams.get('standalone') === 'artist'
   );
+
+  // Dynamically bind the installable PWA manifest: LOWERVIBE Main App for listeners, LOWERVIBE Creator inside Studio for approved artists
+  useEffect(() => {
+    setActivePwaManifest(
+      currentRoute.route === 'studio' && isApprovedArtistAccount ? 'creator' : 'main'
+    );
+  }, [currentRoute.route, isApprovedArtistAccount]);
 
   // Prompt incomplete Google / Phone / legacy accounts to pick gender, age, genres & artists before entering
   useEffect(() => {
@@ -200,11 +222,25 @@ function AppContent() {
     isAdmin,
   ]);
 
-  // Keep URLs canonical: /studio -> /artistcreator and /admin|/administration -> /administrationside
+  // Keep URLs canonical: /studio -> /artistcreator, short links -> /tracks/:id or /artists/:slug, and /admin -> /administrationside
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const rawPath = window.location.pathname.replace(/\/+$/, '') || '/';
     const searchStr = window.location.search || '';
+    const shortTrackMatch = rawPath.match(/^\/(?:s|song)\/([^/]+)$/);
+    if (shortTrackMatch) {
+      navigate(`/tracks/${encodeURIComponent(decodeURIComponent(shortTrackMatch[1]))}${searchStr}`, {
+        replace: true,
+      });
+      return;
+    }
+    const shortArtistMatch = rawPath.match(/^\/(?:a|artist)\/([^/]+)$/);
+    if (shortArtistMatch) {
+      navigate(`/artists/${encodeURIComponent(decodeURIComponent(shortArtistMatch[1]))}${searchStr}`, {
+        replace: true,
+      });
+      return;
+    }
     if (rawPath === '/studio') {
       navigate(`/artistcreator${searchStr}`, { replace: true });
       return;
@@ -226,6 +262,19 @@ function AppContent() {
       navigate(`/administrationside/access-denied${searchStr}`, { replace: true });
     }
   }, [currentRoute.pathname, navigate]);
+
+  // Handle service worker notificationclick navigation messages seamlessly in-app
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+    const handleSwMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; url?: string } | undefined;
+      if (data?.type === 'LOWERVIBE_NAVIGATE' && typeof data.url === 'string' && data.url) {
+        navigate(data.url);
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+  }, [navigate]);
 
   // When an approved artist launches the standalone WebApp, open straight into Artist Creator
   useEffect(() => {
@@ -359,32 +408,46 @@ function AppContent() {
     tracks,
   ]);
 
+  const handleSelectArtist = useCallback(
+    (artistId: string) => {
+      const artist = artistsRef.current.find((a) => a.id === artistId);
+      if (artist) {
+        navigate(`/artists/${artist.slug || artist.id}`);
+      } else if (artistId) {
+        navigate(`/artists/${artistId}`);
+      }
+    },
+    [navigate]
+  );
+
+  const handleOpenTrackDetails = useCallback(
+    (track?: Track) => {
+      if (track) {
+        navigate(`/tracks/${track.id}`);
+      } else if (currentTrackRef.current) {
+        navigate(`/tracks/${currentTrackRef.current.id}`);
+      } else if (tracksRef.current.length > 0) {
+        navigate(`/tracks/${tracksRef.current[0].id}`);
+      }
+    },
+    [navigate]
+  );
+
+  const handleOpenCurrentTrackDetails = useCallback(() => {
+    handleOpenTrackDetails();
+  }, [handleOpenTrackDetails]);
+
   if (!authReady) {
     return <InitialLoader />;
   }
 
-  // Public Legal & Thank-You routes render cleanly even when signed out
-  if (currentRoute.route === 'terms' || currentRoute.route === 'privacy' || currentRoute.route === 'copyright') {
-    return (
-      <div className="min-h-screen bg-[var(--bg)] text-[var(--text)] flex flex-col font-sans transition-colors duration-200">
-        <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 pt-6 pb-16">
-          <LegalPageView docType={currentRoute.route} />
-        </main>
-        <CookieBanner />
-      </div>
-    );
-  }
-
-  if (currentRoute.route === 'thank_you' && !currentUser && !isGuestMode) {
-    return (
-      <div className="min-h-screen bg-[var(--bg)] text-[var(--text)] flex flex-col font-sans transition-colors duration-200">
-        <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 pt-6 pb-16">
-          <ThankYouView />
-        </main>
-        <CookieBanner />
-      </div>
-    );
-  }
+  const isLegalDocRoute =
+    currentRoute.route === 'terms' ||
+    currentRoute.route === 'privacy' ||
+    currentRoute.route === 'copyright';
+  const isSignedOutThankYouRoute =
+    currentRoute.route === 'thank_you' && !currentUser && !isGuestMode;
+  const isMinimalPublicRoute = isLegalDocRoute || isSignedOutThankYouRoute;
 
   // Dedicated Standalone Administration Side (/administrationside, /administrationside/login, /administrationside/access-denied)
   if (currentRoute.route === 'admin_login') {
@@ -410,9 +473,15 @@ function AppContent() {
     return <AdminAccessDeniedView />;
   }
 
-  // Dedicated Auth routes or unauthenticated gate (unless user explicitly entered Guest Browsing)
+  // Public exploration & listening works immediately without forcing login;
+  // private account/library/creator pages & explicit auth routes render AuthPortalView when signed out.
+  const requiresSignedInView =
+    currentRoute.route === 'library' ||
+    currentRoute.route === 'studio' ||
+    currentRoute.route === 'account';
+
   if (
-    (!currentUser && !isGuestMode) ||
+    (!currentUser && !isGuestMode && requiresSignedInView) ||
     currentRoute.route === 'login' ||
     currentRoute.route === 'register' ||
     currentRoute.route === 'forgot_password'
@@ -424,7 +493,20 @@ function AppContent() {
         ? 'forgot_password'
         : 'login';
 
-    return <AuthPortalView initialMode={initialMode} onSuccess={() => navigate('/')} />;
+    return (
+      <AuthPortalView
+        initialMode={initialMode}
+        onSuccess={() => {
+          if (
+            currentRoute.route === 'login' ||
+            currentRoute.route === 'register' ||
+            currentRoute.route === 'forgot_password'
+          ) {
+            navigate('/');
+          }
+        }}
+      />
+    );
   }
 
   // Standalone LOWERVIBE Artist WebApp gate: only approved registered artists can access standalone mode
@@ -515,213 +597,211 @@ function AppContent() {
     setTimeout(() => setIsPageTransitioning(false), 160);
   };
 
-  const handleSelectArtist = (artistId: string) => {
-    const artist = artists.find((a) => a.id === artistId);
-    if (artist) {
-      navigate(`/artists/${artist.slug || artist.id}`);
-    } else if (artistId) {
-      navigate(`/artists/${artistId}`);
-    }
-  };
-
-  const handleOpenTrackDetails = (track?: Track) => {
-    if (track) {
-      navigate(`/tracks/${track.id}`);
-    } else if (currentTrack) {
-      navigate(`/tracks/${currentTrack.id}`);
-    } else if (tracks.length > 0) {
-      navigate(`/tracks/${tracks[0].id}`);
-    }
-  };
-
   const handleSelectCategory = (category: string) => {
     navigate(`/discover?genre=${encodeURIComponent(category)}`);
   };
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)] flex flex-col font-sans transition-colors duration-200 selection:bg-[var(--accent)]/30 overflow-x-hidden">
-      {/* Subtle route progress bar */}
-      <div
-        className={`fixed top-0 left-0 right-0 h-0.5 z-50 pointer-events-none transition-all duration-200 ease-out transform-gpu ${
-          isPageTransitioning
-            ? 'opacity-100 bg-gradient-to-r from-[var(--violet)] via-[var(--accent)] to-[var(--violet)] scale-x-100 origin-left'
-            : 'opacity-0 scale-x-0 origin-left'
-        }`}
-      />
-
-      <StickyHeader
-        onOpenSearch={() => setIsSearchOpen(true)}
-        onOpenAccount={() => handleSelectTab('profile')}
-        onLogoClick={() => navigate('/')}
-      />
-
-      <OfflineBanner />
-
-      {/* Standalone Artist WebApp quick switcher (Studio / Artist Page / Withdrawals) */}
-      {isStandaloneArtistApp && isApprovedArtistAccount && (
-        <div className="bg-[var(--surface)] border-b border-[var(--border)] px-4 py-2">
-          <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
-            <span className="font-bold text-[var(--accent-text)] font-mono uppercase tracking-wider text-[10px]">
-              LOWERVIBE Artist WebApp
-            </span>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <button
-                type="button"
-                onClick={() => navigate('/artistcreator?standalone=artist')}
-                className={`px-3 py-1 rounded-full font-semibold cursor-pointer ${
-                  currentRoute.route === 'studio' && searchParams.get('tab') !== 'withdrawals'
-                    ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
-                    : 'bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)]'
-                }`}
-              >
-                Artist Creator
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const targetId = currentUser?.artistId;
-                  if (targetId) navigate(`/artists/${targetId}?standalone=artist`);
-                  else navigate('/artistcreator?standalone=artist');
-                }}
-                className={`px-3 py-1 rounded-full font-semibold cursor-pointer ${
-                  currentRoute.route === 'artist_detail'
-                    ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
-                    : 'bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)]'
-                }`}
-              >
-                My Artist Page
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/artistcreator?standalone=artist&tab=withdrawals')}
-                className={`px-3 py-1 rounded-full font-semibold cursor-pointer ${
-                  currentRoute.route === 'studio' && searchParams.get('tab') === 'withdrawals'
-                    ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
-                    : 'bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)]'
-                }`}
-              >
-                Withdrawals
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Terms update acknowledgment banner */}
-      {currentUser && needTermsUpdateAck && (
-        <div className="bg-[var(--surface)] border-b border-[var(--border)] px-4 py-2.5">
-          <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2 text-[var(--text)]">
-              <FileText className="w-4 h-4 text-[var(--accent-text)] shrink-0" />
-              <span>
-                We updated our{' '}
-                <button
-                  type="button"
-                  onClick={() => navigate('/terms')}
-                  className="underline font-semibold hover:text-[var(--accent-text)] cursor-pointer"
-                >
-                  Terms of Service
-                </button>{' '}
-                and{' '}
-                <button
-                  type="button"
-                  onClick={() => navigate('/privacy')}
-                  className="underline font-semibold hover:text-[var(--accent-text)] cursor-pointer"
-                >
-                  Privacy Policy
-                </button>
-                .
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => acceptLatestTerms()}
-              className="px-3.5 py-1.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs cursor-pointer"
-            >
-              Accept
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Main Content Container with interactive Pull-to-Refresh + dynamic Mini-Player clearance */}
-      <PullToRefresh
-        disabled={
-          isOnboardingOpen ||
-          isSearchOpen ||
-          isAuthModalOpen ||
-          authModalOpen ||
-          Boolean(activeDetailTrack || activeShareTrack || selectedArtistModal)
-        }
-      >
+      {isMinimalPublicRoute ? (
         <main
-          className={`flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 pt-5 mb-0 transition-[padding] duration-200 ${
-            isPlayerMounted && !isPlayerExiting ? 'pb-40 md:pb-28' : 'pb-20 md:pb-0'
+          className={`flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 pt-6 ${
+            isPlayerMounted && !isPlayerExiting ? 'pb-36' : 'pb-16'
           }`}
         >
-          <div key={currentRoute.pathname} className="animate-fadeIn">
-            {currentRoute.route === 'home' && (
-              <HomeView
-                onSelectArtist={handleSelectArtist}
-                onOpenTrackDetails={handleOpenTrackDetails}
-                onOpenLegal={openLegalModal}
-                onOpenStudio={() => handleSelectTab('upload')}
-                onSelectCategory={handleSelectCategory}
-              />
-            )}
-
-            {currentRoute.route === 'discover' && (
-              <DiscoverView
-                onSelectArtist={handleSelectArtist}
-                onOpenTrackDetails={handleOpenTrackDetails}
-              />
-            )}
-
-            {currentRoute.route === 'artists' && <ArtistsRosterView />}
-
-            {currentRoute.route === 'artist_detail' && <ArtistPublicPageView />}
-
-            {currentRoute.route === 'track_detail' && <TrackPublicPageView />}
-
-            {currentRoute.route === 'library' && (
-              <LibraryView onOpenTrackDetails={handleOpenTrackDetails} />
-            )}
-
-            {currentRoute.route === 'studio' && (
-              <StudioView onOpenTrackDetails={handleOpenTrackDetails} />
-            )}
-
-            {currentRoute.route === 'account' && <AccountView />}
-
-            {currentRoute.route === 'search' && (
-              <SearchResultsView onOpenTrackDetails={handleOpenTrackDetails} />
-            )}
-
-            {currentRoute.route === 'thank_you' && <ThankYouView />}
-
-            {currentRoute.route === 'not_found' && <NotFoundView />}
-
-            {currentRoute.route === 'server_error' && <ServerErrorView />}
-          </div>
-
-          <Footer onOpenLegal={openLegalModal} onNavigate={navigate} />
+          {isLegalDocRoute ? (
+            <LegalPageView docType={currentRoute.route as 'terms' | 'privacy' | 'copyright'} />
+          ) : (
+            <ThankYouView />
+          )}
         </main>
-      </PullToRefresh>
+      ) : (
+        <>
+          {/* Subtle route progress bar */}
+          <div
+            className={`fixed top-0 left-0 right-0 h-0.5 z-50 pointer-events-none transition-all duration-200 ease-out transform-gpu ${
+              isPageTransitioning
+                ? 'opacity-100 bg-gradient-to-r from-[var(--violet)] via-[var(--accent)] to-[var(--violet)] scale-x-100 origin-left'
+                : 'opacity-0 scale-x-0 origin-left'
+            }`}
+          />
+
+          <StickyHeader
+            onOpenSearch={() => setIsSearchOpen(true)}
+            onOpenAccount={() => handleSelectTab('profile')}
+            onLogoClick={() => navigate('/')}
+          />
+
+          <OfflineBanner />
+
+          {/* Standalone Artist WebApp quick switcher (Studio / Artist Page / Withdrawals) */}
+          {isStandaloneArtistApp && isApprovedArtistAccount && (
+            <div className="bg-[var(--surface)] border-b border-[var(--border)] px-4 py-2">
+              <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="font-bold text-[var(--accent-text)] tracking-tight text-xs">
+                  LOWERVIBE Creator
+                </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/artistcreator?standalone=artist')}
+                    className={`px-3 py-1 rounded-full font-semibold cursor-pointer ${
+                      currentRoute.route === 'studio' && searchParams.get('tab') !== 'withdrawals'
+                        ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
+                        : 'bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)]'
+                    }`}
+                  >
+                    Artist Creator
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const targetId = currentUser?.artistId;
+                      if (targetId) navigate(`/artists/${targetId}?standalone=artist`);
+                      else navigate('/artistcreator?standalone=artist');
+                    }}
+                    className={`px-3 py-1 rounded-full font-semibold cursor-pointer ${
+                      currentRoute.route === 'artist_detail'
+                        ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
+                        : 'bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)]'
+                    }`}
+                  >
+                    My Artist Page
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/artistcreator?standalone=artist&tab=withdrawals')}
+                    className={`px-3 py-1 rounded-full font-semibold cursor-pointer ${
+                      currentRoute.route === 'studio' && searchParams.get('tab') === 'withdrawals'
+                        ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
+                        : 'bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)]'
+                    }`}
+                  >
+                    Withdrawals
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Terms update acknowledgment banner */}
+          {currentUser && needTermsUpdateAck && (
+            <div className="bg-[var(--surface)] border-b border-[var(--border)] px-4 py-2.5">
+              <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2 text-[var(--text)]">
+                  <FileText className="w-4 h-4 text-[var(--accent-text)] shrink-0" />
+                  <span>
+                    We updated our{' '}
+                    <button
+                      type="button"
+                      onClick={() => navigate('/terms')}
+                      className="underline font-semibold hover:text-[var(--accent-text)] cursor-pointer"
+                    >
+                      Terms of Service
+                    </button>{' '}
+                    and{' '}
+                    <button
+                      type="button"
+                      onClick={() => navigate('/privacy')}
+                      className="underline font-semibold hover:text-[var(--accent-text)] cursor-pointer"
+                    >
+                      Privacy Policy
+                    </button>
+                    .
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => acceptLatestTerms()}
+                  className="px-3.5 py-1.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs cursor-pointer"
+                >
+                  Accept
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Main Content Container with interactive Pull-to-Refresh + dynamic Mini-Player clearance */}
+          <PullToRefresh
+            disabled={
+              isOnboardingOpen ||
+              isSearchOpen ||
+              isAuthModalOpen ||
+              authModalOpen ||
+              Boolean(activeDetailTrack || activeShareTrack || activeShareArtist || selectedArtistModal)
+            }
+          >
+            <main
+              className={`flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 pt-5 mb-0 transition-[padding] duration-200 ${
+                isPlayerMounted && !isPlayerExiting ? 'pb-40 md:pb-28' : 'pb-20 md:pb-0'
+              }`}
+            >
+              <div key={currentRoute.pathname} className="animate-fadeIn">
+                {currentRoute.route === 'home' && (
+                  <HomeView
+                    onSelectArtist={handleSelectArtist}
+                    onOpenTrackDetails={handleOpenTrackDetails}
+                    onOpenLegal={openLegalModal}
+                    onOpenStudio={() => handleSelectTab('upload')}
+                    onSelectCategory={handleSelectCategory}
+                  />
+                )}
+
+                {currentRoute.route === 'discover' && (
+                  <DiscoverView
+                    onSelectArtist={handleSelectArtist}
+                    onOpenTrackDetails={handleOpenTrackDetails}
+                  />
+                )}
+
+                {currentRoute.route === 'artists' && <ArtistsRosterView />}
+
+                {currentRoute.route === 'artist_detail' && <ArtistPublicPageView />}
+
+                {currentRoute.route === 'track_detail' && <TrackPublicPageView />}
+
+                {currentRoute.route === 'library' && (
+                  <LibraryView onOpenTrackDetails={handleOpenTrackDetails} />
+                )}
+
+                {currentRoute.route === 'studio' && (
+                  <StudioView onOpenTrackDetails={handleOpenTrackDetails} />
+                )}
+
+                {currentRoute.route === 'account' && <AccountView />}
+
+                {currentRoute.route === 'search' && (
+                  <SearchResultsView onOpenTrackDetails={handleOpenTrackDetails} />
+                )}
+
+                {currentRoute.route === 'thank_you' && <ThankYouView />}
+
+                {currentRoute.route === 'not_found' && <NotFoundView />}
+
+                {currentRoute.route === 'server_error' && <ServerErrorView />}
+              </div>
+
+              <Footer onOpenLegal={openLegalModal} onNavigate={navigate} />
+            </main>
+          </PullToRefresh>
+
+          <BottomTabBar activeTab={activeTab} onSelectTab={handleSelectTab} />
+
+          <StickyMobileCta isPlayerVisible={isPlayerMounted && !isPlayerExiting} />
+        </>
+      )}
 
       {isPlayerMounted && (
         <BottomPlayer
-          onOpenDetails={() => handleOpenTrackDetails()}
+          key="pinned-bottom-player"
+          onOpenDetails={handleOpenCurrentTrackDetails}
           onOpenArtist={handleSelectArtist}
-          onOpenFullscreen={() => setIsFullscreenPlayerOpen(true)}
+          onOpenFullscreen={handleOpenFullscreenPlayer}
           onClosePlayer={handleCloseBottomPlayer}
           isExiting={isPlayerExiting}
           fallbackTrack={lastPlayerTrackRef.current}
         />
       )}
-
-      <BottomTabBar activeTab={activeTab} onSelectTab={handleSelectTab} />
-
-      <StickyMobileCta isPlayerVisible={isPlayerMounted && !isPlayerExiting} />
 
       <CookieBanner hasPlayerOffset={isPlayerMounted && !isPlayerExiting} />
 
@@ -779,7 +859,11 @@ function AppContent() {
 
       <ShareModal
         track={activeShareTrack}
-        onClose={() => setActiveShareTrack(null)}
+        artist={activeShareArtist}
+        onClose={() => {
+          setActiveShareTrack(null);
+          setActiveShareArtist(null);
+        }}
       />
 
       <AuthModal

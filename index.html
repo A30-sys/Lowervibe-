@@ -4,14 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 
-    <!-- Primary Title & Meta -->
-    <title>LOWERVIBE — African Independent Music</title>
+    <!-- Primary Title & SEO Meta -->
+    <title>LOWERVIBE — Stream Trending African Independent Music</title>
     <meta
       name="description"
-      content="Stream independent music from Malawi, Nigeria, and across Africa. Discover new artists, save tracks offline, and support creators directly."
+      content="Stream trending independent music from Malawi, Nigeria, South Africa, and across Africa. Discover rising artists, save songs offline, and support creators directly on LOWERVIBE."
+    />
+    <meta
+      name="keywords"
+      content="LOWERVIBE, Malawi music, African independent music, Afro-Fusion, Amapiano, Chichewa music, trending African songs, stream African artists, offline music app"
     />
     <meta name="author" content="LOWERVIBE" />
     <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://lowervibemusic.web.app/" />
 
     <!-- PWA Web App Manifest & Mobile Integration -->
     <link rel="manifest" href="/manifest.json" />
@@ -30,28 +35,53 @@
     <!-- OpenGraph / Social Cards -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="LOWERVIBE" />
-    <meta property="og:title" content="LOWERVIBE — African Independent Music" />
+    <meta property="og:title" content="LOWERVIBE — Stream Trending African Independent Music" />
     <meta
       property="og:description"
-      content="Stream independent music from Malawi, Nigeria, and across Africa. Discover new artists, save tracks offline, and support creators directly."
+      content="Stream trending independent music from Malawi, Nigeria, South Africa, and across Africa. Discover rising artists, save songs offline, and support creators directly."
     />
-    <meta property="og:image" content="/icons/pwa-512x512.png" />
+    <meta property="og:url" content="https://lowervibemusic.web.app/" />
+    <meta property="og:image" content="https://lowervibemusic.web.app/icons/pwa-512x512.png" />
+    <meta property="og:image:width" content="512" />
+    <meta property="og:image:height" content="512" />
     <meta property="og:image:alt" content="LOWERVIBE — African Independent Music" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="LOWERVIBE — African Independent Music" />
+    <meta name="twitter:title" content="LOWERVIBE — Stream Trending African Independent Music" />
     <meta
       name="twitter:description"
-      content="Stream independent music from Malawi, Nigeria, and across Africa. Discover new artists, save tracks offline, and support creators directly."
+      content="Stream trending independent music from Malawi, Nigeria, South Africa, and across Africa. Discover rising artists and save tracks offline."
     />
-    <meta name="twitter:image" content="/icons/pwa-512x512.png" />
+    <meta name="twitter:image" content="https://lowervibemusic.web.app/icons/pwa-512x512.png" />
     <script id="lv-structured-data" type="application/ld+json">
       {
         "@context": "https://schema.org",
-        "@type": "WebApplication",
-        "name": "LOWERVIBE",
-        "applicationCategory": "MusicApplication",
-        "operatingSystem": "All",
-        "description": "Stream independent music from Malawi, Nigeria, and across Africa. Discover new artists, save tracks offline, and support creators directly."
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "name": "LOWERVIBE",
+            "alternateName": "LOWERVIBE Music",
+            "url": "https://lowervibemusic.web.app/",
+            "potentialAction": {
+              "@type": "SearchAction",
+              "target": "https://lowervibemusic.web.app/search?q={search_term_string}",
+              "query-input": "required name=search_term_string"
+            }
+          },
+          {
+            "@type": "Organization",
+            "name": "LOWERVIBE",
+            "url": "https://lowervibemusic.web.app/",
+            "logo": "https://lowervibemusic.web.app/icons/pwa-512x512.png"
+          },
+          {
+            "@type": "WebApplication",
+            "name": "LOWERVIBE",
+            "applicationCategory": "MusicApplication",
+            "operatingSystem": "All",
+            "url": "https://lowervibemusic.web.app/",
+            "description": "Stream independent music from Malawi, Nigeria, and across Africa. Discover new artists, save tracks offline, and support creators directly."
+          }
+        ]
       }
     </script>
 

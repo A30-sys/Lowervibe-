@@ -62,6 +62,7 @@ export function makeAvatarSvg(c1: string, c2: string, ring: string): string {
   );
 }
 
-export const DEFAULT_ARTWORK_SVG = makeCoverSvg('#12121A', '#1B1633', '#C6FF4A');
+export const LOWERVIBE_ICON_ARTWORK = '/icons/pwa-512x512.png';
+export const DEFAULT_ARTWORK_SVG = LOWERVIBE_ICON_ARTWORK;
 export const DEFAULT_BANNER_SVG = makeBannerSvg('#0B0B10', '#18122B', '#6C4BFF');
 export const DEFAULT_AVATAR_SVG = makeAvatarSvg('#1E1B3A', '#101218', '#C6FF4A');

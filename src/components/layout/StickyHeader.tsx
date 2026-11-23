@@ -3,10 +3,13 @@ import {
   Bell,
   CheckCheck,
   CheckCircle2,
+  Disc3,
   Download,
   Megaphone,
   ShieldCheck,
   User as UserIcon,
+  Volume2,
+  VolumeX,
   Wallet,
   X,
 } from 'lucide-react';
@@ -17,6 +20,8 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { useRouter } from '../../context/RouterContext';
 import { NotificationItem } from '../../types';
+import { playNotificationSound, showDeviceNotification } from '../../utils/notificationSound';
+import { MAIN_PWA_INSTALLED_KEY, openPwaInstallPrompt } from '../../utils/pwaManifest';
 import { LowerVibeLogo } from '../brand/LowerVibeLogo';
 
 interface StickyHeaderProps {
@@ -38,14 +43,17 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
   onLogoClick,
 }) => {
   const { isPlaying } = useAudio();
-  const { currentUser, isArtist, isAdmin } = useAuth();
+  const { currentUser, isArtist, isAdmin, userSettings, updateUserSettings } = useAuth();
   const { t } = useLanguage();
   const { notifications, unreadCount, isNotificationRead, markAsRead, markAllAsRead } = useNotifications();
-  const { currentRoute, navigate } = useRouter();
+  const { currentRoute, navigate, searchParams } = useRouter();
 
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifFilter, setNotifFilter] = useState<'all' | 'unread' | 'news'>('all');
-  const [isPwaInstalled, setIsPwaInstalled] = useState(false);
+  const [isMainPwaStandalone, setIsMainPwaStandalone] = useState(false);
+  const [notifPermission, setNotifPermission] = useState<string>(() =>
+    typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
+  );
   const notifContainerRef = useRef<HTMLDivElement>(null);
 
   const canInstallArtistApp = Boolean(
@@ -55,18 +63,29 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
         currentUser.role === 'artist' ||
         currentUser.applicationStatus === 'approved')
   );
+  const isCreatorStandalone =
+    typeof window !== 'undefined' &&
+    (window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true) &&
+    searchParams.get('standalone') === 'artist';
 
   useEffect(() => {
     const standalone =
       window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as unknown as { standalone?: boolean }).standalone === true ||
-      localStorage.getItem('lowervibe_pwa_installed') === 'true';
-    setIsPwaInstalled(standalone);
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+    const mainStandalone = standalone && searchParams.get('standalone') !== 'artist';
+    setIsMainPwaStandalone(
+      mainStandalone || localStorage.getItem(MAIN_PWA_INSTALLED_KEY) === 'true'
+    );
 
-    const handleInstalled = () => setIsPwaInstalled(true);
+    const handleInstalled = () => {
+      if (searchParams.get('standalone') !== 'artist') {
+        setIsMainPwaStandalone(true);
+      }
+    };
     window.addEventListener('appinstalled', handleInstalled);
     return () => window.removeEventListener('appinstalled', handleInstalled);
-  }, []);
+  }, [searchParams]);
 
   useEffect(() => {
     if (!isNotifOpen) return;
@@ -90,6 +109,7 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
 
   const updatesCount = notifications.filter(
     (item) =>
+      item.type === 'new_release' ||
       item.type === 'news' ||
       item.type === 'system' ||
       item.type === 'withdrawal_status'
@@ -99,6 +119,7 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
     if (notifFilter === 'unread') return !isNotificationRead(item);
     if (notifFilter === 'news') {
       return (
+        item.type === 'new_release' ||
         item.type === 'news' ||
         item.type === 'system' ||
         item.type === 'withdrawal_status'
@@ -119,6 +140,12 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
 
   const renderNotifIcon = (type: NotificationItem['type']) => {
     switch (type) {
+      case 'new_release':
+        return (
+          <div className="w-9 h-9 rounded-xl bg-[var(--accent)]/15 text-[var(--accent-text)] border border-[var(--accent)]/35 flex items-center justify-center shrink-0">
+            <Disc3 className="w-4 h-4" />
+          </div>
+        );
       case 'artist_approved':
         return (
           <div className="w-9 h-9 rounded-xl bg-[var(--accent)]/15 text-[var(--accent-text)] border border-[var(--accent)]/35 flex items-center justify-center shrink-0">
@@ -191,19 +218,32 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
           ))}
         </nav>
 
-        {/* Right: Install Artist App + Admin + Notification Bell + Avatar */}
+        {/* Right: Install App / Creator App + Notification Bell + Avatar */}
         <div className="flex items-center gap-2">
-          {!isPwaInstalled && canInstallArtistApp && (
+          {canInstallArtistApp && !isCreatorStandalone ? (
             <button
               type="button"
-              onClick={() => window.dispatchEvent(new Event('lowervibe:open-install-prompt'))}
+              onClick={() => openPwaInstallPrompt('creator')}
               className="flex items-center gap-1.5 px-2.5 sm:px-3 rounded-2xl bg-[var(--surface)] text-[var(--accent-text)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-all active:scale-95 min-h-[44px] sm:min-h-[48px] cursor-pointer text-xs font-bold"
-              title="Install LOWERVIBE Artist WebApp (Android & iPhone)"
-              aria-label="Install Artist WebApp"
+              title="Install LOWERVIBE Creator & Main App"
+              aria-label="Install WebApps"
             >
               <Download className="w-4 h-4" />
-              <span className="hidden lg:inline">Artist App</span>
+              <span className="hidden lg:inline">Creator App</span>
             </button>
+          ) : (
+            !isMainPwaStandalone && (
+              <button
+                type="button"
+                onClick={() => openPwaInstallPrompt('main')}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 rounded-2xl bg-[var(--surface)] text-[var(--accent-text)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-all active:scale-95 min-h-[44px] sm:min-h-[48px] cursor-pointer text-xs font-bold"
+                title="Install LOWERVIBE App (Android, iPhone & Desktop)"
+                aria-label="Install LOWERVIBE App"
+              >
+                <Download className="w-4 h-4" />
+                <span className="hidden lg:inline">Install App</span>
+              </button>
+            )
           )}
 
           {/* Notifications Bell + Rebuilt Panel */}
@@ -255,6 +295,27 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const next = userSettings.notifications.soundEnabled === false;
+                          await updateUserSettings({ notifications: { soundEnabled: next } });
+                          if (next) void playNotificationSound('artist');
+                        }}
+                        className="min-w-[40px] min-h-[40px] rounded-xl bg-[var(--surface-2)] hover:border-[var(--border-strong)] border border-[var(--border)] flex items-center justify-center transition cursor-pointer text-[var(--text)]"
+                        title={
+                          userSettings.notifications.soundEnabled === false
+                            ? 'Notification sound muted — click to enable'
+                            : 'Notification sound active'
+                        }
+                        aria-label="Toggle notification sound"
+                      >
+                        {userSettings.notifications.soundEnabled === false ? (
+                          <VolumeX className="w-4 h-4 text-[var(--text-muted)]" />
+                        ) : (
+                          <Volume2 className="w-4 h-4 text-[var(--accent-text)]" />
+                        )}
+                      </button>
                       {unreadCount > 0 && (
                         <button
                           type="button"
@@ -275,6 +336,43 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
                       </button>
                     </div>
                   </div>
+
+                  {notifPermission === 'default' && (
+                    <div className="px-4 py-2.5 bg-[var(--accent)]/10 border-b border-[var(--border)] flex items-center justify-between gap-2 text-[11px]">
+                      <span className="text-[var(--text)] font-medium">
+                        Enable device sound &amp; OS alerts for releases &amp; admin updates
+                      </span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const perm = await Notification.requestPermission();
+                            setNotifPermission(perm);
+                            if (perm === 'granted') {
+                              await updateUserSettings({
+                                notifications: {
+                                  newReleasesPush: true,
+                                  payoutUpdatesPush: true,
+                                  productNewsPush: true,
+                                  soundEnabled: true,
+                                },
+                              });
+                              void playNotificationSound('artist');
+                              void showDeviceNotification({
+                                title: 'LOWERVIBE alerts enabled',
+                                body: 'You will get sound & device alerts for new music releases and updates.',
+                                url: '/discover',
+                                tag: 'lv-alerts-enabled',
+                              });
+                            }
+                          } catch {}
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--accent-contrast)] font-bold cursor-pointer shrink-0 min-h-[32px]"
+                      >
+                        Enable
+                      </button>
+                    </div>
+                  )}
 
                   {/* Interactive Filter Bar */}
                   <div

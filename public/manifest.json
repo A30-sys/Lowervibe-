@@ -1,14 +1,14 @@
 {
-  "id": "/artistcreator?standalone=artist",
-  "name": "LOWERVIBE Artist",
+  "id": "/",
+  "name": "LOWERVIBE — African Music",
   "short_name": "LOWERVIBE",
-  "description": "Standalone LOWERVIBE Artist WebApp for approved creators — access your Artist Page, upload tracks, track real-time earnings, and manage withdrawals.",
-  "start_url": "/artistcreator?standalone=artist",
+  "description": "Stream independent African music, discover trending tracks, follow artists, receive real-time release alerts, and save songs offline.",
+  "start_url": "/?pwa=main",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "theme_color": "#FFFFFF",
-  "background_color": "#FFFFFF",
+  "theme_color": "#0A0B0A",
+  "background_color": "#0A0B0A",
   "icons": [
     {
       "src": "/icons/pwa-192x192.png",
@@ -38,19 +38,24 @@
   "categories": ["music", "entertainment", "audio"],
   "shortcuts": [
     {
-      "name": "Artist Creator",
-      "url": "/artistcreator?standalone=artist",
-      "description": "Open your Artist Creator & uploads"
+      "name": "Home",
+      "url": "/?pwa=main",
+      "description": "Open LOWERVIBE home feed"
     },
     {
-      "name": "My Artist Page",
-      "url": "/artistcreator?standalone=artist&view=artist-page",
-      "description": "Open your standalone Artist Page"
+      "name": "Discover Charts",
+      "url": "/discover",
+      "description": "Browse trending music and regional charts"
     },
     {
-      "name": "Withdrawals",
-      "url": "/artistcreator?standalone=artist&tab=withdrawals",
-      "description": "Check earnings balance and request payouts"
+      "name": "Artists",
+      "url": "/artists",
+      "description": "Explore independent African artists"
+    },
+    {
+      "name": "Library",
+      "url": "/library",
+      "description": "Open your liked and offline saved music"
     }
   ]
 }

@@ -80,7 +80,7 @@ service cloud.firestore {
         && (!('gender' in data) || data.gender in ['male', 'female', 'non-binary', 'prefer_not_to_say'])
         && (!('age' in data) || (data.age is number && data.age >= 13 && data.age <= 120))
         && (!('preferredGenres' in data) || (data.preferredGenres is list && data.preferredGenres.size() <= 30 && (data.preferredGenres.size() == 0 || data.preferredGenres[0] is string)))
-        && (!('role' in data) || data.role in ['listener', 'artist'] || isAdmin())
+        && (!('role' in data) || data.role == 'listener' || isAdmin())
         && (!('isAdmin' in data) || data.isAdmin == false || isAdmin())
         && (!('artistId' in data) || data.artistId == null || data.artistId == '' || isArtistDocOwnedBy(data.artistId, userId));
     }
@@ -134,7 +134,6 @@ service cloud.firestore {
         && (!('banner' in data) || (data.banner is string && data.banner.size() <= 4096))
         && (
           data.get('role', 'listener') == prev.get('role', 'listener')
-          || data.get('role', 'listener') in ['listener', 'artist']
           || isAdmin()
         )
         && (

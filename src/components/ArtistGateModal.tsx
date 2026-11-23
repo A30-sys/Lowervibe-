@@ -1,6 +1,7 @@
 import { CheckCircle2, Music, Sparkles, Upload, UserCheck, X } from 'lucide-react';
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useRouter } from '../context/RouterContext';
 
 interface ArtistGateModalProps {
   isOpen: boolean;
@@ -15,20 +16,15 @@ export const ArtistGateModal: React.FC<ArtistGateModalProps> = ({
   onClose,
   onOpenArtistAuth,
   onOpenLogin,
-  onSuccessUpgrade,
 }) => {
-  const { currentUser, updateCurrentUser } = useAuth();
+  const { currentUser } = useAuth();
+  const { navigate } = useRouter();
 
   if (!isOpen) return null;
 
-  const handleUpgradeCurrentListener = () => {
-    if (!currentUser) return;
-    updateCurrentUser({
-      role: 'artist',
-      artistId: currentUser.artistId || 'artist-' + Date.now(),
-    });
-    onSuccessUpgrade();
+  const handleGoApplyInStudio = () => {
     onClose();
+    navigate('/artistcreator');
   };
 
   return (
@@ -87,11 +83,15 @@ export const ArtistGateModal: React.FC<ArtistGateModalProps> = ({
             /* Logged in as listener -> 1-click Upgrade */
             <>
               <button
-                onClick={handleUpgradeCurrentListener}
+                onClick={handleGoApplyInStudio}
                 className="w-full py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
               >
                 <UserCheck className="w-4 h-4" />
-                <span>Switch {currentUser.name} to Artist Account</span>
+                <span>
+                  {currentUser.applicationStatus === 'pending'
+                    ? 'Check Artist Approval Status'
+                    : 'Apply in Artist Creator Studio'}
+                </span>
               </button>
               <button
                 onClick={onClose}

@@ -2,6 +2,7 @@ import {
   ArrowUpDown,
   Bookmark,
   Compass,
+  Disc3,
   Flame,
   Heart,
   LayoutGrid,
@@ -11,7 +12,6 @@ import {
   RotateCcw,
   Search,
   Sliders,
-  Sparkles,
   Tag,
   Volume2,
   X,
@@ -351,12 +351,12 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
             </div>
 
             <div className="space-y-3 flex-1 text-center md:text-left">
-              <div className="flex flex-wrap items-center justify-center md:justify-start gap-2">
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase bg-[var(--accent)]/15 text-[var(--accent-text)] border border-[var(--accent)]/30 inline-flex items-center gap-1">
-                  <Sparkles className="w-3 h-3" />
-                  <span>Featured Pick</span>
+              <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 text-xs">
+                <span className="font-bold uppercase tracking-wider text-[11px] text-[var(--accent-text)]">
+                  Featured Release
                 </span>
-                <span className="text-[11px] font-mono text-[var(--text-muted)]">
+                <span className="text-[var(--text-muted)]">·</span>
+                <span className="font-mono text-[11px] text-[var(--text-muted)]">
                   {featuredRecord.region || 'Global'}
                 </span>
               </div>
@@ -657,7 +657,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
           {[
             { title: 'Most Played', icon: Flame, list: topPlayedTracks, metric: (t: Track) => `${t.plays || 0} plays` },
             { title: 'Most Liked', icon: Heart, list: mostLikedTracks, metric: (t: Track) => `${getTrackLikeCount(t)} likes` },
-            { title: 'New Releases', icon: Sparkles, list: newestTracks, metric: (t: Track) => formatTime(t.durationSeconds) },
+            { title: 'New Releases', icon: Disc3, list: newestTracks, metric: (t: Track) => formatTime(t.durationSeconds) },
           ].map((col) => {
             const Icon = col.icon;
             return (

@@ -10,7 +10,6 @@ import {
   Play,
   Radio,
   Share2,
-  Sparkles,
   UserCheck,
   UserPlus,
   Users,
@@ -275,7 +274,7 @@ export const FriendsActivityFeed: React.FC<FriendsActivityFeedProps> = ({
               act.activityType === 'released'
                 ? {
                     label: 'Dropped Master',
-                    icon: Sparkles,
+                    icon: Disc,
                     bg: 'bg-[#C6FF4A]/15 text-[#C6FF4A] border-[#C6FF4A]/30',
                   }
                 : act.activityType === 'liked'

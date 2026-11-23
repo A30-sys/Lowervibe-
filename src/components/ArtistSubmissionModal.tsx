@@ -9,7 +9,6 @@ import {
   Music,
   Radio,
   Sliders,
-  Sparkles,
   Upload,
   User,
   ShieldCheck,
@@ -22,7 +21,7 @@ import { useRouter } from '../context/RouterContext';
 import { useToast } from '../context/ToastContext';
 import { detectDefaultCountry } from '../data/regions';
 import { Artist, Track } from '../types';
-import { makeAvatarSvg, makeBannerSvg, makeCoverSvg } from '../utils/artworkFallback';
+import { LOWERVIBE_ICON_ARTWORK, makeAvatarSvg, makeBannerSvg, makeCoverSvg } from '../utils/artworkFallback';
 import { RegionSelect } from './common/RegionSelect';
 import { GenreSelectOrCustom } from './common/GenreSelectOrCustom';
 
@@ -47,10 +46,10 @@ const PRESET_BANNERS = [
 ];
 
 const PRESET_COVERS = [
+  LOWERVIBE_ICON_ARTWORK,
   makeCoverSvg('#12121A', '#1B1633', '#C6FF4A'),
   makeCoverSvg('#0E1B24', '#102A38', '#38BDF8'),
   makeCoverSvg('#24122B', '#140C1C', '#A855F7'),
-  makeCoverSvg('#261A10', '#120E0A', '#F59E0B'),
 ];
 
 const ALL_GENRES = ['Afrobeats', 'Hip Hop', 'R&B', 'Amapiano', 'Afro-Fusion', 'Neo-Soul', 'Boom Bap', 'Electronic', 'Lo-Fi', 'Ambient', 'Downtempo'];
@@ -648,7 +647,7 @@ export const ArtistSubmissionModal: React.FC<ArtistSubmissionModalProps> = ({
             <div className="space-y-6 animate-fadeIn">
               <div className="text-center py-2">
                 <div className="inline-flex p-3 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 mb-2">
-                  <Sparkles className="w-6 h-6" />
+                  <Disc className="w-6 h-6" />
                 </div>
                 <h3 className="text-lg font-bold text-white font-heading">Ready to Share with LOWERVIBE</h3>
                 <p className="text-xs text-zinc-400 max-w-md mx-auto mt-1">
@@ -782,7 +781,7 @@ export const ArtistSubmissionModal: React.FC<ArtistSubmissionModalProps> = ({
               onClick={handleFinalPublish}
               className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-zinc-950 text-sm font-bold transition shadow-xl shadow-amber-500/25"
             >
-              <Sparkles className="w-4 h-4" />
+              <Disc className="w-4 h-4" />
               <span>Publish & Stream Music Now</span>
             </button>
           )}

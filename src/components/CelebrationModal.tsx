@@ -2,6 +2,7 @@ import { CheckCircle2, ChevronRight, Download, ExternalLink, X } from 'lucide-re
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useRouter } from '../context/RouterContext';
+import { openPwaInstallPrompt } from '../utils/pwaManifest';
 import { LowerVibeLogo } from './brand/LowerVibeLogo';
 
 interface CelebrationModalProps {
@@ -56,12 +57,12 @@ export const CelebrationModal: React.FC<CelebrationModalProps> = ({ onGoToStudio
             type="button"
             onClick={() => {
               dismissCelebrationModal();
-              window.dispatchEvent(new Event('lowervibe:open-install-prompt'));
+              openPwaInstallPrompt('creator');
             }}
             className="w-full py-3.5 rounded-2xl font-bold text-sm text-[var(--accent-contrast)] bg-[var(--accent)] hover:brightness-95 transition flex items-center justify-center gap-2 cursor-pointer"
           >
             <Download className="w-4 h-4" />
-            <span>Install Artist WebApp</span>
+            <span>Install LOWERVIBE Creator App</span>
           </button>
 
           <div className="grid grid-cols-2 gap-2">

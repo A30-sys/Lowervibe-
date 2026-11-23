@@ -13,7 +13,6 @@ import {
   Phone,
   RefreshCw,
   ShieldAlert,
-  Sparkles,
   UserPlus,
   Users,
 } from 'lucide-react';
@@ -882,8 +881,15 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                       <Music className="w-4 h-4 text-[var(--accent-text)]" />
                       <span>Artist</span>
                     </div>
+                    <div className="text-[10px] text-[var(--text-muted)] mt-0.5">Requires approval</div>
                   </button>
                 </div>
+
+                {role === 'artist' && (
+                  <p className="text-[11px] text-[var(--text-muted)] bg-[var(--surface-2)] border border-[var(--border)] rounded-xl px-3 py-2 leading-relaxed">
+                    Your account opens as a listener immediately so you can install LOWERVIBE &amp; explore music, while your Artist Creator application is reviewed by Admin.
+                  </p>
+                )}
 
                 <div>
                   <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
@@ -1120,7 +1126,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)]">
-                      <Sparkles className="w-3.5 h-3.5 text-[var(--accent-text)]" />
+                      <Music className="w-3.5 h-3.5 text-[var(--accent-text)]" />
                       <span>Favourite genres</span>
                     </label>
                     <span className="text-[11px] font-mono text-[var(--accent-text)]">

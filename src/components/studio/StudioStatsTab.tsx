@@ -13,7 +13,6 @@ import {
   Play,
   Pause,
   Radio,
-  Sparkles,
   TrendingUp,
   Users,
 } from 'lucide-react';
@@ -376,7 +375,7 @@ export const StudioStatsTab: React.FC<StudioStatsTabProps> = ({
       <div className="rounded-[24px] bg-[var(--surface)] border border-[var(--border)] overflow-hidden">
         <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between">
           <h3 className="text-sm font-bold text-[var(--text)] flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-[var(--accent-text)]" />
+            <Disc3 className="w-4 h-4 text-[var(--accent-text)]" />
             <span>Tracks ({artistTracks.length})</span>
           </h3>
         </div>

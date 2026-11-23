@@ -65,8 +65,9 @@ import {
 } from '../../services/uploadService';
 import { verifyServerToken } from '../../services/payoutTokenService';
 import { PayoutProviderType, Track } from '../../types';
-import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG, DEFAULT_BANNER_SVG } from '../../utils/artworkFallback';
+import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG, DEFAULT_BANNER_SVG, LOWERVIBE_ICON_ARTWORK } from '../../utils/artworkFallback';
 import { formatTime } from '../../utils/formatters';
+import { openPwaInstallPrompt } from '../../utils/pwaManifest';
 import { GenreSelectOrCustom } from '../common/GenreSelectOrCustom';
 import { MoodSelectOrCustom } from '../common/MoodSelectOrCustom';
 import { RegionSelect } from '../common/RegionSelect';
@@ -625,13 +626,13 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
       setUploadStep(2);
       return;
     }
-    if (!coverBlob) {
-      setUploadError('Select a cover artwork image.');
+    if (coverBlob && !artworkNoLogoConfirmed) {
+      setUploadError('Please confirm the cover artwork checkbox.');
       setUploadStep(2);
       return;
     }
-    if (!artworkNoLogoConfirmed || !rightsConfirmed) {
-      setUploadError('Please confirm both artwork and rights checkboxes.');
+    if (!rightsConfirmed) {
+      setUploadError('Please confirm that you own or control the audio rights.');
       setUploadStep(2);
       return;
     }
@@ -696,9 +697,11 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
         console.warn('Artist profile preflight check:', err);
       }
 
-      setUploadStatusText('Uploading audio & compressed artwork...');
+      setUploadStatusText(
+        coverBlob ? 'Uploading audio & compressed artwork...' : 'Uploading audio...'
+      );
       let audioPct = audioFile ? 0 : 100;
-      let coverPct = 0;
+      let coverPct = coverBlob ? 0 : 100;
       const syncCombinedProgress = () => {
         const combined = Math.round(audioPct * 0.72 + coverPct * 0.22);
         setUploadProgress(Math.max(5, Math.min(94, combined)));
@@ -719,7 +722,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
               setUploadStatusText(
                 snap.state === 'paused'
                   ? 'Upload paused — tap Resume to continue'
-                  : 'Uploading audio & compressed artwork...'
+                  : coverBlob
+                  ? 'Uploading audio & compressed artwork...'
+                  : 'Uploading audio...'
               );
               syncCombinedProgress();
             },
@@ -731,17 +736,22 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
           ? probeAudioUrlMetadata(finalAudioUrl).catch(() => null)
           : Promise.resolve(null);
 
-      const coverUploadPromise = uploadTrackCoverArtwork({
-        ownerId: currentUser.id,
-        trackId,
-        blob: coverBlob,
-        originalFilename: coverOriginalName,
-        contentType: coverContentType,
-        onProgress: (snap) => {
-          coverPct = snap.percent;
-          syncCombinedProgress();
-        },
-      });
+      const coverUploadPromise = coverBlob
+        ? uploadTrackCoverArtwork({
+            ownerId: currentUser.id,
+            trackId,
+            blob: coverBlob,
+            originalFilename: coverOriginalName,
+            contentType: coverContentType,
+            onProgress: (snap) => {
+              coverPct = snap.percent;
+              syncCombinedProgress();
+            },
+          })
+        : Promise.resolve({
+            downloadUrl: LOWERVIBE_ICON_ARTWORK,
+            storagePath: undefined as string | undefined,
+          });
 
       const [audioRes, probedRes, coverRes] = await Promise.all([
         audioUploadPromise,
@@ -772,10 +782,10 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
         artistId,
         artistName,
         artistAvatar: currentArtist?.avatar || currentUser.avatar || DEFAULT_AVATAR_SVG,
-        coverArt: coverRes.downloadUrl,
+        coverArt: coverRes.downloadUrl || LOWERVIBE_ICON_ARTWORK,
         audioUrl: finalAudioUrl,
         storageAudioPath,
-        storageCoverPath: coverRes.storagePath,
+        ...(coverRes.storagePath ? { storageCoverPath: coverRes.storagePath } : {}),
         audioChecksum: extractedMeta?.audioChecksum,
         verifiedMetadata: true,
         uploadedByUserId: currentUser.id,
@@ -1493,12 +1503,12 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
 
             <button
               type="button"
-              onClick={() => window.dispatchEvent(new Event('lowervibe:open-install-prompt'))}
+              onClick={() => openPwaInstallPrompt('creator')}
               className="px-3.5 py-2 rounded-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--accent)] text-xs font-semibold text-[var(--accent-text)] flex items-center gap-1.5 cursor-pointer"
-              title="Install standalone Artist WebApp (Android & iPhone)"
+              title="Install standalone LOWERVIBE Creator App (Android & iPhone)"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Artist App</span>
+              <span>Creator App</span>
             </button>
             {currentArtist && (
               <button
@@ -2135,10 +2145,10 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                     </div>
                   </div>
 
-                  {/* Cover Art Upload (Auto-cropped square WebP) */}
+                  {/* Cover Art Upload (Optional — uses LOWERVIBE icon logo automatically if omitted) */}
                   <div className="space-y-2">
                     <label className="text-xs font-semibold text-[var(--text)]">
-                      Cover artwork (Auto-cropped to 1:1 square · Fast WebP) *
+                      Cover artwork (Optional · Auto-uses LOWERVIBE icon if skipped)
                     </label>
                     <div
                       onClick={() => coverInputRef.current?.click()}
@@ -2155,19 +2165,21 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                         }}
                       />
                       <div className="w-16 h-16 rounded-xl bg-[var(--surface)] border border-[var(--border)] overflow-hidden shrink-0 flex items-center justify-center">
-                        {coverPreview ? (
-                          <img src={coverPreview} alt="Cover" className="w-full h-full object-cover" />
-                        ) : (
-                          <ImageIcon className="w-6 h-6 text-[var(--text-muted)]" />
-                        )}
+                        <img
+                          src={coverPreview || LOWERVIBE_ICON_ARTWORK}
+                          alt={coverPreview ? 'Cover preview' : 'Default LOWERVIBE cover logo'}
+                          className="w-full h-full object-cover"
+                        />
                       </div>
                       <div className="min-w-0">
                         <div className="text-xs font-bold text-[var(--text)] truncate">
-                          {coverPreview ? coverOriginalName : 'Tap to choose square cover image'}
+                          {coverPreview
+                            ? coverOriginalName
+                            : 'Tap to upload custom cover (or leave default LOWERVIBE icon)'}
                         </div>
                         <p className="text-[11px] text-[var(--text-muted)]">
                           {coverCompressionNote ||
-                            'Clean square image without third-party platform banners or logos.'}
+                            'Optional 1:1 WebP cover. If skipped, LOWERVIBE applies your official icon artwork automatically.'}
                         </p>
                       </div>
                     </div>
@@ -2178,15 +2190,17 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
 
                   {/* Required Checkboxes */}
                   <div className="space-y-2">
-                    <label className="flex items-start gap-2.5 p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] cursor-pointer text-xs text-[var(--text)]">
-                      <input
-                        type="checkbox"
-                        checked={artworkNoLogoConfirmed}
-                        onChange={(e) => setArtworkNoLogoConfirmed(e.target.checked)}
-                        className="mt-0.5 accent-[var(--accent)]"
-                      />
-                      <span>This artwork has no other platform&apos;s logo and I own the rights *</span>
-                    </label>
+                    {coverBlob && (
+                      <label className="flex items-start gap-2.5 p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] cursor-pointer text-xs text-[var(--text)]">
+                        <input
+                          type="checkbox"
+                          checked={artworkNoLogoConfirmed}
+                          onChange={(e) => setArtworkNoLogoConfirmed(e.target.checked)}
+                          className="mt-0.5 accent-[var(--accent)]"
+                        />
+                        <span>This artwork has no other platform&apos;s logo and I own the rights *</span>
+                      </label>
+                    )}
 
                     <label className="flex items-start gap-2.5 p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] cursor-pointer text-xs text-[var(--text)]">
                       <input

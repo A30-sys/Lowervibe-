@@ -15,7 +15,6 @@ import {
   Search,
   Share2,
   ShieldCheck,
-  Sparkles,
   Upload,
   UserCheck,
   Users

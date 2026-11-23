@@ -3,6 +3,9 @@ Allow: /
 Allow: /discover
 Allow: /artists
 Allow: /tracks
+Allow: /s/
+Allow: /a/
+Allow: /search
 Allow: /terms
 Allow: /privacy
 Allow: /copyright
@@ -15,4 +18,4 @@ Disallow: /account
 Disallow: /artistcreator
 Disallow: /studio
 
-Sitemap: /sitemap.xml
+Sitemap: https://lowervibemusic.web.app/sitemap.xml

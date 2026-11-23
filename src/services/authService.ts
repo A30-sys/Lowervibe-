@@ -5,6 +5,7 @@ import {
   createUserWithEmailAndPassword,
   deleteUser,
   EmailAuthProvider,
+  indexedDBLocalPersistence,
   linkWithPopup,
   PhoneAuthProvider,
   reauthenticateWithCredential,
@@ -316,11 +317,14 @@ export async function registerUserAccount(
   if (rateError) return { success: false, error: rateError };
 
   const isPlatformAdmin = false;
-  const assignedRole: UserRole = role === 'artist' ? 'artist' : 'listener';
-  const applicationStatus: 'none' | 'pending' | 'approved' | 'rejected' = extra?.application ? 'pending' : 'none';
+  // All new public signups begin as listeners; Creator Studio access requires Admin approval.
+  const assignedRole: UserRole = 'listener';
+  const hasArtistRequest = Boolean(extra?.application || role === 'artist');
 
   try {
-    await setPersistence(auth, browserLocalPersistence);
+    await setPersistence(auth, indexedDBLocalPersistence).catch(() =>
+      setPersistence(auth, browserLocalPersistence)
+    );
     const cred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
     const fbUser = cred.user;
 
@@ -354,6 +358,41 @@ export async function registerUserAccount(
       ? Array.from(new Set(extra.favoriteArtistIds.filter(Boolean))).slice(0, 30)
       : [];
 
+    const submittedApp: ArtistApplication | undefined = extra?.application
+      ? {
+          ...extra.application,
+          id: `app-${Date.now()}`,
+          userId: fbUser.uid,
+          userEmail: cleanEmail,
+          stageName: extra.application.stageName || cleanName,
+          legalName: extra.application.legalName || cleanName,
+          country: extra.application.country || extra?.country || 'Malawi',
+          primaryGenre: extra.application.primaryGenre || cleanPreferredGenres[0] || 'Afro-Fusion',
+          bio: extra.application.bio || extra?.bio || '',
+          avatarUrl: extra.application.avatarUrl || extra?.avatar || DEFAULT_AVATAR_SVG,
+          rightsConfirmed: extra.application.rightsConfirmed ?? true,
+          status: 'pending',
+          submittedAt: nowIso,
+        }
+      : hasArtistRequest
+      ? {
+          id: `app-${Date.now()}`,
+          userId: fbUser.uid,
+          userEmail: cleanEmail,
+          stageName: cleanName,
+          legalName: cleanName,
+          country: extra?.country || 'Malawi',
+          primaryGenre: cleanPreferredGenres[0] || 'Afro-Fusion',
+          bio: extra?.bio || '',
+          avatarUrl: extra?.avatar || DEFAULT_AVATAR_SVG,
+          rightsConfirmed: true,
+          status: 'pending',
+          submittedAt: nowIso,
+        }
+      : undefined;
+
+    const applicationStatus: 'none' | 'pending' | 'approved' | 'rejected' = submittedApp ? 'pending' : 'none';
+
     const newUser: User = {
       id: fbUser.uid,
       name: cleanName,
@@ -374,48 +413,19 @@ export async function registerUserAccount(
       followingArtistIds: cleanFavoriteArtistIds,
       playlists: [],
       applicationStatus,
+      ...(submittedApp ? { artistApplication: submittedApp } : {}),
       termsAcceptedAt: nowIso,
       termsVersion: LEGAL_CONFIG.currentTermsVersion,
       sessions: [currentSession],
     };
 
-    // If registering directly as an Artist, create canonical artist profile right away
-    if (assignedRole === 'artist') {
-      const artistId = `artist-${fbUser.uid.slice(0, 10)}`;
-      newUser.artistId = artistId;
-      await setDoc(
-        doc(db, 'artists', artistId),
-        {
-          id: artistId,
-          ownerId: fbUser.uid,
-          ownerUserId: fbUser.uid,
-          claimedByUserId: fbUser.uid,
-          name: cleanName,
-          handle: `@${finalHandle}`,
-          country: newUser.country || 'Malawi',
-          location: newUser.country || 'Malawi',
-          genres: cleanPreferredGenres.length > 0 ? cleanPreferredGenres.slice(0, 3) : ['Afro-Fusion'],
-          bio: extra?.bio || '',
-          avatar: newUser.avatar,
-          banner: '',
-          followersCount: 0,
-          likesCount: 0,
-          likedByUserIds: [],
-          monthlyListeners: 0,
-          verified: false,
-          isCertified: false,
-          isMonetized: false,
-          monetizationStatus: 'locked',
-          earningsBalance: 0,
-          joinedDate: nowIso,
-          socials: {},
-          contactEmail: cleanEmail,
-        },
-        { merge: true }
-      );
-    }
-
     await syncUserRecord(newUser);
+    if (submittedApp) {
+      await durableSetDoc('applications', submittedApp.id, submittedApp as unknown as Record<string, unknown>, {
+        merge: true,
+        mirrorBackup: true,
+      });
+    }
     await claimHandleRecord(finalHandle, fbUser.uid);
     if (cleanFavoriteArtistIds.length > 0) {
       await Promise.all(
@@ -466,7 +476,13 @@ export async function loginUserAccount(
   const isPlatformAdmin = false;
 
   try {
-    await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+    if (rememberMe) {
+      await setPersistence(auth, indexedDBLocalPersistence).catch(() =>
+        setPersistence(auth, browserLocalPersistence)
+      );
+    } else {
+      await setPersistence(auth, browserSessionPersistence);
+    }
     const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
     const fbUser = userCredential.user;
     clearRateLimit(`login:${cleanEmail}`);
