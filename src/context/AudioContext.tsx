@@ -125,7 +125,15 @@ interface AudioContextType {
   isCatalogLoaded: boolean;
 
   // Playback Controls
-  playTrack: (track: Track, options?: { crossfade?: boolean; startAtSeconds?: number; expandFullscreen?: boolean }) => void;
+  playTrack: (
+    track: Track,
+    options?: {
+      crossfade?: boolean;
+      crossfadeDurationOverride?: number;
+      startAtSeconds?: number;
+      expandFullscreen?: boolean;
+    }
+  ) => void;
   playTrackList: (items: Track[], startIndex?: number) => void;
   togglePlayPause: () => void;
   clearActiveTrack: () => void;
@@ -736,11 +744,21 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [crossfadeSeconds, setCrossfadeSecondsState] = useState<number>(() => {
     try {
       const saved = localStorage.getItem('lowervibe_crossfade_v2');
-      return saved !== null ? Math.max(0, Math.min(12, Number(saved))) : 0;
+      return saved !== null ? Math.max(0, Math.min(12, Number(saved))) : 4;
     } catch {
-      return 0;
+      return 4;
     }
   });
+
+  const crossfadeSecondsRef = useRef(crossfadeSeconds);
+  crossfadeSecondsRef.current = crossfadeSeconds;
+  const gaplessRef = useRef(userSettings.playback.gapless);
+  gaplessRef.current = userSettings.playback.gapless;
+  const isShufflingRef = useRef(isShuffling);
+  isShufflingRef.current = isShuffling;
+  const playSessionIdRef = useRef(0);
+  const autoCrossfadedSessionRef = useRef<number | null>(null);
+  const advanceNextTrackRef = useRef<(fadeOverrideSeconds?: number) => void>(() => {});
 
   const [playbackRate, setPlaybackRateState] = useState<number>(() => initialPinned.playbackRate || 1);
 
@@ -1547,20 +1565,25 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCatalogReloadNonce((n) => n + 1);
   };
 
-  // Preload next track for gapless handoff
+  // Preload next track for gapless / crossfade handoff
   useEffect(() => {
-    const nextCandidate =
-      queue[0] ||
-      tracks.find((t, idx, arr) => {
-        if (!currentTrack) return false;
-        const curIdx = arr.findIndex((x) => x.id === currentTrack.id);
-        return curIdx >= 0 && idx === (curIdx + 1) % arr.length && t.id !== currentTrack.id;
-      });
+    if (!currentTrack) return;
+    const available = tracks.filter((t) => !t.isDraft && !t.isDeranked);
+    let nextCandidate: Track | undefined = queue.find((t) => !t.isDraft && !t.isDeranked);
+    if (!nextCandidate && available.length > 0 && !isShuffling) {
+      const curIdx = available.findIndex((x) => x.id === currentTrack.id);
+      if (curIdx >= 0) {
+        const candidate = available[(curIdx + 1) % available.length];
+        if (candidate && candidate.id !== currentTrack.id) {
+          nextCandidate = candidate;
+        }
+      }
+    }
 
     if (nextCandidate?.audioUrl) {
       audioEngine.preloadNext(nextCandidate.audioUrl, effectiveAudioQuality === 'saver');
     }
-  }, [currentTrack?.id, queue, tracks, effectiveAudioQuality]);
+  }, [currentTrack?.id, queue, tracks, isShuffling, effectiveAudioQuality]);
 
   const isAuthenticatedListener = Boolean(
     currentUser && auth.currentUser && auth.currentUser.uid === currentUser.id
@@ -1706,6 +1729,50 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (dur > 0) {
         syncMediaSessionPositionState(curr, dur, playbackRate);
       }
+
+      // Automatic early crossfade before EOF so Song A blends smoothly into Song B
+      // even when the phone is locked and JS timers are throttled
+      if (
+        currentTrack &&
+        dur > 10 &&
+        curr > 3 &&
+        crossfadeSecondsRef.current > 0 &&
+        !sleepAtEndOfTrack &&
+        repeatMode !== 'one' &&
+        autoCrossfadedSessionRef.current !== playSessionIdRef.current
+      ) {
+        const wallRemaining = (dur - curr) / Math.max(0.5, playbackRate);
+        const available = tracks.filter((t) => !t.isDraft && !t.isDeranked);
+        let nextCandidate: Track | null = queue.find((t) => !t.isDraft && !t.isDeranked) || null;
+        if (!nextCandidate && available.length > 0) {
+          const curIdx = available.findIndex((t) => t.id === currentTrack.id);
+          if (repeatMode === 'off' && curIdx >= 0 && curIdx === available.length - 1) {
+            nextCandidate = null;
+          } else if (isShufflingRef.current) {
+            const others = available.length > 1 ? available.filter((t) => t.id !== currentTrack.id) : available;
+            nextCandidate = others[0] || null;
+          } else if (curIdx >= 0) {
+            nextCandidate = available[(curIdx + 1) % available.length] || null;
+          }
+        }
+
+        if (nextCandidate && nextCandidate.audioUrl && nextCandidate.id !== currentTrack.id) {
+          const sameAlbum = Boolean(
+            currentTrack.artistId === nextCandidate.artistId &&
+              currentTrack.recordLabel &&
+              nextCandidate.recordLabel &&
+              currentTrack.recordLabel === nextCandidate.recordLabel
+          );
+          const effectiveCrossfade =
+            sameAlbum && gaplessRef.current ? 0 : crossfadeSecondsRef.current;
+
+          if (effectiveCrossfade > 0 && wallRemaining <= effectiveCrossfade && wallRemaining > 0.15) {
+            autoCrossfadedSessionRef.current = playSessionIdRef.current;
+            const clampedFade = Math.max(0.8, Math.min(effectiveCrossfade, wallRemaining - 0.1));
+            advanceNextTrackRef.current(clampedFade);
+          }
+        }
+      }
     };
 
     audioEngine.onEnded = () => {
@@ -1788,13 +1855,27 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const playTrack = async (
     track: Track,
-    options?: { crossfade?: boolean; startAtSeconds?: number; expandFullscreen?: boolean }
+    options?: {
+      crossfade?: boolean;
+      crossfadeDurationOverride?: number;
+      startAtSeconds?: number;
+      expandFullscreen?: boolean;
+    }
   ) => {
     // Allow anyone (including unauthenticated / guest visitors) to stream tracks immediately.
     // Real play counts remain gated until the listener signs up / logs in.
 
+    if (currentTrack?.id === track.id && isPlaying && options?.startAtSeconds === undefined) {
+      if (options?.expandFullscreen) setIsFullscreenPlayerOpen(true);
+      return;
+    }
+
+    const mySessionId = ++playSessionIdRef.current;
+    autoCrossfadedSessionRef.current = null;
+
     // Check Wi-Fi-only streaming setting if offline blob isn't cached
     const offlineBlobUrl = await getAudioBlobUrl(track.id);
+    if (playSessionIdRef.current !== mySessionId) return;
     if (!offlineBlobUrl && userSettings.dataSaver.streamWifiOnly) {
       const conn = (navigator as Navigator & { connection?: { type?: string } }).connection;
       if (conn?.type && conn.type === 'cellular') {
@@ -1816,22 +1897,21 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
 
     const isSwitchingActive = Boolean(isPlaying && currentTrack && currentTrack.id !== track.id);
+    const activeFadeSeconds =
+      typeof options?.crossfadeDurationOverride === 'number'
+        ? Math.max(0, Math.min(12, options.crossfadeDurationOverride))
+        : crossfadeSecondsRef.current;
     const fadeDuration =
       sameAlbum && userSettings.playback.gapless
         ? 0
-        : options?.crossfade && crossfadeSeconds > 0
-        ? crossfadeSeconds
+        : options?.crossfade && activeFadeSeconds > 0
+        ? activeFadeSeconds
         : isSwitchingActive
-        ? crossfadeSeconds
+        ? activeFadeSeconds
         : 0;
 
     sessionListenedSeconds.current = 0;
     hasStreamBeenValidated.current = false;
-
-    if (currentTrack?.id === track.id && isPlaying && options?.startAtSeconds === undefined) {
-      if (options?.expandFullscreen) setIsFullscreenPlayerOpen(true);
-      return;
-    }
 
     const startPos = options?.startAtSeconds ?? 0;
     const resolvedDuration = track.metadata?.Duration ?? track.metadata?.duration ?? track.durationSeconds;
@@ -1992,6 +2072,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const seekTo = (timeInSeconds: number) => {
     const clamped = Math.max(0, Math.min(duration || 0, timeInSeconds));
+    if (clamped < Math.max(0, (duration || 0) - Math.max(2, crossfadeSecondsRef.current) - 1)) {
+      autoCrossfadedSessionRef.current = null;
+    }
     setCurrentTime(clamped);
     setPendingResumeSeekSeconds(0);
     audioEngine.seek(clamped);
@@ -2036,12 +2119,16 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   };
 
-  const playNextTrack = () => {
+  const advanceToNextTrack = (fadeOverrideSeconds?: number) => {
+    const crossfadeOpt =
+      typeof fadeOverrideSeconds === 'number'
+        ? { crossfade: true, crossfadeDurationOverride: fadeOverrideSeconds }
+        : { crossfade: true };
     const available = tracks.filter((t) => !t.isDraft && !t.isDeranked);
     if (queue.length > 0) {
       const next = queue[0];
       setQueue((prev) => prev.slice(1));
-      playTrack(next, { crossfade: true });
+      playTrack(next, crossfadeOpt);
       return;
     }
 
@@ -2050,13 +2137,18 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (isShuffling) {
       const others = available.length > 1 ? available.filter((t) => t.id !== currentTrack?.id) : available;
       const rand = others[Math.floor(Math.random() * others.length)];
-      playTrack(rand, { crossfade: true });
+      playTrack(rand, crossfadeOpt);
       return;
     }
 
     const currentIndex = available.findIndex((t) => t.id === currentTrack?.id);
     const nextIndex = (currentIndex + 1) % available.length;
-    playTrack(available[nextIndex], { crossfade: true });
+    playTrack(available[nextIndex], crossfadeOpt);
+  };
+  advanceNextTrackRef.current = advanceToNextTrack;
+
+  const playNextTrack = () => {
+    advanceToNextTrack();
   };
 
   const playPrevTrack = () => {

@@ -25,6 +25,7 @@ class AudioEngine {
   private masterGain: GainNode | null = null;
 
   private connectedSources = new WeakMap<HTMLAudioElement, MediaElementAudioSourceNode>();
+  private elementGains = new WeakMap<HTMLAudioElement, GainNode>();
 
   private activeElement: HTMLAudioElement | null = null;
   private activeUrl: string | null = null;
@@ -40,9 +41,11 @@ class AudioEngine {
   private monoAudio: boolean = false;
 
   private incomingFadeFactor: number = 1;
-  private incomingFadeRaf: number | null = null;
-  private sleepFadeRaf: number | null = null;
+  private incomingFadeTimer: number | null = null;
+  private incomingFadeStepFn: (() => void) | null = null;
+  private sleepFadeTimer: number | null = null;
   private outgoingCleanups: Set<() => void> = new Set();
+  private visibilityListenerAttached: boolean = false;
 
   public onTimeUpdate: ((currentTime: number, duration: number) => void) | null = null;
   public onEnded: (() => void) | null = null;
@@ -99,6 +102,18 @@ class AudioEngine {
 
     if (this.ctx && this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
+    }
+
+    if (!this.visibilityListenerAttached && typeof document !== 'undefined') {
+      this.visibilityListenerAttached = true;
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          if (this.isPlaying && this.ctx && this.ctx.state === 'suspended') {
+            this.ctx.resume().catch(() => {});
+          }
+          this.incomingFadeStepFn?.();
+        }
+      });
     }
 
     return this.ctx;
@@ -187,12 +202,73 @@ class AudioEngine {
       }
       if (!this.connectedSources.has(el)) {
         const source = this.ctx.createMediaElementSource(el);
-        source.connect(this.lowFilter);
+        const gain = this.ctx.createGain();
+        gain.gain.value = 1;
+        source.connect(gain);
+        gain.connect(this.lowFilter);
         this.connectedSources.set(el, source);
+        this.elementGains.set(el, gain);
       }
     } catch {
       // Safe fallback: native HTMLAudioElement playback remains intact
     }
+  }
+
+  private buildEqualPowerCurve(
+    direction: 'in' | 'out',
+    startGain: number,
+    endGain: number,
+    samples: number = 64
+  ): Float32Array {
+    const curve = new Float32Array(samples);
+    for (let i = 0; i < samples; i++) {
+      const progress = i / (samples - 1);
+      const shaped =
+        direction === 'in'
+          ? Math.sin(progress * Math.PI * 0.5)
+          : Math.cos(progress * Math.PI * 0.5);
+      const val =
+        direction === 'in'
+          ? startGain + (endGain - startGain) * shaped
+          : endGain + (startGain - endGain) * shaped;
+      curve[i] = Math.max(0, Math.min(1, val));
+    }
+    return curve;
+  }
+
+  private scheduleGainCurve(
+    el: HTMLAudioElement,
+    direction: 'in' | 'out',
+    startGain: number,
+    endGain: number,
+    fadeSeconds: number
+  ): boolean {
+    const gainNode = this.elementGains.get(el);
+    if (!gainNode || !this.ctx) return false;
+    try {
+      if (this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
+      }
+      const now = this.ctx.currentTime;
+      const safeDur = Math.max(0.05, fadeSeconds);
+      const curve = this.buildEqualPowerCurve(direction, startGain, endGain);
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(Math.max(0, Math.min(1, startGain)), now);
+      gainNode.gain.setValueCurveAtTime(curve, now, safeDur);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private setElementGainImmediate(el: HTMLAudioElement, value: number) {
+    const gainNode = this.elementGains.get(el);
+    if (!gainNode || !this.ctx) return;
+    try {
+      const now = this.ctx.currentTime;
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(Math.max(0, Math.min(1, value)), now);
+    } catch {}
   }
 
   public getIsActive(): boolean {
@@ -236,7 +312,10 @@ class AudioEngine {
     this.volume = Math.max(0, Math.min(1, val));
     const target = this.isMuted ? 0 : this.volume;
     if (this.activeElement) {
-      this.activeElement.volume = Math.max(0, Math.min(1, target * this.incomingFadeFactor));
+      const usesGainNode = this.elementGains.has(this.activeElement);
+      this.activeElement.volume = usesGainNode
+        ? Math.max(0, Math.min(1, target))
+        : Math.max(0, Math.min(1, target * this.incomingFadeFactor));
     }
   }
 
@@ -245,18 +324,23 @@ class AudioEngine {
     this.setVolume(this.volume);
   }
 
-  private cancelIncomingFade() {
-    if (this.incomingFadeRaf !== null) {
-      cancelAnimationFrame(this.incomingFadeRaf);
-      this.incomingFadeRaf = null;
+  private cancelIncomingFade(resetGainToFull: boolean = true) {
+    if (this.incomingFadeTimer !== null) {
+      window.clearInterval(this.incomingFadeTimer);
+      this.incomingFadeTimer = null;
     }
+    this.incomingFadeStepFn = null;
     this.incomingFadeFactor = 1;
+    if (resetGainToFull && this.activeElement) {
+      this.setElementGainImmediate(this.activeElement, 1);
+      this.activeElement.volume = this.isMuted ? 0 : this.volume;
+    }
   }
 
   private cancelSleepFade() {
-    if (this.sleepFadeRaf !== null) {
-      cancelAnimationFrame(this.sleepFadeRaf);
-      this.sleepFadeRaf = null;
+    if (this.sleepFadeTimer !== null) {
+      window.clearInterval(this.sleepFadeTimer);
+      this.sleepFadeTimer = null;
     }
   }
 
@@ -278,19 +362,39 @@ class AudioEngine {
     outgoingEl.ontimeupdate = null;
     outgoingEl.onended = null;
     outgoingEl.onerror = null;
+    outgoingEl.onplay = null;
+    outgoingEl.onpause = null;
 
     const durationMs = Math.max(150, fadeSeconds * 1000);
-    if (!outgoingEl.paused && outgoingEl.volume > 0.005) {
+    const gainNode = this.elementGains.get(outgoingEl);
+    const currentGainVal = gainNode ? gainNode.gain.value : 1;
+
+    if (!outgoingEl.paused && outgoingEl.volume > 0.005 && currentGainVal > 0.005) {
       const startVol = outgoingEl.volume;
-      const startTime = performance.now();
-      let rafId: number | null = null;
+      const startMs = Date.now();
+      let intervalId: number | null = null;
+      let timeoutId: number | null = null;
       let finished = false;
+
+      const usesWebAudioEnvelope = this.scheduleGainCurve(
+        outgoingEl,
+        'out',
+        currentGainVal,
+        0,
+        durationMs / 1000
+      );
 
       const finishOutgoing = () => {
         if (finished) return;
         finished = true;
-        if (rafId !== null) cancelAnimationFrame(rafId);
+        if (intervalId !== null) window.clearInterval(intervalId);
+        if (timeoutId !== null) window.clearTimeout(timeoutId);
+        outgoingEl.ontimeupdate = null;
+        outgoingEl.onended = null;
         try {
+          if (usesWebAudioEnvelope) {
+            this.setElementGainImmediate(outgoingEl, 0);
+          }
           outgoingEl.volume = 0;
           outgoingEl.pause();
           outgoingEl.removeAttribute('src');
@@ -301,22 +405,27 @@ class AudioEngine {
 
       this.outgoingCleanups.add(finishOutgoing);
 
-      const step = (now: number) => {
+      const step = () => {
         if (finished) return;
-        const elapsed = now - startTime;
+        const elapsed = Date.now() - startMs;
         const progress = Math.min(1, elapsed / durationMs);
-        const gainFactor = Math.cos(progress * Math.PI * 0.5);
-        try {
-          outgoingEl.volume = Math.max(0, Math.min(1, startVol * gainFactor));
-        } catch {}
-        if (progress < 1) {
-          rafId = requestAnimationFrame(step);
-        } else {
+        if (!usesWebAudioEnvelope) {
+          const gainFactor = Math.cos(progress * Math.PI * 0.5);
+          try {
+            outgoingEl.volume = Math.max(0, Math.min(1, startVol * gainFactor));
+          } catch {}
+        }
+        if (progress >= 1 || outgoingEl.ended) {
           finishOutgoing();
         }
       };
 
-      rafId = requestAnimationFrame(step);
+      // Drive native fallback & cleanup via wall-clock timer + timeupdate + hard timeout
+      // so locked screens / background throttling never leave outgoing audio dangling.
+      intervalId = window.setInterval(step, usesWebAudioEnvelope ? 120 : 50);
+      timeoutId = window.setTimeout(finishOutgoing, durationMs + 150);
+      outgoingEl.ontimeupdate = step;
+      outgoingEl.onended = finishOutgoing;
     } else {
       try {
         outgoingEl.pause();
@@ -327,40 +436,65 @@ class AudioEngine {
   }
 
   private startIncomingAudioFadeIn(targetEl: HTMLAudioElement, fadeSeconds: number) {
-    this.cancelIncomingFade();
+    this.cancelIncomingFade(false);
+    const targetVol = this.isMuted ? 0 : this.volume;
+
     if (fadeSeconds <= 0) {
       this.incomingFadeFactor = 1;
-      targetEl.volume = this.isMuted ? 0 : this.volume;
+      this.setElementGainImmediate(targetEl, 1);
+      targetEl.volume = targetVol;
       return;
     }
 
     const durationMs = fadeSeconds * 1000;
-    const startTime = performance.now();
+    const startMs = Date.now();
     this.incomingFadeFactor = 0;
-    targetEl.volume = 0;
 
-    const step = (now: number) => {
+    // Web Audio GainNode envelope runs on the hardware audio thread even when the phone is locked
+    const usesWebAudioEnvelope = this.scheduleGainCurve(targetEl, 'in', 0, 1, fadeSeconds);
+    if (usesWebAudioEnvelope) {
+      targetEl.volume = targetVol;
+    } else {
+      targetEl.volume = 0;
+    }
+
+    const step = () => {
       if (this.activeElement !== targetEl || !this.isPlaying) {
-        this.incomingFadeRaf = null;
+        if (this.incomingFadeTimer !== null) {
+          window.clearInterval(this.incomingFadeTimer);
+          this.incomingFadeTimer = null;
+        }
+        this.incomingFadeStepFn = null;
         return;
       }
-      const elapsed = now - startTime;
+      const elapsed = Date.now() - startMs;
       const progress = Math.min(1, elapsed / durationMs);
       this.incomingFadeFactor = Math.sin(progress * Math.PI * 0.5);
-      const targetVol = this.isMuted ? 0 : this.volume;
-      try {
-        targetEl.volume = Math.max(0, Math.min(1, targetVol * this.incomingFadeFactor));
-      } catch {}
 
-      if (progress < 1) {
-        this.incomingFadeRaf = requestAnimationFrame(step);
-      } else {
+      if (!usesWebAudioEnvelope) {
+        const liveTargetVol = this.isMuted ? 0 : this.volume;
+        try {
+          targetEl.volume = Math.max(0, Math.min(1, liveTargetVol * this.incomingFadeFactor));
+        } catch {}
+      }
+
+      if (progress >= 1) {
         this.incomingFadeFactor = 1;
-        this.incomingFadeRaf = null;
+        if (this.incomingFadeTimer !== null) {
+          window.clearInterval(this.incomingFadeTimer);
+          this.incomingFadeTimer = null;
+        }
+        this.incomingFadeStepFn = null;
+        if (usesWebAudioEnvelope) {
+          this.setElementGainImmediate(targetEl, 1);
+        } else {
+          targetEl.volume = this.isMuted ? 0 : this.volume;
+        }
       }
     };
 
-    this.incomingFadeRaf = requestAnimationFrame(step);
+    this.incomingFadeStepFn = step;
+    this.incomingFadeTimer = window.setInterval(step, usesWebAudioEnvelope ? 120 : 50);
   }
 
   public preloadNext(url?: string, dataSaver: boolean = false) {
@@ -395,7 +529,7 @@ class AudioEngine {
     const shouldCrossfade = crossfadeSeconds > 0 && this.isPlaying && Boolean(this.activeElement);
 
     if (shouldCrossfade) {
-      this.cancelIncomingFade();
+      this.cancelIncomingFade(false);
       this.fadeOutCurrentSource(crossfadeSeconds);
     } else {
       this.stop();
@@ -442,7 +576,9 @@ class AudioEngine {
     }
 
     el.ontimeupdate = () => {
-      if (this.activeElement === el && this.onTimeUpdate) {
+      if (this.activeElement !== el) return;
+      this.incomingFadeStepFn?.();
+      if (this.onTimeUpdate) {
         this.onTimeUpdate(el.currentTime || 0, Number.isFinite(el.duration) ? el.duration : 0);
       }
     };
@@ -478,6 +614,7 @@ class AudioEngine {
       this.startIncomingAudioFadeIn(el, crossfadeSeconds);
     } else {
       this.incomingFadeFactor = 1;
+      this.setElementGainImmediate(el, 1);
       el.volume = this.isMuted ? 0 : this.volume;
     }
 
@@ -488,9 +625,11 @@ class AudioEngine {
         if (err && err.name === 'AbortError') return;
         if (err && err.name === 'NotAllowedError') {
           this.isPlaying = false;
+          this.onExternalPlayState?.(false);
           return;
         }
         this.isPlaying = false;
+        this.onExternalPlayState?.(false);
         this.onError?.('Playback interrupted. Tap Play to try again.');
       });
     }
@@ -526,36 +665,39 @@ class AudioEngine {
     this.cancelSleepFade();
 
     const durationMs = Math.max(300, fadeSeconds * 1000);
-    const startTime = performance.now();
+    const startMs = Date.now();
     const el = this.activeElement;
     const startElVol = el.volume;
+    const gainNode = this.elementGains.get(el);
+    const startGain = gainNode ? gainNode.gain.value : 1;
+    const usesWebAudioEnvelope = this.scheduleGainCurve(el, 'out', startGain, 0, durationMs / 1000);
 
-    const step = (now: number) => {
+    const step = () => {
       if (!this.isPlaying || this.activeElement !== el) {
-        this.sleepFadeRaf = null;
+        this.cancelSleepFade();
         this.pause();
         onComplete?.();
         return;
       }
 
-      const elapsed = now - startTime;
+      const elapsed = Date.now() - startMs;
       const progress = Math.min(1, elapsed / durationMs);
-      const gainFactor = Math.cos(progress * Math.PI * 0.5);
 
-      try {
-        el.volume = Math.max(0, Math.min(1, startElVol * gainFactor));
-      } catch {}
+      if (!usesWebAudioEnvelope) {
+        const gainFactor = Math.cos(progress * Math.PI * 0.5);
+        try {
+          el.volume = Math.max(0, Math.min(1, startElVol * gainFactor));
+        } catch {}
+      }
 
-      if (progress < 1) {
-        this.sleepFadeRaf = requestAnimationFrame(step);
-      } else {
-        this.sleepFadeRaf = null;
+      if (progress >= 1) {
+        this.cancelSleepFade();
         this.pause();
         onComplete?.();
       }
     };
 
-    this.sleepFadeRaf = requestAnimationFrame(step);
+    this.sleepFadeTimer = window.setInterval(step, usesWebAudioEnvelope ? 120 : 50);
   }
 
   public resume() {
@@ -563,6 +705,7 @@ class AudioEngine {
     this.init();
     if (this.activeElement && this.activeUrl) {
       this.isPlaying = true;
+      this.setElementGainImmediate(this.activeElement, 1);
       this.activeElement.volume = this.isMuted ? 0 : this.volume;
       this.activeElement
         .play()

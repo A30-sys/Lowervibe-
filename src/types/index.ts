@@ -64,7 +64,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   playback: {
     streamingQuality: 'auto',
     downloadQuality: 'high',
-    crossfadeSeconds: 0,
+    crossfadeSeconds: 4,
     gapless: true,
     normalizeVolume: false,
     autoplaySimilar: true,

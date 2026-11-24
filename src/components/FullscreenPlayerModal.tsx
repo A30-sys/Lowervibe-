@@ -29,7 +29,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AudioQualityPreference, isTrackLosslessSource, useAudio } from '../context/AudioContext';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -39,6 +39,7 @@ import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../utils/artworkFallbac
 import { ExtractedPalette, extractDominantColor } from '../utils/colorExtract';
 import { formatTime, getTrackLikeCount, isTrackLikedByUser } from '../utils/formatters';
 import { translateGenreCategory } from '../utils/genreCategories';
+import { triggerHaptic } from '../utils/haptics';
 import { parseLrc } from '../utils/lrcParser';
 
 export const FullscreenPlayerModal: React.FC = () => {
@@ -68,6 +69,7 @@ export const FullscreenPlayerModal: React.FC = () => {
     openPlaylistModal,
     playTrack,
     queue,
+    playHistory,
     reorderQueue,
     removeFromQueue,
     clearQueue,
@@ -103,6 +105,14 @@ export const FullscreenPlayerModal: React.FC = () => {
   const [commentText, setCommentText] = useState('');
   const [touchStartY, setTouchStartY] = useState<number | null>(null);
   const [dragOffset, setDragOffset] = useState<number>(0);
+  const [artSwipeX, setArtSwipeX] = useState<number>(0);
+  const [isArtDragging, setIsArtDragging] = useState<boolean>(false);
+  const [artSlideDir, setArtSlideDir] = useState<'next' | 'prev' | null>(null);
+  const artTouchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const artGestureAxisRef = useRef<'horizontal' | 'vertical' | null>(null);
+  const artCommitTimerRef = useRef<number | null>(null);
+  const pendingSlideDirRef = useRef<'next' | 'prev' | null>(null);
+  const prevTrackIdRef = useRef<string | null>(null);
   const [likePopping, setLikePopping] = useState(false);
   const [palette, setPalette] = useState<ExtractedPalette>({
     primary: 'rgba(124, 92, 255, 0.34)',
@@ -159,6 +169,59 @@ export const FullscreenPlayerModal: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isFullscreenPlayerOpen, setIsFullscreenPlayerOpen]);
 
+  const playableTracks = useMemo(
+    () => tracks.filter((t) => !t.isDraft && !t.isDeranked),
+    [tracks]
+  );
+
+  const nextTrackCandidate = useMemo(() => {
+    if (!currentTrack) return null;
+    const queued = queue.find((t) => !t.isDraft && !t.isDeranked && t.id !== currentTrack.id);
+    if (queued) return queued;
+    if (playableTracks.length <= 1) return null;
+    const idx = playableTracks.findIndex((t) => t.id === currentTrack.id);
+    if (idx >= 0) {
+      const candidate = playableTracks[(idx + 1) % playableTracks.length];
+      return candidate && candidate.id !== currentTrack.id ? candidate : null;
+    }
+    return playableTracks[0]?.id !== currentTrack.id ? playableTracks[0] || null : null;
+  }, [currentTrack, queue, playableTracks]);
+
+  const prevTrackCandidate = useMemo(() => {
+    if (!currentTrack) return null;
+    const recentPrev = playHistory.find(
+      (item) => item.trackId !== currentTrack.id && !item.track.isDraft && !item.track.isDeranked
+    )?.track;
+    if (playableTracks.length <= 1) return recentPrev || null;
+    const idx = playableTracks.findIndex((t) => t.id === currentTrack.id);
+    if (idx >= 0) {
+      const candidate = playableTracks[(idx - 1 + playableTracks.length) % playableTracks.length];
+      if (candidate && candidate.id !== currentTrack.id) return candidate;
+    }
+    return recentPrev || null;
+  }, [currentTrack, playableTracks, playHistory]);
+
+  useEffect(() => {
+    const nextId = currentTrack?.id || null;
+    if (prevTrackIdRef.current && nextId && prevTrackIdRef.current !== nextId) {
+      const dir = pendingSlideDirRef.current || 'next';
+      pendingSlideDirRef.current = null;
+      setArtSlideDir(dir);
+      const timer = window.setTimeout(() => setArtSlideDir(null), 300);
+      prevTrackIdRef.current = nextId;
+      return () => window.clearTimeout(timer);
+    }
+    prevTrackIdRef.current = nextId;
+  }, [currentTrack?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (artCommitTimerRef.current !== null) {
+        window.clearTimeout(artCommitTimerRef.current);
+      }
+    };
+  }, []);
+
   if (!isFullscreenPlayerOpen || !currentTrack) return null;
 
   const isLiked = isTrackLikedByUser(currentTrack, currentUser);
@@ -183,6 +246,143 @@ export const FullscreenPlayerModal: React.FC = () => {
     }
     setTouchStartY(null);
     setDragOffset(0);
+  };
+
+  const resetArtSwipe = () => {
+    artTouchStartRef.current = null;
+    artGestureAxisRef.current = null;
+    setIsArtDragging(false);
+    setArtSwipeX(0);
+  };
+
+  const triggerSlideSkip = (direction: 'next' | 'prev') => {
+    pendingSlideDirRef.current = direction;
+    triggerHaptic('tap');
+    if (direction === 'next') {
+      if (queue.length > 0 || !isShuffling) {
+        playNextTrack();
+      } else if (nextTrackCandidate) {
+        playTrack(nextTrackCandidate, { crossfade: true });
+      } else {
+        playNextTrack();
+      }
+    } else if (prevTrackCandidate) {
+      playTrack(prevTrackCandidate, { crossfade: true });
+    } else {
+      playPrevTrack();
+    }
+  };
+
+  const finishArtSwipe = (deltaX: number, startTime: number) => {
+    const elapsed = Math.max(1, Date.now() - startTime);
+    const velocity = Math.abs(deltaX) / elapsed;
+    const triggered = Math.abs(deltaX) > 52 || (Math.abs(deltaX) > 26 && velocity > 0.32);
+    const canGoNext = deltaX < 0 && Boolean(nextTrackCandidate);
+    const canGoPrev = deltaX > 0 && Boolean(prevTrackCandidate);
+
+    if (triggered && (canGoNext || canGoPrev)) {
+      const direction: 'next' | 'prev' = deltaX < 0 ? 'next' : 'prev';
+      artTouchStartRef.current = null;
+      artGestureAxisRef.current = null;
+      setIsArtDragging(false);
+      // Slide card smoothly across the stage before switching track so transition has zero snap
+      setArtSwipeX(direction === 'next' ? -290 : 290);
+      if (artCommitTimerRef.current !== null) {
+        window.clearTimeout(artCommitTimerRef.current);
+      }
+      artCommitTimerRef.current = window.setTimeout(() => {
+        artCommitTimerRef.current = null;
+        setArtSwipeX(0);
+        triggerSlideSkip(direction);
+      }, 150);
+      return;
+    }
+    resetArtSwipe();
+  };
+
+  const handleArtworkTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    if (artCommitTimerRef.current !== null) {
+      window.clearTimeout(artCommitTimerRef.current);
+      artCommitTimerRef.current = null;
+    }
+    artTouchStartRef.current = {
+      x: e.touches[0].clientX,
+      y: e.touches[0].clientY,
+      time: Date.now(),
+    };
+    artGestureAxisRef.current = null;
+  };
+
+  const handleArtworkTouchMove = (e: React.TouchEvent) => {
+    const start = artTouchStartRef.current;
+    if (!start || e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - start.x;
+    const dy = e.touches[0].clientY - start.y;
+
+    if (artGestureAxisRef.current === null) {
+      if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+        if (Math.abs(dx) > Math.abs(dy) * 1.1) {
+          artGestureAxisRef.current = 'horizontal';
+          setIsArtDragging(true);
+          setTouchStartY(null);
+          setDragOffset(0);
+        } else {
+          artGestureAxisRef.current = 'vertical';
+        }
+      }
+    }
+
+    if (artGestureAxisRef.current === 'horizontal') {
+      e.stopPropagation();
+      const maxLeft = nextTrackCandidate ? -260 : -45;
+      const maxRight = prevTrackCandidate ? 260 : 45;
+      const clamped = Math.max(maxLeft, Math.min(maxRight, dx));
+      setArtSwipeX(clamped);
+    }
+  };
+
+  const handleArtworkTouchEnd = (e: React.TouchEvent) => {
+    const start = artTouchStartRef.current;
+    if (artGestureAxisRef.current === 'horizontal' && start) {
+      e.stopPropagation();
+      finishArtSwipe(artSwipeX, start.time);
+    } else {
+      resetArtSwipe();
+    }
+  };
+
+  const handleArtworkMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    if (artCommitTimerRef.current !== null) {
+      window.clearTimeout(artCommitTimerRef.current);
+      artCommitTimerRef.current = null;
+    }
+    artTouchStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      time: Date.now(),
+    };
+    artGestureAxisRef.current = 'horizontal';
+    setIsArtDragging(true);
+  };
+
+  const handleArtworkMouseMove = (e: React.MouseEvent) => {
+    const start = artTouchStartRef.current;
+    if (!start || !isArtDragging) return;
+    const dx = e.clientX - start.x;
+    const maxLeft = nextTrackCandidate ? -260 : -45;
+    const maxRight = prevTrackCandidate ? 260 : 45;
+    setArtSwipeX(Math.max(maxLeft, Math.min(maxRight, dx)));
+  };
+
+  const handleArtworkMouseUp = () => {
+    const start = artTouchStartRef.current;
+    if (start && isArtDragging) {
+      finishArtSwipe(artSwipeX, start.time);
+    } else {
+      resetArtSwipe();
+    }
   };
 
   const handleLike = () => {
@@ -339,19 +539,144 @@ export const FullscreenPlayerModal: React.FC = () => {
       <div className="relative z-10 w-full max-w-lg mx-auto my-auto py-4">
         {activeTab === 'playing' && (
           <div className="space-y-5">
-            {/* Hero Cover Artwork (clean artwork only — no badge overlays) */}
-            <div className="w-64 h-64 sm:w-80 sm:h-80 mx-auto rounded-[28px] overflow-hidden shadow-[0_24px_60px_rgba(0,0,0,0.7)] border border-white/10 bg-[#131513]">
-              <img
-                src={currentTrack.coverArt || DEFAULT_ARTWORK_SVG}
-                alt={currentTrack.title}
-                referrerPolicy="no-referrer"
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).src = DEFAULT_ARTWORK_SVG;
-                }}
-                className={`w-full h-full object-cover transition-transform duration-500 ease-out ${
-                  isPlaying ? 'scale-[1.02]' : 'scale-100'
-                }`}
-              />
+            {/* Interactive 3-Card Cover Carousel (shows previous & next song artwork on swipe) */}
+            <div
+              className="relative w-full overflow-hidden py-1 touch-pan-y cursor-grab active:cursor-grabbing select-none"
+              onTouchStart={handleArtworkTouchStart}
+              onTouchMove={handleArtworkTouchMove}
+              onTouchEnd={handleArtworkTouchEnd}
+              onTouchCancel={resetArtSwipe}
+              onMouseDown={handleArtworkMouseDown}
+              onMouseMove={handleArtworkMouseMove}
+              onMouseUp={handleArtworkMouseUp}
+              onMouseLeave={() => {
+                if (isArtDragging) handleArtworkMouseUp();
+              }}
+              aria-label={
+                isNy
+                  ? 'Chithunzi cha nyimbo — kwezani kumanzere kapena kumanja kuona ndi kusintha nyimbo'
+                  : 'Album artwork — swipe left or right to preview and switch tracks'
+              }
+            >
+              <div className="relative w-64 h-64 sm:w-80 sm:h-80 mx-auto">
+                {/* Previous Song Artwork Slide (slides in from left when swiping right) */}
+                {prevTrackCandidate && (
+                  <div
+                    aria-hidden={artSwipeX <= 8}
+                    className={`absolute inset-0 rounded-[28px] overflow-hidden shadow-[0_24px_60px_rgba(0,0,0,0.65)] border border-white/10 bg-[#131513] pointer-events-none ${
+                      isArtDragging ? 'transition-none' : 'transition-all duration-200 ease-out'
+                    }`}
+                    style={{
+                      transform: `translate3d(calc(-100% - 20px + ${artSwipeX}px), 0, 0) scale(${
+                        0.9 + Math.min(0.1, Math.max(0, artSwipeX) / 2600)
+                      })`,
+                      opacity: artSwipeX > 4 ? Math.min(1, 0.35 + artSwipeX / 220) : 0,
+                    }}
+                  >
+                    <img
+                      src={prevTrackCandidate.coverArt || DEFAULT_ARTWORK_SVG}
+                      alt={prevTrackCandidate.title}
+                      draggable={false}
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).src = DEFAULT_ARTWORK_SVG;
+                      }}
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/90 via-black/55 to-transparent">
+                      <p className="text-[11px] font-semibold text-[#C6FF3D] flex items-center gap-1.5">
+                        <SkipBack className="w-3.5 h-3.5 shrink-0" />
+                        <span>{isNy ? "Yam'mbuyo" : 'Previous'}</span>
+                      </p>
+                      <p className="text-sm font-bold text-white truncate mt-0.5">
+                        {prevTrackCandidate.title}
+                      </p>
+                      <p className="text-xs text-white/75 truncate">
+                        {prevTrackCandidate.artistName}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Active Song Artwork Slide */}
+                <div
+                  key={currentTrack.id}
+                  className={`relative w-full h-full rounded-[28px] overflow-hidden shadow-[0_24px_60px_rgba(0,0,0,0.7)] border border-white/10 bg-[#131513] ${
+                    isArtDragging
+                      ? 'transition-none'
+                      : artSlideDir === 'next'
+                      ? 'animate-art-slide-next'
+                      : artSlideDir === 'prev'
+                      ? 'animate-art-slide-prev'
+                      : 'transition-all duration-200 ease-out'
+                  }`}
+                  style={{
+                    transform:
+                      artSwipeX !== 0
+                        ? `translate3d(${artSwipeX}px, 0, 0) scale(${Math.max(
+                            0.91,
+                            1 - Math.abs(artSwipeX) / 2200
+                          )})`
+                        : undefined,
+                    opacity:
+                      artSwipeX !== 0
+                        ? Math.max(0.45, 1 - Math.abs(artSwipeX) / 360)
+                        : 1,
+                  }}
+                >
+                  <img
+                    src={currentTrack.coverArt || DEFAULT_ARTWORK_SVG}
+                    alt={currentTrack.title}
+                    draggable={false}
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src = DEFAULT_ARTWORK_SVG;
+                    }}
+                    className={`w-full h-full object-cover pointer-events-none transition-transform duration-500 ease-out ${
+                      isPlaying ? 'scale-[1.02]' : 'scale-100'
+                    }`}
+                  />
+                </div>
+
+                {/* Next Song Artwork Slide (slides in from right when swiping left) */}
+                {nextTrackCandidate && (
+                  <div
+                    aria-hidden={artSwipeX >= -8}
+                    className={`absolute inset-0 rounded-[28px] overflow-hidden shadow-[0_24px_60px_rgba(0,0,0,0.65)] border border-white/10 bg-[#131513] pointer-events-none ${
+                      isArtDragging ? 'transition-none' : 'transition-all duration-200 ease-out'
+                    }`}
+                    style={{
+                      transform: `translate3d(calc(100% + 20px + ${artSwipeX}px), 0, 0) scale(${
+                        0.9 + Math.min(0.1, Math.max(0, -artSwipeX) / 2600)
+                      })`,
+                      opacity: artSwipeX < -4 ? Math.min(1, 0.35 + Math.abs(artSwipeX) / 220) : 0,
+                    }}
+                  >
+                    <img
+                      src={nextTrackCandidate.coverArt || DEFAULT_ARTWORK_SVG}
+                      alt={nextTrackCandidate.title}
+                      draggable={false}
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).src = DEFAULT_ARTWORK_SVG;
+                      }}
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/90 via-black/55 to-transparent">
+                      <p className="text-[11px] font-semibold text-[#C6FF3D] flex items-center gap-1.5">
+                        <SkipForward className="w-3.5 h-3.5 shrink-0" />
+                        <span>{isNy ? 'Yotsatira' : 'Up Next'}</span>
+                      </p>
+                      <p className="text-sm font-bold text-white truncate mt-0.5">
+                        {nextTrackCandidate.title}
+                      </p>
+                      <p className="text-xs text-white/75 truncate">
+                        {nextTrackCandidate.artistName}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Playback error alert */}
@@ -465,7 +790,10 @@ export const FullscreenPlayerModal: React.FC = () => {
 
               <button
                 type="button"
-                onClick={playPrevTrack}
+                onClick={() => {
+                  pendingSlideDirRef.current = 'prev';
+                  playPrevTrack();
+                }}
                 className="text-white/85 hover:text-white transition active:scale-95 cursor-pointer min-h-[48px] min-w-[48px] flex items-center justify-center"
                 title={t('previous')}
                 aria-label={t('previous')}
@@ -489,7 +817,10 @@ export const FullscreenPlayerModal: React.FC = () => {
 
               <button
                 type="button"
-                onClick={playNextTrack}
+                onClick={() => {
+                  pendingSlideDirRef.current = 'next';
+                  playNextTrack();
+                }}
                 className="text-white/85 hover:text-white transition active:scale-95 cursor-pointer min-h-[48px] min-w-[48px] flex items-center justify-center"
                 title={t('next_track')}
                 aria-label={t('next_track')}
