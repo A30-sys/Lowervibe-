@@ -60,6 +60,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
     playTrack,
     togglePlayPause,
     downloadTrack,
+    clearHistory,
     updatePublicPlaylist,
     deletePublicPlaylist,
     reorderPlaylistTracks,
@@ -88,6 +89,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
   });
   const [confirmClearDownloads, setConfirmClearDownloads] = useState(false);
   const [isClearingDownloads, setIsClearingDownloads] = useState(false);
+  const [confirmClearHistory, setConfirmClearHistory] = useState(false);
 
   // Playlist creation & editing
   const [isCreatingPl, setIsCreatingPl] = useState(false);
@@ -179,7 +181,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
     const seen = new Set<string>();
     const combined: Track[] = [];
     for (const tr of [...savedTracks, ...likedTracks]) {
-      if (!downloadedIdSet.has(tr.id) && !seen.has(tr.id) && tr.audioUrl) {
+      if (!downloadedIdSet.has(tr.id) && !seen.has(tr.id) && tr.downloadable !== false && tr.audioUrl) {
         seen.add(tr.id);
         combined.push(tr);
       }
@@ -387,16 +389,16 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                     <CheckCircle2 className="w-3 h-3" />
                     <span className="hidden sm:inline">{t('library_offline')}</span>
                   </span>
-                ) : (
+                ) : track.downloadable !== false && Boolean(track.audioUrl) ? (
                   <button
                     type="button"
                     onClick={() => downloadTrack(track)}
                     title={isNy ? 'Tsitsani kuti mumvere popanda intaneti' : 'Download for offline listening'}
-                    className="p-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--accent-text)] cursor-pointer transition"
+                    className="p-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--accent-text)] cursor-pointer transition min-h-[36px] min-w-[36px] flex items-center justify-center"
                   >
                     <Download className="w-3.5 h-3.5" />
                   </button>
-                )
+                ) : null
               )
             )
           )}
@@ -439,16 +441,16 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                     <CheckCircle2 className="w-3 h-3" />
                     <span className="hidden sm:inline">{t('library_offline')}</span>
                   </span>
-                ) : (
+                ) : tr.downloadable !== false && Boolean(tr.audioUrl) ? (
                   <button
                     type="button"
                     onClick={() => downloadTrack(tr)}
                     title={isNy ? 'Tsitsani kuti mumvere popanda intaneti' : 'Download for offline listening'}
-                    className="p-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--accent-text)] cursor-pointer transition"
+                    className="p-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--accent-text)] cursor-pointer transition min-h-[36px] min-w-[36px] flex items-center justify-center"
                   >
                     <Download className="w-3.5 h-3.5" />
                   </button>
-                )
+                ) : null
               )
             )
           )}
@@ -1098,22 +1100,63 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
 
       {/* HISTORY */}
       {activeTab === 'history' && (
-        <div className="rounded-[22px] bg-[var(--surface)] border border-[var(--border)] overflow-hidden divide-y divide-[var(--border)]">
-          {playHistory.length === 0 ? (
-            <EmptyBox
-              icon={Clock}
-              title={isNy ? 'Palibe mbiri yakale pakadali pano' : 'No listening history yet'}
-              subtitle={
-                isNy
-                  ? 'Nyimbo zomwe mumamvera zionekera pano kuti mubwerere mosavuta.'
-                  : 'Songs you play appear here so you can easily jump back in.'
-              }
-              cta={isNy ? 'Lizani nyimbo' : 'Play something'}
-              onCta={() => navigate('/')}
-            />
-          ) : (
-            playHistory.map((item) => renderTrackRow(item.track))
+        <div className="space-y-3">
+          {playHistory.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+              <p className="text-xs text-[var(--text-muted)]">
+                {isNy
+                  ? 'Mbiri yanu yomvera imapanga mndandanda wa Pitilizani kumvera.'
+                  : 'Your recently played songs appear here and in Continue listening.'}
+              </p>
+              {!confirmClearHistory ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmClearHistory(true)}
+                  className="px-3.5 py-2 rounded-full bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--danger)] text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--danger)] cursor-pointer transition min-h-[40px]"
+                >
+                  {t('clear_history', 'Clear history')}
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmClearHistory(false)}
+                    className="px-3 py-1.5 rounded-full text-xs text-[var(--text-muted)] cursor-pointer"
+                  >
+                    {t('cancel')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearHistory();
+                      setConfirmClearHistory(false);
+                    }}
+                    className="px-3.5 py-1.5 rounded-full bg-[var(--danger)] text-white text-xs font-bold cursor-pointer"
+                  >
+                    {isNy ? 'Fufutani zonse' : 'Confirm clear'}
+                  </button>
+                </div>
+              )}
+            </div>
           )}
+
+          <div className="rounded-[22px] bg-[var(--surface)] border border-[var(--border)] overflow-hidden divide-y divide-[var(--border)]">
+            {playHistory.length === 0 ? (
+              <EmptyBox
+                icon={Clock}
+                title={isNy ? 'Palibe mbiri yakale pakadali pano' : 'No listening history yet'}
+                subtitle={
+                  isNy
+                    ? 'Nyimbo zomwe mumamvera zionekera pano kuti mubwerere mosavuta.'
+                    : 'Songs you play appear here so you can easily jump back in.'
+                }
+                cta={isNy ? 'Lizani nyimbo' : 'Play something'}
+                onCta={() => navigate('/')}
+              />
+            ) : (
+              playHistory.map((item) => renderTrackRow(item.track))
+            )}
+          </div>
         </div>
       )}
     </div>

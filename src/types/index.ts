@@ -41,6 +41,9 @@ export interface UserSettings {
     payoutUpdatesPush: boolean;
     productNewsInApp: boolean;
     productNewsPush: boolean;
+    promotionalBanners?: boolean;
+    playlistUpdatesInApp?: boolean;
+    playlistUpdatesPush?: boolean;
     soundEnabled: boolean;
   };
   privacy: {
@@ -53,6 +56,7 @@ export interface UserSettings {
     theme: 'system' | 'light' | 'dark';
     language: 'en' | 'ny';
     density: 'comfortable' | 'compact';
+    reducedMotion?: boolean;
   };
 }
 
@@ -86,6 +90,9 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     payoutUpdatesPush: true,
     productNewsInApp: true,
     productNewsPush: true,
+    promotionalBanners: true,
+    playlistUpdatesInApp: true,
+    playlistUpdatesPush: false,
     soundEnabled: true,
   },
   privacy: {
@@ -98,6 +105,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     theme: 'system',
     language: 'en',
     density: 'comfortable',
+    reducedMotion: false,
   },
 };
 
@@ -391,6 +399,8 @@ export interface TrackComment {
   content: string;
   createdAt: string;
   likes: number;
+  hiddenByModeration?: boolean;
+  reportedCount?: number;
 }
 
 export interface TrackMetadata {
@@ -445,6 +455,8 @@ export interface Track {
   releaseDate: string;
   scheduledPublishDate?: string;
   isDraft?: boolean;
+  moderationStatus?: 'draft' | 'validation' | 'submitted' | 'in_review' | 'approved' | 'rejected' | 'published';
+  moderationFeedback?: string;
   isFeaturedVibe?: boolean;
   curatorNote?: string;
   allowComments?: boolean;
@@ -565,9 +577,10 @@ export interface FriendActivityItem {
 
 export interface ReportRecord {
   id: string;
-  type?: 'copyright_dmca' | 'artist_report' | 'track_report' | 'bug_report';
+  type?: 'copyright_dmca' | 'artist_report' | 'track_report' | 'bug_report' | 'comment';
   trackId: string;
   trackTitle: string;
+  commentId?: string;
   artistId?: string;
   artistName?: string;
   reporterEmail: string;
@@ -610,25 +623,68 @@ export interface AdminConfig {
   updatedAt: string;
 }
 
+export type TrackModerationStatus =
+  | 'draft'
+  | 'validation'
+  | 'submitted'
+  | 'in_review'
+  | 'approved'
+  | 'rejected'
+  | 'published';
+
 export type NotificationType =
   | 'new_release'
   | 'artist_approved'
+  | 'artist_pending'
   | 'artist_rejected'
+  | 'new_follower'
+  | 'playlist_update'
+  | 'platform_announcement'
+  | 'account_security'
+  | 'upload_completed'
+  | 'upload_failed'
+  | 'maintenance'
+  | 'new_feature'
   | 'withdrawal_status'
   | 'news'
   | 'system';
+
+export type NotificationCategory = 'essential' | 'promotional';
 
 export interface NotificationItem {
   id: string;
   userId: string;
   userEmail?: string;
   type: NotificationType;
+  category?: NotificationCategory;
   title: string;
   message: string;
+  artworkUrl?: string;
+  actionLabel?: string;
   readBy: string[];
   createdAt: string;
   createdBy?: string;
   actionRoute?: string;
   payoutRequestId?: string;
   payoutStatus?: PayoutRequest['status'];
+}
+
+export interface PlatformBanner {
+  id: string;
+  type: NotificationType;
+  category: NotificationCategory;
+  title: string;
+  message: string;
+  artworkUrl?: string;
+  actionLabel?: string;
+  actionRoute?: string;
+  dismissible: boolean;
+  active: boolean;
+  priority: number;
+  audience: 'all' | 'listeners' | 'artists';
+  tone?: 'light' | 'dark';
+  createdAt: string;
+  expiresAt?: string;
+  createdBy?: string;
+  retryId?: string;
 }

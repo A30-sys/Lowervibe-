@@ -19,9 +19,9 @@ export const THEME_MODE_KEY = 'lowervibe_theme_mode_v3';
 
 function getSystemTheme(): Theme {
   if (typeof window !== 'undefined' && window.matchMedia) {
-    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
-  return 'dark';
+  return 'light';
 }
 
 function resolveThemeForMode(mode: ThemeMode, system: Theme): Theme {

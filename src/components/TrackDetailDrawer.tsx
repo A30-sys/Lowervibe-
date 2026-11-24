@@ -7,7 +7,9 @@ import {
   Disc,
   Edit3,
   Eye,
+  EyeOff,
   FileText,
+  Flag,
   Heart,
   MessageSquare,
   Mic2,
@@ -20,6 +22,7 @@ import {
   Send,
   Share2,
   Timer,
+  Trash2,
   Type,
   User,
   X,
@@ -65,6 +68,9 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
     updateTrack,
     addCommentToTrack,
     likeComment,
+    deleteTrackComment,
+    moderateTrackComment,
+    submitContentReportRecord,
     setActiveShareTrack,
     setActiveDetailTrack,
     seekTo,
@@ -75,7 +81,7 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
     upsertGenre,
   } = useAudio();
 
-  const { currentUser, toggleLikeTrack } = useAuth();
+  const { currentUser, isAdmin, toggleLikeTrack } = useAuth();
   const { showToast } = useToast();
   const { language, t } = useLanguage();
   const isNy = language === 'ny';
@@ -1057,88 +1063,173 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
               </motion.div>
             )}
 
-            {activeTab === 'reflections' && (
-              <motion.div
-                key="tab-reflections"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.16, ease: 'easeOut' }}
-                className="space-y-4"
-              >
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-[var(--text)] font-heading">
-                    {isNy ? 'Ndemanga' : 'Comments'} ({track.comments?.length || 0})
-                  </h4>
-                  <span className="text-[11px] text-[var(--text-muted)]">
-                    {isNy ? 'Dinani nthawi kuti mupiteko' : 'Tap timestamp to jump'}
-                  </span>
-                </div>
-
-                {!track.comments || track.comments.length === 0 ? (
-                  <div className="text-center py-12 px-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] text-xs space-y-1">
-                    <MessageSquare className="w-6 h-6 mx-auto mb-2 opacity-60" />
-                    <p className="font-semibold text-[var(--text)]">
-                      {isNy ? 'Palibe ndemanga pakadali pano' : 'No comments yet'}
-                    </p>
-                    <p>
-                      {isNy ? 'Khalani woyamba kunena maganizo anu.' : 'Be the first to share what you think.'}
-                    </p>
+            {activeTab === 'reflections' && (() => {
+              const isTrackOwnerOrAdmin = Boolean(isAdmin || canEditMetadata);
+              const visibleComments = (track.comments || []).filter(
+                (c) => !c.hiddenByModeration || isTrackOwnerOrAdmin
+              );
+              const commentsAllowed = track.allowComments !== false;
+              return (
+                <motion.div
+                  key="tab-reflections"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.16, ease: 'easeOut' }}
+                  className="space-y-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-[var(--text)] font-heading">
+                      {isNy ? 'Ndemanga' : 'Comments'} ({visibleComments.length})
+                    </h4>
+                    <span className="text-[11px] text-[var(--text-muted)]">
+                      {isNy ? 'Dinani nthawi kuti mupiteko' : 'Tap timestamp to jump'}
+                    </span>
                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    {track.comments.map((c) => (
-                      <div
-                        key={c.id}
-                        className="p-3 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)]"
-                      >
-                        <div className="flex items-center justify-between mb-1.5">
-                          <div className="flex items-center gap-2">
-                            <img
-                              src={c.userAvatar || DEFAULT_AVATAR_SVG}
-                              alt={c.userName}
-                              referrerPolicy="no-referrer"
-                              className="w-5 h-5 rounded-full object-cover border border-[var(--border)]"
-                            />
-                            <span className="text-xs font-semibold text-[var(--text)]">{c.userName}</span>
-                          </div>
 
-                          {c.timestampSeconds > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (currentTrack?.id !== track.id) {
-                                  playTrack(track);
-                                }
-                                seekTo(c.timestampSeconds);
-                              }}
-                              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)] border border-[var(--border)] cursor-pointer"
-                            >
-                              <Clock className="w-2.5 h-2.5" />
-                              <span>{formatTime(c.timestampSeconds)}</span>
-                            </button>
-                          )}
-                        </div>
-
-                        <p className="text-xs text-[var(--text-dim)] leading-relaxed">{c.content}</p>
-
-                        <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-[var(--border)] text-[10px] text-[var(--text-muted)]">
-                          <span>{c.createdAt}</span>
-                          <button
-                            type="button"
-                            onClick={() => likeComment(track.id, c.id)}
-                            className="flex items-center gap-1 hover:text-rose-500 transition cursor-pointer"
+                  {visibleComments.length === 0 ? (
+                    <div className="text-center py-12 px-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] text-xs space-y-1">
+                      <MessageSquare className="w-6 h-6 mx-auto mb-2 opacity-60" />
+                      <p className="font-semibold text-[var(--text)]">
+                        {commentsAllowed
+                          ? isNy
+                            ? 'Palibe ndemanga pakadali pano'
+                            : 'No comments yet'
+                          : t('comments_disabled', 'Comments are turned off for this track.')}
+                      </p>
+                      {commentsAllowed && (
+                        <p>
+                          {isNy ? 'Khalani woyamba kunena maganizo anu.' : 'Be the first to share what you think.'}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {visibleComments.map((c) => {
+                        const canDelete = Boolean(
+                          isTrackOwnerOrAdmin || (currentUser && c.userId === currentUser.id)
+                        );
+                        return (
+                          <div
+                            key={c.id}
+                            className={`p-3 rounded-2xl bg-[var(--surface-2)] border ${
+                              c.hiddenByModeration ? 'border-amber-500/40 opacity-75' : 'border-[var(--border)]'
+                            }`}
                           >
-                            <Heart className="w-3 h-3" />
-                            <span>{c.likes}</span>
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </motion.div>
-            )}
+                            <div className="flex items-center justify-between mb-1.5 gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <img
+                                  src={c.userAvatar || DEFAULT_AVATAR_SVG}
+                                  alt={c.userName}
+                                  referrerPolicy="no-referrer"
+                                  className="w-5 h-5 rounded-full object-cover border border-[var(--border)] shrink-0"
+                                />
+                                <span className="text-xs font-semibold text-[var(--text)] truncate">{c.userName}</span>
+                                {c.hiddenByModeration && (
+                                  <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 text-[10px] font-mono">
+                                    {isNy ? 'Yobisika' : 'Hidden'}
+                                  </span>
+                                )}
+                              </div>
+
+                              {c.timestampSeconds > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (currentTrack?.id !== track.id) {
+                                      playTrack(track);
+                                    }
+                                    seekTo(c.timestampSeconds);
+                                  }}
+                                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)] border border-[var(--border)] cursor-pointer shrink-0"
+                                >
+                                  <Clock className="w-2.5 h-2.5" />
+                                  <span>{formatTime(c.timestampSeconds)}</span>
+                                </button>
+                              )}
+                            </div>
+
+                            <p className="text-xs text-[var(--text-dim)] leading-relaxed">{c.content}</p>
+
+                            <div className="flex items-center justify-between gap-2 mt-2 pt-1.5 border-t border-[var(--border)] text-[10px] text-[var(--text-muted)]">
+                              <span>{c.createdAt}</span>
+                              <div className="flex items-center gap-2">
+                                {isTrackOwnerOrAdmin && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const res = await moderateTrackComment(
+                                        track.id,
+                                        c.id,
+                                        !c.hiddenByModeration
+                                      );
+                                      if (res.success) {
+                                        showToast(
+                                          c.hiddenByModeration
+                                            ? isNy ? 'Ndemanga ikuwonekeranso' : 'Comment restored'
+                                            : isNy ? 'Ndemanga yabisika' : 'Comment hidden'
+                                        );
+                                      }
+                                    }}
+                                    className="inline-flex items-center gap-1 hover:text-[var(--text)] cursor-pointer"
+                                  >
+                                    {c.hiddenByModeration ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                                    <span>{c.hiddenByModeration ? (isNy ? 'Onetsani' : 'Show') : (isNy ? 'Bisani' : 'Hide')}</span>
+                                  </button>
+                                )}
+                                {canDelete && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const res = await deleteTrackComment(track.id, c.id);
+                                      if (res.success) {
+                                        showToast(isNy ? 'Ndemanga yafufutidwa' : 'Comment deleted');
+                                      }
+                                    }}
+                                    className="inline-flex items-center gap-1 hover:text-[var(--danger)] cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    <span>{t('delete_comment', 'Delete')}</span>
+                                  </button>
+                                )}
+                                {currentUser && !canDelete && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      await submitContentReportRecord({
+                                        type: 'comment',
+                                        trackId: track.id,
+                                        trackTitle: track.title,
+                                        commentId: c.id,
+                                        reason: 'Flagged listener comment',
+                                        details: `Comment by ${c.userName}: "${c.content}"`,
+                                      });
+                                      showToast(isNy ? 'Ndemanga yanenedwa kwa oyang\'anira' : 'Comment reported for review');
+                                    }}
+                                    className="inline-flex items-center gap-1 hover:text-amber-500 cursor-pointer"
+                                  >
+                                    <Flag className="w-3 h-3" />
+                                    <span>{t('report_comment', 'Report')}</span>
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => likeComment(track.id, c.id)}
+                                  className="flex items-center gap-1 hover:text-rose-500 transition cursor-pointer"
+                                >
+                                  <Heart className="w-3 h-3" />
+                                  <span>{c.likes}</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </motion.div>
+              );
+            })()}
           </AnimatePresence>
         </div>
 
@@ -1192,6 +1283,10 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
                 />
               </div>
             </div>
+          </div>
+        ) : track.allowComments === false ? (
+          <div className="p-4 border-t border-[var(--border)] bg-[var(--bg)] text-center text-xs text-[var(--text-muted)]">
+            {t('comments_disabled', 'Comments are turned off for this track.')}
           </div>
         ) : (
           <form onSubmit={handlePostComment} className="p-4 border-t border-[var(--border)] bg-[var(--bg)]">

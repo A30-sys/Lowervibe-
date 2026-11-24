@@ -1,4 +1,4 @@
-import { CheckCircle2, Heart, Search, Share2, Users } from 'lucide-react';
+import { CheckCircle2, Heart, Search, Share2, ShieldCheck, Users } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
@@ -7,6 +7,8 @@ import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
 import { CANONICAL_GENRES } from '../../services/genresService';
 import { Artist } from '../../types';
+import { DEFAULT_AVATAR_SVG } from '../../utils/artworkFallback';
+import { formatNumber } from '../../utils/formatters';
 import { normalizeGenreCategory, translateGenreCategory } from '../../utils/genreCategories';
 import { SafeImage } from '../SafeImage';
 
@@ -20,10 +22,35 @@ export const ArtistsRosterView: React.FC = () => {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('all');
+  const [verifiedOnly, setVerifiedOnly] = useState(false);
+
+  const publicTracks = useMemo(
+    () => tracks.filter((tr) => !tr.isDraft && !tr.isDeranked),
+    [tracks]
+  );
+
+  // Pre-compute song counts & real plays per artist in O(T) instead of O(A * T) per render
+  const { trackCountById, trackCountByName, totalPlaysById } = useMemo(() => {
+    const byId = new Map<string, number>();
+    const byName = new Map<string, number>();
+    const playsById = new Map<string, number>();
+
+    for (const tr of publicTracks) {
+      if (tr.artistId) {
+        byId.set(tr.artistId, (byId.get(tr.artistId) || 0) + 1);
+        playsById.set(tr.artistId, (playsById.get(tr.artistId) || 0) + (tr.plays || 0));
+      }
+      const lowerName = (tr.artistName || '').trim().toLowerCase();
+      if (lowerName) {
+        byName.set(lowerName, (byName.get(lowerName) || 0) + 1);
+      }
+    }
+    return { trackCountById: byId, trackCountByName: byName, totalPlaysById: playsById };
+  }, [publicTracks]);
 
   const genres = useMemo(() => {
     const artistGenres = artists.flatMap((a) => a.genres || []).map((g) => normalizeGenreCategory(g));
-    const trackGenres = tracks.map((tr) => tr.genre).filter(Boolean).map((g) => normalizeGenreCategory(g));
+    const trackGenres = publicTracks.map((tr) => tr.genre).filter(Boolean).map((g) => normalizeGenreCategory(g));
     const merged = Array.from(
       new Set([
         ...CANONICAL_GENRES.slice(0, 5).map((g) => normalizeGenreCategory(g.name)),
@@ -32,20 +59,46 @@ export const ArtistsRosterView: React.FC = () => {
       ])
     ).filter(Boolean);
     return ['all', ...merged];
-  }, [artists, tracks]);
+  }, [artists, publicTracks]);
 
-  const filteredArtists = artists.filter((artist) => {
-    const matchesSearch =
-      (artist.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (artist.location || artist.country || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (artist.bio || '').toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesGenre =
-      selectedGenre === 'all' ||
-      (artist.genres || []).some(
-        (g) => normalizeGenreCategory(g).toLowerCase() === selectedGenre.toLowerCase()
-      );
-    return matchesSearch && matchesGenre;
-  });
+  const filteredArtists = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return artists
+      .filter((artist) => {
+        const isArtistVerified = Boolean(artist.verified || artist.isVerified);
+        if (verifiedOnly && !isArtistVerified) return false;
+        const matchesSearch =
+          !q ||
+          (artist.name || '').toLowerCase().includes(q) ||
+          (artist.location || artist.country || '').toLowerCase().includes(q) ||
+          (artist.bio || '').toLowerCase().includes(q);
+        const matchesGenre =
+          selectedGenre === 'all' ||
+          (artist.genres || []).some(
+            (g) => normalizeGenreCategory(g).toLowerCase() === selectedGenre.toLowerCase()
+          );
+        return matchesSearch && matchesGenre;
+      })
+      .sort((a, b) => {
+        const aVerified = a.verified || a.isVerified ? 1 : 0;
+        const bVerified = b.verified || b.isVerified ? 1 : 0;
+        if (aVerified !== bVerified) return bVerified - aVerified;
+        const aScore =
+          (totalPlaysById.get(a.id) || 0) +
+          (a.followersCount || 0) * 5 +
+          (trackCountById.get(a.id) || 0) * 10;
+        const bScore =
+          (totalPlaysById.get(b.id) || 0) +
+          (b.followersCount || 0) * 5 +
+          (trackCountById.get(b.id) || 0) * 10;
+        return bScore - aScore;
+      });
+  }, [artists, searchQuery, selectedGenre, verifiedOnly, totalPlaysById, trackCountById]);
+
+  const verifiedCount = useMemo(
+    () => artists.filter((a) => Boolean(a.verified || a.isVerified)).length,
+    [artists]
+  );
 
   const handleShare = (artist: Artist, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -70,22 +123,49 @@ export const ArtistsRosterView: React.FC = () => {
   return (
     <div className="space-y-6 sm:space-y-8 animate-fadeIn pb-8">
       {/* Header */}
-      <div className="p-6 sm:p-8 rounded-[28px] bg-[var(--surface)] border border-[var(--border)]">
+      <div className="p-6 sm:p-8 rounded-[28px] bg-[var(--surface)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="space-y-1.5">
-          <div className="text-xs font-mono text-[var(--text-muted)]">
-            {isNy
-              ? `Oimba ${artists.length}`
-              : `${artists.length} independent ${artists.length === 1 ? 'artist' : 'artists'}`}
+          <div className="text-xs font-mono text-[var(--text-muted)] flex items-center gap-2 flex-wrap">
+            <span>
+              {isNy
+                ? `Oimba ${artists.length}`
+                : `${artists.length} independent ${artists.length === 1 ? 'artist' : 'artists'}`}
+            </span>
+            {verifiedCount > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="inline-flex items-center gap-1 text-[var(--accent-text)] font-bold">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  {isNy ? `Ovomerezeka ${verifiedCount}` : `${verifiedCount} verified`}
+                </span>
+              </>
+            )}
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold font-heading text-[var(--text)]">
             {isNy ? 'Oimba pa LOWERVIBE' : 'Artists on LOWERVIBE'}
           </h1>
           <p className="text-xs sm:text-sm text-[var(--text-muted)] max-w-xl">
             {isNy
-              ? 'Pezani oimba a ku Malawi, Nigeria, ndi Africa yonse.'
-              : 'Discover independent musicians from Malawi, Nigeria, and across Africa.'}
+              ? 'Pezani oimba ovomerereka a ku Malawi, Nigeria, ndi Africa yonse.'
+              : 'Discover trusted independent musicians from Malawi, Nigeria, and across Africa.'}
           </p>
         </div>
+
+        {verifiedCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setVerifiedOnly((prev) => !prev)}
+            aria-pressed={verifiedOnly}
+            className={`px-4 py-2.5 rounded-2xl border text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer shrink-0 min-h-[44px] ${
+              verifiedOnly
+                ? 'bg-[var(--accent)] text-[var(--accent-contrast)] border-[var(--accent)]'
+                : 'bg-[var(--surface-2)] text-[var(--text)] border-[var(--border)] hover:border-[var(--border-strong)]'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span>{isNy ? 'Ovomerezeka okha' : 'Verified only'}</span>
+          </button>
+        )}
       </div>
 
       {/* Filter and Search Bar */}
@@ -124,6 +204,7 @@ export const ArtistsRosterView: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
           {filteredArtists.map((artist) => {
             const isFollowing = currentUser?.followingArtistIds.includes(artist.id);
+            const isArtistVerified = Boolean(artist.verified || artist.isVerified);
             const isArtistLiked = Boolean(
               currentUser &&
                 ((currentUser.likedArtistIds || []).includes(artist.id) ||
@@ -132,13 +213,10 @@ export const ArtistsRosterView: React.FC = () => {
             const artistLikes = Array.isArray(artist.likedByUserIds)
               ? new Set(artist.likedByUserIds.filter(Boolean)).size
               : artist.likesCount || 0;
-            const artistTrackCount = tracks.filter(
-              (tr) =>
-                !tr.isDraft &&
-                !tr.isDeranked &&
-                (tr.artistId === artist.id ||
-                  (tr.artistName || '').toLowerCase() === (artist.name || '').toLowerCase())
-            ).length;
+            const artistTrackCount = Math.max(
+              trackCountById.get(artist.id) || 0,
+              trackCountByName.get((artist.name || '').trim().toLowerCase()) || 0
+            );
 
             return (
               <div
@@ -149,15 +227,27 @@ export const ArtistsRosterView: React.FC = () => {
                 <div className="space-y-3">
                   <div className="relative h-28 w-full rounded-2xl overflow-hidden bg-[var(--surface-2)] border border-[var(--border)]">
                     <SafeImage
-                      src={artist.banner || artist.avatar}
+                      src={artist.banner || artist.avatar || DEFAULT_AVATAR_SVG}
                       alt={artist.name}
+                      loading="lazy"
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                     />
+                    {isArtistVerified && (
+                      <span className="absolute top-2 right-2 px-2 py-0.5 rounded-lg bg-black/70 backdrop-blur-sm text-[var(--accent)] text-[10px] font-bold inline-flex items-center gap-1 border border-white/10">
+                        <CheckCircle2 className="w-3 h-3" />
+                        <span>{t('verified', 'Verified')}</span>
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-start gap-3">
                     <div className="relative w-14 h-14 rounded-2xl overflow-hidden shrink-0 border-2 border-[var(--surface)] -mt-7 bg-[var(--surface-2)] shadow-md">
-                      <SafeImage src={artist.avatar} alt={artist.name} className="w-full h-full object-cover" />
+                      <SafeImage
+                        src={artist.avatar || DEFAULT_AVATAR_SVG}
+                        alt={artist.name}
+                        loading="lazy"
+                        className="w-full h-full object-cover"
+                      />
                     </div>
 
                     <div className="min-w-0 flex-1">
@@ -165,8 +255,11 @@ export const ArtistsRosterView: React.FC = () => {
                         <h3 className="text-sm font-bold font-heading text-[var(--text)] truncate">
                           {artist.name}
                         </h3>
-                        {artist.verified && (
-                          <CheckCircle2 className="w-4 h-4 text-[var(--violet)] shrink-0" />
+                        {isArtistVerified && (
+                          <CheckCircle2
+                            className="w-4 h-4 text-[var(--accent-text)] shrink-0"
+                            aria-label={t('verified', 'Verified')}
+                          />
                         )}
                       </div>
                       <p className="text-[11px] text-[var(--text-muted)] truncate mt-0.5">
@@ -186,7 +279,9 @@ export const ArtistsRosterView: React.FC = () => {
                   <div className="text-[11px] font-mono text-[var(--text-muted)] tabular-nums">
                     <span className="text-[var(--text)] font-bold">{artistTrackCount}</span>{' '}
                     {isNy ? 'nyimbo' : artistTrackCount === 1 ? 'song' : 'songs'} ·{' '}
-                    <span className="text-[var(--text)] font-bold">{artist.followersCount || 0}</span>{' '}
+                    <span className="text-[var(--text)] font-bold">
+                      {formatNumber(artist.followersCount || 0)}
+                    </span>{' '}
                     {t('followers', 'followers')}
                   </div>
 
@@ -249,6 +344,7 @@ export const ArtistsRosterView: React.FC = () => {
             onClick={() => {
               setSearchQuery('');
               setSelectedGenre('all');
+              setVerifiedOnly(false);
             }}
             className="px-5 py-2.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs cursor-pointer"
           >

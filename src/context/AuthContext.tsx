@@ -294,11 +294,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {}
   };
 
-  // Sync settings & persistent device login cache
+  // Sync settings, reduced-motion class & persistent device login cache
   useEffect(() => {
     try {
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(userSettings));
     } catch {}
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle(
+        'reduced-motion',
+        Boolean(userSettings.appearance?.reducedMotion)
+      );
+    }
   }, [userSettings]);
 
   useEffect(() => {
@@ -993,6 +999,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       merge: true,
       mirrorBackup: true,
     });
+    const pendingNotifId = `notif-app-pending-${newApp.id}`;
+    void durableSetDoc(
+      'notifications',
+      pendingNotifId,
+      {
+        id: pendingNotifId,
+        userId: data.userId,
+        userEmail: data.userEmail?.toLowerCase(),
+        type: 'artist_pending',
+        category: 'essential',
+        title: 'Creator Studio application received',
+        message: `Your artist profile "${data.stageName}" is under review. You will be notified as soon as verification finishes.`,
+        readBy: [],
+        createdAt: new Date().toISOString(),
+        createdBy: 'system',
+        actionRoute: '/artistcreator',
+      },
+      { mirrorBackup: false }
+    );
     return newApp;
   };
 
@@ -1266,15 +1291,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCurrentUser(updatedUser);
     updateUserProfileFields(currentUser.id, { followingArtistIds: updated });
 
-    // Sync follower count atomically
+    // Sync follower count atomically & notify artist owner on follow
     runTransaction(db, async (tx) => {
       const aRef = doc(db, 'artists', artistId);
       const snap = await tx.get(aRef);
       if (!snap.exists()) return;
-      const prevCount = typeof snap.data().followersCount === 'number' ? snap.data().followersCount : 0;
+      const data = snap.data() as {
+        followersCount?: number;
+        ownerId?: string;
+        ownerUserId?: string;
+        claimedByUserId?: string;
+        name?: string;
+      };
+      const prevCount = typeof data.followersCount === 'number' ? data.followersCount : 0;
       tx.update(aRef, {
         followersCount: Math.max(0, prevCount + (exists ? -1 : 1)),
       });
+      const targetOwnerId = data.ownerId || data.ownerUserId || data.claimedByUserId;
+      if (!exists && targetOwnerId && targetOwnerId !== currentUser.id) {
+        const notifId = `notif-follow-${artistId}-${currentUser.id}-${Date.now()}`;
+        void setDoc(doc(db, 'notifications', notifId), {
+          id: notifId,
+          userId: targetOwnerId,
+          type: 'new_follower',
+          category: 'promotional',
+          title: `New follower for ${data.name || 'your artist page'}`,
+          message: `${currentUser.name || 'A listener'} started following you on LOWERVIBE.`,
+          readBy: [],
+          createdAt: new Date().toISOString(),
+          createdBy: currentUser.id,
+          actionRoute: `/artists/${artistId}`,
+        }).catch(() => {});
+      }
     }).catch(() => {});
   };
 

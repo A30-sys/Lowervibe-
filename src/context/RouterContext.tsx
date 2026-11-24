@@ -21,6 +21,7 @@ export interface RouteMatch {
     | 'terms'
     | 'privacy'
     | 'copyright'
+    | 'about'
     | 'thank_you'
     | 'not_found'
     | 'server_error';
@@ -57,6 +58,9 @@ export function parseRoute(pathname: string, search: string, hash: string = ''):
   }
   if (cleanPath === '/copyright') {
     return { route: 'copyright', params: {}, pathname: cleanPath, searchQuery, hash };
+  }
+  if (cleanPath === '/about') {
+    return { route: 'about', params: {}, pathname: cleanPath, searchQuery, hash };
   }
   if (cleanPath === '/thank-you') {
     return { route: 'thank_you', params: {}, pathname: cleanPath, searchQuery, hash };

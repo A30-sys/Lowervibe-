@@ -268,6 +268,7 @@ service cloud.firestore {
           'durationSeconds',
           'metadata',
           'isDraft',
+          'moderationStatus',
           'scheduledPublishDate',
           'downloadable',
           'artworkRightsConfirmed',
@@ -418,6 +419,9 @@ service cloud.firestore {
             'chartRank',
             'isDeranked',
             'isDraft',
+            'moderationStatus',
+            'moderationFeedback',
+            'comments',
             'updatedAt'
           ])
         )
@@ -610,12 +614,42 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    match /banners/{bannerId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(bannerId) && isAdmin();
+    }
+
     match /notifications/{notificationId} {
-      allow read: if isSignedIn();
-      allow create: if isValidId(notificationId) && (isAdmin() || isSignedIn());
+      allow read: if isSignedIn() && (
+        isAdmin()
+        || resource.data.userId == 'all'
+        || resource.data.userId == request.auth.uid
+        || (
+          'userEmail' in resource.data
+          && 'email' in request.auth.token
+          && resource.data.userEmail == request.auth.token.email
+        )
+      );
+      allow create: if isValidId(notificationId) && isSignedIn() && (
+        isAdmin()
+        || request.resource.data.userId == request.auth.uid
+        || request.resource.data.type in ['new_release', 'new_follower', 'playlist_update', 'system']
+      );
       allow update: if isValidId(notificationId) && (
         isAdmin()
-        || (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy']))
+        || (
+          isSignedIn()
+          && (
+            resource.data.userId == 'all'
+            || resource.data.userId == request.auth.uid
+            || (
+              'userEmail' in resource.data
+              && 'email' in request.auth.token
+              && resource.data.userEmail == request.auth.token.email
+            )
+          )
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy'])
+        )
       );
       allow delete: if isAdmin();
     }

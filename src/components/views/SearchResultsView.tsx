@@ -79,6 +79,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
     currentTrack,
     isPlaying,
     playTrack,
+    playTrackList,
     togglePlayPause,
     setActiveDetailTrack,
   } = useAudio();
@@ -286,6 +287,37 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
         </button>
       </form>
 
+      {/* Instant Live Suggestions when typing */}
+      {rawQuery.trim().length >= 2 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+          <span className="text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
+            {t('search_suggestions_heading', 'Try searching for')}:
+          </span>
+          {Array.from(
+            new Set([
+              ...matchedArtists.slice(0, 3).map((a) => a.name),
+              ...matchedTracks.slice(0, 3).map((tr) => tr.title),
+              ...trendingGenres.slice(0, 3).map((g) => g.name),
+            ])
+          )
+            .slice(0, 6)
+            .map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                onClick={() => {
+                  setRawQuery(suggestion);
+                  setDebouncedQuery(suggestion);
+                  saveSearchTerm(suggestion);
+                }}
+                className="px-3 py-1 rounded-full bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--accent)] text-[11px] font-semibold text-[var(--text)] whitespace-nowrap cursor-pointer"
+              >
+                {suggestion}
+              </button>
+            ))}
+        </div>
+      )}
+
       {/* EMPTY QUERY STATE: Recent Searches + Trending Genres */}
       {!debouncedQuery.trim() ? (
         <div className="space-y-6">
@@ -298,9 +330,10 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                 <button
                   type="button"
                   onClick={clearRecentSearches}
-                  className="text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--danger)] cursor-pointer"
                 >
-                  {isNy ? 'Chotsani zonse' : 'Clear all'}
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{t('clear_history', 'Clear history')}</span>
                 </button>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -386,16 +419,96 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
           </div>
 
           {totalMatches === 0 ? (
-            <div className="p-10 rounded-[24px] bg-[var(--surface)] border border-[var(--border)] text-center space-y-2">
+            <div className="p-8 sm:p-10 rounded-[24px] bg-[var(--surface)] border border-[var(--border)] text-center space-y-5">
               <Search className="w-8 h-8 text-[var(--text-muted)] mx-auto" />
-              <div className="text-sm font-bold text-[var(--text)]">
-                {isNy ? `Palibe zopezeka za "${debouncedQuery}"` : `No results for "${debouncedQuery}"`}
+              <div className="space-y-1.5">
+                <h2 className="text-base font-extrabold text-[var(--text)]">
+                  {t('search_no_match', 'Nothing matched your search yet.')}
+                </h2>
+                <p className="text-xs text-[var(--text-muted)] max-w-md mx-auto">
+                  {isNy
+                    ? `Sitinapeze "${debouncedQuery}". Yesani mitundu, oimba, kapena nyimbo zomwe zilipo pansipa.`
+                    : `We could not find "${debouncedQuery}". Explore available genres, artists, or songs below.`}
+                </p>
               </div>
-              <p className="text-xs text-[var(--text-muted)]">
-                {isNy
-                  ? 'Yang\'anani kalembedwe kapena yesani dzina lina la woimba, nyimbo kapena mtundu.'
-                  : 'Check the spelling or try another artist name, song title, or genre.'}
-              </p>
+
+              {trendingGenres.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                    {t('genres', 'Genres')}
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {trendingGenres.slice(0, 6).map((g) => (
+                      <button
+                        key={g.name}
+                        type="button"
+                        onClick={() => {
+                          setRawQuery(g.name);
+                          setDebouncedQuery(g.name);
+                        }}
+                        className="px-3.5 py-2 rounded-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--accent)] text-xs font-semibold text-[var(--text)] cursor-pointer"
+                      >
+                        {translateGenreCategory(g.name, language)} ({g.count})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {artists.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                    {t('artists', 'Artists')}
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {artists.slice(0, 5).map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => navigate(`/artists/${a.slug || a.id}`)}
+                        className="px-3.5 py-2 rounded-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--accent)] text-xs font-semibold text-[var(--accent-text)] cursor-pointer"
+                      >
+                        {a.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {publicTracks.length > 0 && (
+                <div className="pt-2 text-left max-w-md mx-auto space-y-2">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] text-center">
+                    {t('popular_music_title', 'Popular on LOWERVIBE')}
+                  </div>
+                  <div className="rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] divide-y divide-[var(--border)] overflow-hidden">
+                    {[...publicTracks]
+                      .sort((a, b) => (b.plays || 0) - (a.plays || 0))
+                      .slice(0, 3)
+                      .map((tr) => (
+                        <button
+                          key={tr.id}
+                          type="button"
+                          onClick={() => playTrack(tr)}
+                          className="w-full p-2.5 flex items-center justify-between gap-2.5 text-left hover:bg-[var(--surface)] transition cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <img
+                              src={tr.coverArt || DEFAULT_ARTWORK_SVG}
+                              alt={tr.title}
+                              referrerPolicy="no-referrer"
+                              className="w-9 h-9 rounded-lg object-cover shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <div className="text-xs font-bold text-[var(--text)] truncate">{tr.title}</div>
+                              <div className="text-[11px] text-[var(--text-muted)] truncate">{tr.artistName}</div>
+                            </div>
+                          </div>
+                          <Play className="w-4 h-4 text-[var(--accent-text)] shrink-0 fill-current" />
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-6">
@@ -475,25 +588,37 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                     <div
                       onClick={() => {
                         saveSearchTerm(debouncedQuery);
-                        navigate('/library');
+                        const resolved = (topResult.item.trackIds || [])
+                          .map((id) => publicTracks.find((tItem) => tItem.id === id))
+                          .filter((x): x is Track => Boolean(x));
+                        if (resolved.length > 0) {
+                          playTrackList(resolved, 0);
+                        } else {
+                          navigate('/library');
+                        }
                       }}
-                      className="p-5 rounded-[22px] bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-strong)] flex items-center gap-4 cursor-pointer"
+                      className="p-5 rounded-[22px] bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-strong)] flex items-center justify-between gap-4 cursor-pointer"
                     >
-                      <img
-                        src={topResult.item.coverArt || DEFAULT_ARTWORK_SVG}
-                        alt={topResult.item.name}
-                        referrerPolicy="no-referrer"
-                        className="w-16 h-16 rounded-2xl object-cover border border-[var(--border)] shrink-0"
-                      />
-                      <div>
-                        <div className="text-base font-extrabold text-[var(--text)]">{topResult.item.name}</div>
-                        <div className="text-xs text-[var(--text-muted)]">
-                          {isNy ? 'Mndandanda' : 'Playlist'} ·{' '}
-                          {t('songs_count_label', `${topResult.item.trackIds.length} songs`, {
-                            count: topResult.item.trackIds.length,
-                          })}
+                      <div className="flex items-center gap-4 min-w-0">
+                        <img
+                          src={topResult.item.coverArt || DEFAULT_ARTWORK_SVG}
+                          alt={topResult.item.name}
+                          referrerPolicy="no-referrer"
+                          className="w-16 h-16 rounded-2xl object-cover border border-[var(--border)] shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <div className="text-base font-extrabold text-[var(--text)] truncate">{topResult.item.name}</div>
+                          <div className="text-xs text-[var(--text-muted)]">
+                            {isNy ? 'Mndandanda' : 'Playlist'} ·{' '}
+                            {t('songs_count_label', `${topResult.item.trackIds.length} songs`, {
+                              count: topResult.item.trackIds.length,
+                            })}
+                          </div>
                         </div>
                       </div>
+                      <span className="w-11 h-11 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] flex items-center justify-center shrink-0">
+                        <Play className="w-5 h-5 fill-current ml-0.5" />
+                      </span>
                     </div>
                   )}
                 </section>
@@ -590,32 +715,48 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                 <section className="space-y-2.5">
                   <h2 className="text-sm font-bold text-[var(--text)]">{t('playlists', 'Playlists')}</h2>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {matchedPlaylists.map((pl) => (
-                      <div
-                        key={pl.id}
-                        onClick={() => {
-                          saveSearchTerm(debouncedQuery);
-                          navigate('/library');
-                        }}
-                        className="p-3.5 rounded-2xl bg-[var(--surface)] border border-[var(--border)] flex items-center gap-3 cursor-pointer"
-                      >
-                        <img
-                          src={pl.coverArt || DEFAULT_ARTWORK_SVG}
-                          alt={pl.name}
-                          referrerPolicy="no-referrer"
-                          className="w-12 h-12 rounded-xl object-cover shrink-0 border border-[var(--border)]"
-                        />
-                        <div className="min-w-0">
-                          <div className="text-sm font-bold text-[var(--text)] truncate">{pl.name}</div>
-                          <div className="text-xs text-[var(--text-muted)]">
-                            {t('songs_count_label', `${pl.trackIds.length} songs`, {
-                              count: pl.trackIds.length,
-                            })}{' '}
-                            · {pl.creatorName}
+                    {matchedPlaylists.map((pl) => {
+                      const resolved = (pl.trackIds || [])
+                        .map((id) => publicTracks.find((tItem) => tItem.id === id))
+                        .filter((x): x is Track => Boolean(x));
+                      return (
+                        <div
+                          key={pl.id}
+                          onClick={() => {
+                            saveSearchTerm(debouncedQuery);
+                            if (resolved.length > 0) {
+                              playTrackList(resolved, 0);
+                            } else {
+                              navigate('/library');
+                            }
+                          }}
+                          className="p-3.5 rounded-2xl bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-strong)] flex items-center justify-between gap-3 cursor-pointer"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <img
+                              src={pl.coverArt || resolved[0]?.coverArt || DEFAULT_ARTWORK_SVG}
+                              alt={pl.name}
+                              referrerPolicy="no-referrer"
+                              className="w-12 h-12 rounded-xl object-cover shrink-0 border border-[var(--border)]"
+                            />
+                            <div className="min-w-0">
+                              <div className="text-sm font-bold text-[var(--text)] truncate">{pl.name}</div>
+                              <div className="text-xs text-[var(--text-muted)]">
+                                {t('songs_count_label', `${pl.trackIds.length} songs`, {
+                                  count: pl.trackIds.length,
+                                })}{' '}
+                                · {pl.creatorName}
+                              </div>
+                            </div>
                           </div>
+                          {resolved.length > 0 && (
+                            <span className="w-9 h-9 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] flex items-center justify-center shrink-0">
+                              <Play className="w-4 h-4 fill-current ml-0.5" />
+                            </span>
+                          )}
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </section>
               )}

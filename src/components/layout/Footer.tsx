@@ -1,4 +1,4 @@
-import { Globe, Instagram, Music2, Twitter, Youtube } from 'lucide-react';
+import { Globe, Music2 } from 'lucide-react';
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { LANGUAGES, useLanguage } from '../../context/LanguageContext';
@@ -8,12 +8,6 @@ interface FooterProps {
   onOpenLegal?: (type: 'terms' | 'privacy') => void;
   onNavigate?: (path: string) => void;
 }
-
-const SOCIAL_LINKS = [
-  { name: 'Instagram', url: 'https://instagram.com/lowervibe', icon: Instagram },
-  { name: 'X', url: 'https://x.com/lowervibe_fm', icon: Twitter },
-  { name: 'YouTube', url: 'https://youtube.com/@lowervibe', icon: Youtube },
-];
 
 export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
   const { language, setLanguage, t } = useLanguage();
@@ -62,22 +56,6 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                 );
               })}
             </div>
-
-            {SOCIAL_LINKS.map((s) => {
-              const Icon = s.icon;
-              return (
-                <a
-                  key={s.name}
-                  href={s.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-strong)] text-[var(--text)] text-xs font-semibold transition-all active:scale-95 min-h-[44px]"
-                >
-                  <Icon className="w-4 h-4" />
-                  <span>{s.name}</span>
-                </a>
-              );
-            })}
           </div>
         </div>
 
@@ -157,6 +135,15 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               {t('footer_legal', 'Legal')}
             </h4>
             <ul className="space-y-2">
+              <li>
+                <button
+                  type="button"
+                  onClick={() => onNavigate?.('/about')}
+                  className="hover:text-[var(--text)] transition cursor-pointer text-left"
+                >
+                  {t('footer_about', 'About LOWERVIBE')}
+                </button>
+              </li>
               <li>
                 <button
                   type="button"

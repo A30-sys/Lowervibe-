@@ -1679,6 +1679,32 @@ export const AccountView: React.FC = () => {
               </div>
             )}
 
+            <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] space-y-1">
+              <div className="flex items-center gap-2 text-xs font-bold text-[var(--text)]">
+                <Shield className="w-4 h-4 text-[var(--accent-text)] shrink-0" />
+                <span>
+                  {isNy
+                    ? 'Zidziwitso zofunikira za akaunti ndi chitetezo (Zimakhala zoyatsidwa nthawi zonse)'
+                    : 'Essential account, security & upload alerts (Always enabled)'}
+                </span>
+              </div>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                {isNy
+                  ? 'Zidziwitso za chitetezo, kukonza nsanja, kupambana kapena kulephera kwa kukweza nyimbo, ndi zisankho za pempho la woimba sizimitsidwa.'
+                  : 'Security warnings, upload processing status, artist application decisions, and critical maintenance notices stay active to protect your account.'}
+              </p>
+            </div>
+
+            <ToggleRow
+              label={t('promo_banner_toggle_label', 'Promotional banners & feature announcements')}
+              description={t(
+                'promo_banner_toggle_desc',
+                'Show optional release highlights, new platform features, and community announcements.'
+              )}
+              checked={userSettings.notifications.promotionalBanners !== false}
+              onChange={(v) => updateUserSettings({ notifications: { promotionalBanners: v } })}
+            />
+
             <div className="space-y-2">
               {[
                 {
@@ -1690,6 +1716,11 @@ export const AccountView: React.FC = () => {
                   title: isNy ? 'Okonda nyimbo & otsatira atsopano' : 'Likes & new followers',
                   inApp: 'likesFollowsInApp' as const,
                   push: 'likesFollowsPush' as const,
+                },
+                {
+                  title: isNy ? 'Zosintha za mindandanda' : 'Playlist updates',
+                  inApp: 'playlistUpdatesInApp' as const,
+                  push: 'playlistUpdatesPush' as const,
                 },
                 {
                   title: isNy ? 'Chidule cha mlungu ndi mlungu' : 'Weekly listening recap',
@@ -1716,7 +1747,7 @@ export const AccountView: React.FC = () => {
                     <label className="flex items-center gap-1.5 cursor-pointer text-[var(--text-muted)]">
                       <input
                         type="checkbox"
-                        checked={userSettings.notifications[row.inApp]}
+                        checked={userSettings.notifications[row.inApp] !== false}
                         onChange={(e) => updateUserSettings({ notifications: { [row.inApp]: e.target.checked } })}
                         className="accent-[var(--accent)]"
                       />
@@ -1725,7 +1756,7 @@ export const AccountView: React.FC = () => {
                     <label className="flex items-center gap-1.5 cursor-pointer text-[var(--text-muted)]">
                       <input
                         type="checkbox"
-                        checked={userSettings.notifications[row.push]}
+                        checked={Boolean(userSettings.notifications[row.push])}
                         onChange={(e) => handleRequestPushPermission(row.push, e.target.checked)}
                         className="accent-[var(--accent)]"
                       />
@@ -1923,6 +1954,16 @@ export const AccountView: React.FC = () => {
                 ))}
               </div>
             </div>
+
+            <ToggleRow
+              label={t('reduced_motion_label', 'Reduced animations')}
+              description={t(
+                'reduced_motion_desc',
+                'Minimize motion transitions for smoother performance on Android and reduced eye strain.'
+              )}
+              checked={Boolean(userSettings.appearance.reducedMotion)}
+              onChange={(v) => updateUserSettings({ appearance: { reducedMotion: v } })}
+            />
           </div>
         </SettingsGroup>
 

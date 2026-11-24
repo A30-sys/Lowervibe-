@@ -110,9 +110,18 @@ export async function playNotificationSound(
   }
 }
 
+function resolveAbsoluteUrl(pathOrUrl: string): string {
+  if (typeof window === 'undefined') return pathOrUrl;
+  try {
+    return new URL(pathOrUrl, window.location.origin).href;
+  } catch {
+    return pathOrUrl;
+  }
+}
+
 /**
  * Triggers a native browser / installed PWA device notification when permission is granted,
- * routing taps back to the exact song, artist, or studio update inside LOWERVIBE.
+ * always showing the LOWERVIBE PNG icon and routing taps straight to the target action.
  */
 export async function showDeviceNotification(input: {
   title: string;
@@ -120,15 +129,43 @@ export async function showDeviceNotification(input: {
   url?: string;
   tag?: string;
   icon?: string;
+  image?: string;
 }): Promise<boolean> {
   if (typeof window === 'undefined' || typeof Notification === 'undefined') return false;
   if (Notification.permission !== 'granted') return false;
 
-  const targetUrl = input.url || '/';
-  const options: NotificationOptions & { renotify?: boolean; vibrate?: number[] } = {
+  const rawUrl = (input.url || '/').trim() || '/';
+  let targetUrl = '/';
+  try {
+    const parsed = new URL(rawUrl, window.location.origin);
+    targetUrl =
+      parsed.origin === window.location.origin
+        ? `${parsed.pathname}${parsed.search}${parsed.hash}` || '/'
+        : '/';
+  } catch {
+    targetUrl = rawUrl.startsWith('/') ? rawUrl : '/';
+  }
+
+  const lowervibeIcon = resolveAbsoluteUrl('/icons/pwa-512x512.png');
+  const lowervibeBadge = resolveAbsoluteUrl('/icons/pwa-192x192.png');
+  const customIcon =
+    input.icon && !input.icon.startsWith('data:image/svg')
+      ? resolveAbsoluteUrl(input.icon)
+      : lowervibeIcon;
+  const richImage =
+    input.image && !input.image.startsWith('data:image/svg')
+      ? resolveAbsoluteUrl(input.image)
+      : undefined;
+
+  const options: NotificationOptions & {
+    renotify?: boolean;
+    vibrate?: number[];
+    image?: string;
+  } = {
     body: input.body,
-    icon: input.icon || '/icons/pwa-512x512.png',
-    badge: '/icons/pwa-192x192.png',
+    icon: customIcon,
+    badge: lowervibeBadge,
+    ...(richImage ? { image: richImage } : {}),
     tag: input.tag || `lowervibe-${Date.now()}`,
     renotify: true,
     vibrate: [160, 60, 160],
@@ -158,10 +195,11 @@ export async function showDeviceNotification(input: {
     n.onclick = () => {
       try {
         window.focus();
-        if (targetUrl && targetUrl !== window.location.pathname) {
+        if (targetUrl && targetUrl !== `${window.location.pathname}${window.location.search}`) {
           window.history.pushState({}, '', targetUrl);
           window.dispatchEvent(new PopStateEvent('popstate'));
         }
+        n.close();
       } catch {}
     };
     return true;

@@ -1,16 +1,24 @@
 import {
   AlertCircle,
+  AlertTriangle,
   Bell,
   CheckCheck,
   CheckCircle2,
+  Clock,
   Disc3,
   Download,
+  ListMusic,
   Megaphone,
+  ShieldAlert,
   ShieldCheck,
+  Sparkles,
+  UploadCloud,
   User as UserIcon,
+  UserPlus,
   Volume2,
   VolumeX,
   Wallet,
+  Wrench,
   X,
 } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
@@ -21,7 +29,11 @@ import { useNotifications } from '../../context/NotificationContext';
 import { useRouter } from '../../context/RouterContext';
 import { NotificationItem } from '../../types';
 import { playNotificationSound, showDeviceNotification } from '../../utils/notificationSound';
-import { MAIN_PWA_INSTALLED_KEY, openPwaInstallPrompt } from '../../utils/pwaManifest';
+import {
+  CREATOR_PWA_INSTALLED_KEY,
+  MAIN_PWA_INSTALLED_KEY,
+  openPwaInstallPrompt,
+} from '../../utils/pwaManifest';
 import { LowerVibeLogo } from '../brand/LowerVibeLogo';
 
 interface StickyHeaderProps {
@@ -43,6 +55,7 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifFilter, setNotifFilter] = useState<'all' | 'unread' | 'news'>('all');
   const [isMainPwaStandalone, setIsMainPwaStandalone] = useState(false);
+  const [isCreatorPwaInstalled, setIsCreatorPwaInstalled] = useState(false);
   const [notifPermission, setNotifPermission] = useState<string>(() =>
     typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
   );
@@ -62,21 +75,31 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
     searchParams.get('standalone') === 'artist';
 
   useEffect(() => {
-    const standalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as unknown as { standalone?: boolean }).standalone === true;
-    const mainStandalone = standalone && searchParams.get('standalone') !== 'artist';
-    setIsMainPwaStandalone(
-      mainStandalone || localStorage.getItem(MAIN_PWA_INSTALLED_KEY) === 'true'
-    );
+    const syncInstalledState = () => {
+      const standalone =
+        window.matchMedia('(display-mode: standalone)').matches ||
+        (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+      const creatorStandalone = standalone && searchParams.get('standalone') === 'artist';
+      const mainStandalone = standalone && !creatorStandalone;
+      setIsMainPwaStandalone(
+        mainStandalone || localStorage.getItem(MAIN_PWA_INSTALLED_KEY) === 'true'
+      );
+      setIsCreatorPwaInstalled(
+        creatorStandalone || localStorage.getItem(CREATOR_PWA_INSTALLED_KEY) === 'true'
+      );
+    };
+
+    syncInstalledState();
 
     const handleInstalled = () => {
-      if (searchParams.get('standalone') !== 'artist') {
-        setIsMainPwaStandalone(true);
-      }
+      syncInstalledState();
     };
     window.addEventListener('appinstalled', handleInstalled);
-    return () => window.removeEventListener('appinstalled', handleInstalled);
+    window.addEventListener('lowervibe:pwa-installed', syncInstalledState);
+    return () => {
+      window.removeEventListener('appinstalled', handleInstalled);
+      window.removeEventListener('lowervibe:pwa-installed', syncInstalledState);
+    };
   }, [searchParams]);
 
   useEffect(() => {
@@ -99,23 +122,25 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
     };
   }, [isNotifOpen]);
 
-  const updatesCount = notifications.filter(
-    (item) =>
-      item.type === 'new_release' ||
-      item.type === 'news' ||
-      item.type === 'system' ||
-      item.type === 'withdrawal_status'
-  ).length;
+  const isUpdateType = (type: NotificationItem['type']) =>
+    type === 'new_release' ||
+    type === 'news' ||
+    type === 'system' ||
+    type === 'withdrawal_status' ||
+    type === 'platform_announcement' ||
+    type === 'maintenance' ||
+    type === 'new_feature' ||
+    type === 'playlist_update' ||
+    type === 'account_security' ||
+    type === 'upload_completed' ||
+    type === 'upload_failed';
+
+  const updatesCount = notifications.filter((item) => isUpdateType(item.type)).length;
 
   const filteredNotifications = notifications.filter((item) => {
     if (notifFilter === 'unread') return !isNotificationRead(item);
     if (notifFilter === 'news') {
-      return (
-        item.type === 'new_release' ||
-        item.type === 'news' ||
-        item.type === 'system' ||
-        item.type === 'withdrawal_status'
-      );
+      return isUpdateType(item.type);
     }
     return true;
   });
@@ -130,8 +155,17 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
     }
   };
 
-  const renderNotifIcon = (type: NotificationItem['type']) => {
-    switch (type) {
+  const renderNotifIcon = (item: NotificationItem) => {
+    if (item.artworkUrl) {
+      return (
+        <img
+          src={item.artworkUrl}
+          alt={item.title}
+          className="w-9 h-9 rounded-xl object-cover border border-[var(--border)] shrink-0"
+        />
+      );
+    }
+    switch (item.type) {
       case 'new_release':
         return (
           <div className="w-9 h-9 rounded-xl bg-[var(--accent)]/15 text-[var(--accent-text)] border border-[var(--accent)]/35 flex items-center justify-center shrink-0">
@@ -144,10 +178,58 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
             <CheckCircle2 className="w-4 h-4" />
           </div>
         );
+      case 'artist_pending':
+        return (
+          <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/35 flex items-center justify-center shrink-0">
+            <Clock className="w-4 h-4" />
+          </div>
+        );
       case 'artist_rejected':
         return (
           <div className="w-9 h-9 rounded-xl bg-[var(--danger)]/15 text-[var(--danger)] border border-[var(--danger)]/35 flex items-center justify-center shrink-0">
             <AlertCircle className="w-4 h-4" />
+          </div>
+        );
+      case 'new_follower':
+        return (
+          <div className="w-9 h-9 rounded-xl bg-[var(--violet)]/15 text-[var(--violet)] border border-[var(--violet)]/35 flex items-center justify-center shrink-0">
+            <UserPlus className="w-4 h-4" />
+          </div>
+        );
+      case 'playlist_update':
+        return (
+          <div className="w-9 h-9 rounded-xl bg-[var(--violet)]/15 text-[var(--violet)] border border-[var(--violet)]/35 flex items-center justify-center shrink-0">
+            <ListMusic className="w-4 h-4" />
+          </div>
+        );
+      case 'upload_completed':
+        return (
+          <div className="w-9 h-9 rounded-xl bg-[var(--accent)]/15 text-[var(--accent-text)] border border-[var(--accent)]/35 flex items-center justify-center shrink-0">
+            <UploadCloud className="w-4 h-4" />
+          </div>
+        );
+      case 'upload_failed':
+        return (
+          <div className="w-9 h-9 rounded-xl bg-[var(--danger)]/15 text-[var(--danger)] border border-[var(--danger)]/35 flex items-center justify-center shrink-0">
+            <AlertTriangle className="w-4 h-4" />
+          </div>
+        );
+      case 'account_security':
+        return (
+          <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/35 flex items-center justify-center shrink-0">
+            <ShieldAlert className="w-4 h-4" />
+          </div>
+        );
+      case 'maintenance':
+        return (
+          <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/35 flex items-center justify-center shrink-0">
+            <Wrench className="w-4 h-4" />
+          </div>
+        );
+      case 'new_feature':
+        return (
+          <div className="w-9 h-9 rounded-xl bg-[var(--violet)]/15 text-[var(--violet)] border border-[var(--violet)]/35 flex items-center justify-center shrink-0">
+            <Sparkles className="w-4 h-4" />
           </div>
         );
       case 'withdrawal_status':
@@ -162,6 +244,7 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
             <ShieldCheck className="w-4 h-4" />
           </div>
         );
+      case 'platform_announcement':
       case 'news':
       default:
         return (
@@ -212,7 +295,7 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
 
         {/* Right: Install App / Creator App + Notification Bell + Avatar */}
         <div className="flex items-center gap-2">
-          {canInstallArtistApp && !isCreatorStandalone ? (
+          {canInstallArtistApp && !isCreatorStandalone && !isCreatorPwaInstalled ? (
             <button
               type="button"
               onClick={() => openPwaInstallPrompt('creator')}
@@ -444,7 +527,7 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
                               !read ? 'bg-[var(--surface-2)]/35' : ''
                             }`}
                           >
-                            {renderNotifIcon(item.type)}
+                            {renderNotifIcon(item)}
                             <div className="flex-1 min-w-0 space-y-1">
                               <div className="flex items-start justify-between gap-2">
                                 <span

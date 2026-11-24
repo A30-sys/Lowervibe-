@@ -326,17 +326,20 @@ export const ArtistPublicPageView: React.FC = () => {
 
           <div className="flex-1 min-w-0 text-center sm:text-left space-y-3">
             <div className="space-y-1">
-              <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap">
+              <div className="flex items-center justify-center sm:justify-start gap-2.5 flex-wrap">
                 <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-[var(--text)] break-words">
                   {safeName}
                 </h1>
-              {isVerified && (
-                <CheckCircle2
-                  className="w-6 h-6 text-[var(--accent-text)] shrink-0"
-                  aria-label="Verified artist"
-                />
-              )}
-            </div>
+                {isVerified && (
+                  <span
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[var(--accent)]/15 border border-[var(--accent)]/40 text-[var(--accent-text)] text-xs font-bold shrink-0"
+                    aria-label={isNy ? 'Woimba wotsimikizika' : 'Verified artist'}
+                  >
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{isNy ? 'Wotsimikizika' : 'Verified Artist'}</span>
+                  </span>
+                )}
+              </div>
 
             <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap text-xs sm:text-sm text-[var(--text-muted)]">
               {locationText && (

@@ -27,15 +27,15 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
-const MAIN_GUIDE_KEY_PREFIX = 'lowervibe_main_pwa_guide_v1_';
-const CREATOR_GUIDE_KEY_PREFIX = 'lowervibe_creator_pwa_guide_v1_';
+const SESSION_DISMISS_MAIN_KEY = 'lowervibe_install_dismissed_main_session_v1';
+const SESSION_DISMISS_CREATOR_KEY = 'lowervibe_install_dismissed_creator_session_v1';
 const BRAND_LOGO_SRC =
   '/assets/aistudio/hf_20261027_065809_f2446c35-920d-4d5a-a97a-dcfad0262ef1_802ab9c5.png';
 
 export const PwaInstallPrompt: React.FC = () => {
   const { currentUser, isArtist, isAdmin, updateUserSettings } = useAuth();
   const { language, t } = useLanguage();
-  const { navigate, searchParams } = useRouter();
+  const { currentRoute, navigate, searchParams } = useRouter();
   const isNy = language === 'ny';
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showPrompt, setShowPrompt] = useState(false);
@@ -54,18 +54,50 @@ export const PwaInstallPrompt: React.FC = () => {
   );
 
   useEffect(() => {
+    let active = true;
     const isStandalone =
       window.matchMedia('(display-mode: standalone)').matches ||
       (window.navigator as unknown as { standalone?: boolean }).standalone === true;
     const isCreatorStandalone = isStandalone && searchParams.get('standalone') === 'artist';
     const isMainStandalone = isStandalone && !isCreatorStandalone;
 
-    setMainInstalled(
-      isMainStandalone || localStorage.getItem(MAIN_PWA_INSTALLED_KEY) === 'true'
-    );
-    setCreatorInstalled(
-      isCreatorStandalone || localStorage.getItem(CREATOR_PWA_INSTALLED_KEY) === 'true'
-    );
+    if (isMainStandalone) {
+      try {
+        localStorage.setItem(MAIN_PWA_INSTALLED_KEY, 'true');
+      } catch {}
+    }
+    if (isCreatorStandalone) {
+      try {
+        localStorage.setItem(CREATOR_PWA_INSTALLED_KEY, 'true');
+      } catch {}
+    }
+
+    const storedMainInstalled =
+      isMainStandalone || localStorage.getItem(MAIN_PWA_INSTALLED_KEY) === 'true';
+    const storedCreatorInstalled =
+      isCreatorStandalone || localStorage.getItem(CREATOR_PWA_INSTALLED_KEY) === 'true';
+
+    setMainInstalled(storedMainInstalled);
+    setCreatorInstalled(storedCreatorInstalled);
+
+    // Check Android Chrome getInstalledRelatedApps if supported so previously installed PWAs stay hidden forever
+    const navWithRelated = window.navigator as Navigator & {
+      getInstalledRelatedApps?: () => Promise<Array<{ id?: string; platform?: string; url?: string }>>;
+    };
+    if (!storedMainInstalled && typeof navWithRelated.getInstalledRelatedApps === 'function') {
+      navWithRelated
+        .getInstalledRelatedApps()
+        .then((apps) => {
+          if (!active || !Array.isArray(apps) || apps.length === 0) return;
+          try {
+            localStorage.setItem(MAIN_PWA_INSTALLED_KEY, 'true');
+          } catch {}
+          setMainInstalled(true);
+          setShowPrompt(false);
+          window.dispatchEvent(new Event('lowervibe:pwa-installed'));
+        })
+        .catch(() => {});
+    }
 
     const ua = window.navigator.userAgent.toLowerCase();
     const isIosDevice = /iphone|ipad|ipod/.test(ua);
@@ -82,11 +114,16 @@ export const PwaInstallPrompt: React.FC = () => {
       setTargetApp((currentTarget) => {
         if (currentTarget === 'creator') {
           setCreatorInstalled(true);
-          localStorage.setItem(CREATOR_PWA_INSTALLED_KEY, 'true');
+          try {
+            localStorage.setItem(CREATOR_PWA_INSTALLED_KEY, 'true');
+          } catch {}
         } else {
           setMainInstalled(true);
-          localStorage.setItem(MAIN_PWA_INSTALLED_KEY, 'true');
+          try {
+            localStorage.setItem(MAIN_PWA_INSTALLED_KEY, 'true');
+          } catch {}
         }
+        window.dispatchEvent(new Event('lowervibe:pwa-installed'));
         return currentTarget;
       });
     };
@@ -108,39 +145,54 @@ export const PwaInstallPrompt: React.FC = () => {
     window.addEventListener('appinstalled', handleAppInstalled);
     window.addEventListener('lowervibe:open-install-prompt', handleOpenInstallModal);
 
-    // Automatically invite registered users to install Main App once, and approved artists to install Creator App once
+    // Pop up automatically on every visit until the user actually installs the app; then vanish forever
+    const skipAutoRoutes = new Set([
+      'login',
+      'register',
+      'forgot_password',
+      'admin',
+      'admin_login',
+      'admin_dashboard',
+      'admin_access_denied',
+    ]);
     let autoTimer: number | undefined;
-    if (!isStandalone && currentUser?.id) {
-      if (isApprovedArtist) {
-        const creatorSeenKey = `${CREATOR_GUIDE_KEY_PREFIX}${currentUser.id}`;
-        const alreadyCreator = localStorage.getItem(CREATOR_PWA_INSTALLED_KEY) === 'true';
-        if (!localStorage.getItem(creatorSeenKey) && !alreadyCreator) {
+
+    if (!isStandalone && !skipAutoRoutes.has(currentRoute.route)) {
+      if (currentRoute.route === 'studio' && isApprovedArtist) {
+        let dismissedThisSession = false;
+        try {
+          dismissedThisSession = sessionStorage.getItem(SESSION_DISMISS_CREATOR_KEY) === 'true';
+        } catch {}
+        if (!storedCreatorInstalled && !dismissedThisSession) {
           autoTimer = window.setTimeout(() => {
             setTargetApp('creator');
             setActivePwaManifest('creator');
             setShowPrompt(true);
-          }, 1100);
+          }, 1200);
         }
       } else {
-        const mainSeenKey = `${MAIN_GUIDE_KEY_PREFIX}${currentUser.id}`;
-        const alreadyMain = localStorage.getItem(MAIN_PWA_INSTALLED_KEY) === 'true';
-        if (!localStorage.getItem(mainSeenKey) && !alreadyMain) {
+        let dismissedThisSession = false;
+        try {
+          dismissedThisSession = sessionStorage.getItem(SESSION_DISMISS_MAIN_KEY) === 'true';
+        } catch {}
+        if (!storedMainInstalled && !dismissedThisSession) {
           autoTimer = window.setTimeout(() => {
             setTargetApp('main');
             setActivePwaManifest('main');
             setShowPrompt(true);
-          }, 1400);
+          }, 1700);
         }
       }
     }
 
     return () => {
+      active = false;
       if (autoTimer) window.clearTimeout(autoTimer);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
       window.removeEventListener('appinstalled', handleAppInstalled);
       window.removeEventListener('lowervibe:open-install-prompt', handleOpenInstallModal);
     };
-  }, [isApprovedArtist, currentUser?.id, searchParams]);
+  }, [isApprovedArtist, currentUser?.id, currentRoute.route, searchParams]);
 
   const handleSelectTarget = (next: PwaAppTarget) => {
     setTargetApp(next);
@@ -183,17 +235,16 @@ export const PwaInstallPrompt: React.FC = () => {
         if (choice.outcome === 'accepted') {
           if (targetApp === 'creator') {
             setCreatorInstalled(true);
-            localStorage.setItem(CREATOR_PWA_INSTALLED_KEY, 'true');
-            if (currentUser?.id) {
-              localStorage.setItem(`${CREATOR_GUIDE_KEY_PREFIX}${currentUser.id}`, 'true');
-            }
+            try {
+              localStorage.setItem(CREATOR_PWA_INSTALLED_KEY, 'true');
+            } catch {}
           } else {
             setMainInstalled(true);
-            localStorage.setItem(MAIN_PWA_INSTALLED_KEY, 'true');
-            if (currentUser?.id) {
-              localStorage.setItem(`${MAIN_GUIDE_KEY_PREFIX}${currentUser.id}`, 'true');
-            }
+            try {
+              localStorage.setItem(MAIN_PWA_INSTALLED_KEY, 'true');
+            } catch {}
           }
+          window.dispatchEvent(new Event('lowervibe:pwa-installed'));
           setShowPrompt(false);
           setDeferredPrompt(null);
           return;
@@ -217,10 +268,11 @@ export const PwaInstallPrompt: React.FC = () => {
   };
 
   const handleDismiss = () => {
-    if (currentUser?.id) {
-      const keyPrefix = targetApp === 'creator' ? CREATOR_GUIDE_KEY_PREFIX : MAIN_GUIDE_KEY_PREFIX;
-      localStorage.setItem(`${keyPrefix}${currentUser.id}`, 'true');
-    }
+    try {
+      const sessionKey =
+        targetApp === 'creator' ? SESSION_DISMISS_CREATOR_KEY : SESSION_DISMISS_MAIN_KEY;
+      sessionStorage.setItem(sessionKey, 'true');
+    } catch {}
     setShowPrompt(false);
   };
 

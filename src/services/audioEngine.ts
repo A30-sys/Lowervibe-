@@ -47,6 +47,7 @@ class AudioEngine {
   public onTimeUpdate: ((currentTime: number, duration: number) => void) | null = null;
   public onEnded: (() => void) | null = null;
   public onError: ((message: string) => void) | null = null;
+  public onExternalPlayState: ((playing: boolean) => void) | null = null;
 
   public init(): AudioContext | null {
     if (typeof window === 'undefined') return null;
@@ -452,6 +453,21 @@ class AudioEngine {
       }
     };
 
+    el.onplay = () => {
+      if (this.activeElement === el && !this.isPlaying) {
+        this.isPlaying = true;
+        this.init();
+        this.onExternalPlayState?.(true);
+      }
+    };
+
+    el.onpause = () => {
+      if (this.activeElement === el && this.isPlaying && !el.ended) {
+        this.isPlaying = false;
+        this.onExternalPlayState?.(false);
+      }
+    };
+
     el.onerror = () => {
       if (this.activeElement !== el) return;
       this.isPlaying = false;
@@ -544,7 +560,9 @@ class AudioEngine {
 
   public resume() {
     this.cancelSleepFade();
+    this.init();
     if (this.activeElement && this.activeUrl) {
+      this.isPlaying = true;
       this.activeElement.volume = this.isMuted ? 0 : this.volume;
       this.activeElement
         .play()
@@ -553,6 +571,7 @@ class AudioEngine {
         })
         .catch(() => {
           this.isPlaying = false;
+          this.onExternalPlayState?.(false);
           this.onError?.('Tap Play again to resume audio.');
         });
     }
@@ -564,6 +583,8 @@ class AudioEngine {
       this.activeElement.ontimeupdate = null;
       this.activeElement.onended = null;
       this.activeElement.onerror = null;
+      this.activeElement.onplay = null;
+      this.activeElement.onpause = null;
       try {
         this.activeElement.pause();
         this.activeElement.removeAttribute('src');

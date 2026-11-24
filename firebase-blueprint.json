@@ -114,6 +114,8 @@
         "likedByUserIds": { "type": "array" },
         "downloads": { "type": "number" },
         "isDraft": { "type": "boolean" },
+        "moderationStatus": { "type": "string", "enum": ["draft", "validation", "submitted", "in_review", "approved", "rejected", "published"] },
+        "moderationFeedback": { "type": "string" },
         "releaseDate": { "type": "string" }
       },
       "required": ["id", "title", "artistId", "artistName", "durationSeconds"]
@@ -245,6 +247,27 @@
         "dataBase64": { "type": "string" }
       },
       "required": ["index", "dataBase64"]
+    },
+    "PlatformBanner": {
+      "title": "PlatformBanner",
+      "description": "Unified LOWERVIBE banner for platform announcements, maintenance, and new features",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "category": { "type": "string", "enum": ["essential", "promotional"] },
+        "title": { "type": "string", "maxLength": 140 },
+        "message": { "type": "string", "maxLength": 400 },
+        "artworkUrl": { "type": "string" },
+        "actionLabel": { "type": "string" },
+        "actionRoute": { "type": "string" },
+        "dismissible": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "priority": { "type": "number" },
+        "audience": { "type": "string", "enum": ["all", "listeners", "artists"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "type", "title", "message", "active"]
     }
   },
   "firestore": {
@@ -258,6 +281,7 @@
     "/payoutRequests/{requestId}": { "schema": "PayoutRequest", "description": "Withdrawal requests" },
     "/config/{configId}": { "schema": "MonetizationConfig", "description": "Platform monetization config" },
     "/tickets/{ticketId}": { "schema": "SupportTicket", "description": "Support tickets" },
+    "/banners/{bannerId}": { "schema": "PlatformBanner", "description": "Platform banners and maintenance announcements" },
     "/mediaAssets/{assetId}": { "schema": "MediaAsset", "description": "Uploaded audio and artwork metadata manifests" },
     "/mediaAssets/{assetId}/chunks/{chunkId}": { "schema": "MediaChunk", "description": "Uploaded binary media chunks" }
   }

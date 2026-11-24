@@ -111,6 +111,40 @@
     --color-danger: var(--danger);
   }
 
+  /* Dedicated near-black charcoal player surfaces across light and dark themes */
+  .lv-player-surface {
+    --bg: #0a0b0a;
+    --surface: #131513;
+    --surface-2: #1b1e1b;
+    --input-bg: #1b1e1b;
+    --text: #f4f5f3;
+    --text-muted: #a6aca5;
+    --text-dim: #cfd4cd;
+    --border: rgba(255, 255, 255, 0.14);
+    --border-strong: rgba(255, 255, 255, 0.26);
+    --accent: #c6ff3d;
+    --accent-contrast: #0a0b0a;
+    --accent-text: #c6ff3d;
+    --focus-ring: #c6ff3d;
+    --violet: #8b6eff;
+    --danger: #ff6b7a;
+    --lv-bg: #0a0b0a;
+    --lv-surface: #131513;
+    --lv-elevated: #1b1e1b;
+    --lv-border: rgba(255, 255, 255, 0.14);
+    --lv-border-strong: rgba(255, 255, 255, 0.26);
+    --lv-text: #f4f5f3;
+    --lv-text-dim: #cfd4cd;
+    --lv-muted: #a6aca5;
+    --lv-accent: #c6ff3d;
+    --lv-accent-ink: #0a0b0a;
+    --lv-accent-text: #c6ff3d;
+    --lv-violet: #8b6eff;
+    --lv-danger: #ff6b7a;
+    background-color: #131513;
+    color: #f4f5f3;
+  }
+
   html {
     background-color: var(--bg);
     color: var(--text);
@@ -382,7 +416,16 @@ html.light .stroke-numeral {
   animation: shimmer-sweep 1.6s infinite ease-in-out;
 }
 
-/* Reduced Motion Override */
+/* Reduced Motion Override (OS preference or user Settings toggle) */
+html.reduced-motion *,
+html.reduced-motion ::before,
+html.reduced-motion ::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after {
     animation-duration: 0.01ms !important;

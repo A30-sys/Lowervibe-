@@ -129,6 +129,8 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
     isNotificationRead,
     markAsRead,
     sendNotification,
+    pushTransientBanner,
+    clearTransientBanner,
   } = useNotifications();
   const { navigate, searchParams } = useRouter();
   const { language, t: translate } = useLanguage();
@@ -882,17 +884,52 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
       });
 
       setUploadProgress(100);
+      clearTransientBanner('transient-upload-failed');
       resetUploadWizard();
       setActiveTab('tracks');
       if (saveAsDraft) {
         showNotice(isNy ? 'Zasungidwa m\'zolembedwa.' : 'Saved as draft.');
+        pushTransientBanner({
+          id: 'transient-upload-completed',
+          type: 'upload_completed',
+          category: 'essential',
+          title: isNy ? 'Zolembedwa zasungidwa' : 'Draft upload saved',
+          message: isNy
+            ? `"${savedTrack.title}" yasungidwa m'zolembedwa za Situdiyo.`
+            : `"${savedTrack.title}" finished processing and is saved as a draft.`,
+          artworkUrl: savedTrack.coverArt,
+        });
       } else {
         setPublishedCelebrationTrack(savedTrack);
+        pushTransientBanner({
+          id: 'transient-upload-completed',
+          type: 'upload_completed',
+          category: 'essential',
+          title: isNy ? 'Nyimbo yakwezedwa bwino' : 'Upload completed',
+          message: isNy
+            ? `"${savedTrack.title}" yakonzeka tsopano pa LOWERVIBE.`
+            : `"${savedTrack.title}" finished processing and is ready to stream.`,
+          artworkUrl: savedTrack.coverArt,
+          actionLabel: isNy ? 'Onani' : 'View track',
+          actionRoute: `/tracks/${savedTrack.id}`,
+        });
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : isNy ? 'Kukweza kwalephera.' : 'Upload failed.';
       setUploadError(msg);
       showNotice(msg, 'err');
+      pushTransientBanner({
+        id: 'transient-upload-failed',
+        type: 'upload_failed',
+        category: 'essential',
+        title: isNy ? 'Kukweza kwalephera' : 'Upload failed',
+        message: msg,
+        actionLabel: isNy ? 'Yesaninso' : 'Retry',
+        onAction: () => {
+          clearTransientBanner('transient-upload-failed');
+          void handlePublishOrDraft(saveAsDraft);
+        },
+      });
     } finally {
       activeUploadControllerRef.current = null;
       setIsUploadPaused(false);
@@ -2214,11 +2251,61 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
             </div>
 
             {uploadError && (
-              <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--danger)] text-xs text-[var(--danger)] flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{uploadError}</span>
+              <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--danger)] text-xs text-[var(--danger)] flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{uploadError}</span>
+                </div>
+                {uploadStep === 3 && (
+                  <button
+                    type="button"
+                    disabled={isUploading}
+                    onClick={() => void handlePublishOrDraft(false)}
+                    className="px-3 py-1.5 rounded-lg bg-[var(--danger)] text-white text-[11px] font-bold shrink-0 cursor-pointer"
+                  >
+                    {isNy ? 'Yesaninso' : 'Retry'}
+                  </button>
+                )}
               </div>
             )}
+
+            {/* Live Upload Requirements Checklist */}
+            <div className="p-3.5 rounded-2xl bg-[var(--surface-2)]/70 border border-[var(--border)] space-y-2">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                {isNy ? 'Zofunika pakukweza nyimbo' : 'Upload requirements checklist'}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs">
+                {[
+                  {
+                    met: hasAudioSource,
+                    label: isNy ? 'MP3, WAV, FLAC, M4A (<= 120 MB) kapena ulalo' : 'Audio file (MP3/WAV/FLAC/M4A <= 120 MB) or HTTPS link',
+                  },
+                  {
+                    met: Boolean(title.trim()),
+                    label: isNy ? 'Dzina la nyimbo ndi mtundu' : 'Track title & genre metadata',
+                  },
+                  {
+                    met: !coverBlob || artworkNoLogoConfirmed,
+                    label: isNy ? 'Chithunzi cha 1:1 choyera (kapena chizindikiro cha LOWERVIBE)' : 'Clean 1:1 artwork (or official LOWERVIBE icon)',
+                  },
+                  {
+                    met: rightsConfirmed,
+                    label: isNy ? 'Kutsimikizira ufulu wofalitsa' : 'Audio publishing rights confirmed',
+                  },
+                ].map((reqItem) => (
+                  <div key={reqItem.label} className="flex items-center gap-2 text-[11px]">
+                    <CheckCircle2
+                      className={`w-3.5 h-3.5 shrink-0 ${
+                        reqItem.met ? 'text-[var(--accent-text)]' : 'text-[var(--text-muted)]/50'
+                      }`}
+                    />
+                    <span className={reqItem.met ? 'text-[var(--text)] font-medium' : 'text-[var(--text-muted)]'}>
+                      {reqItem.label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
 
             {/* STEP 1: AUDIO */}
             {uploadStep === 1 && (
@@ -2940,7 +3027,37 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                   · {track.isDraft ? (isNy ? 'Zolembedwa' : 'Draft') : isNy ? 'Yafalitsidwa' : 'Published'} ·{' '}
                                   {translateGenreCategory(track.genre, language)}
                                 </span>
+                                {track.moderationStatus && track.moderationStatus !== 'published' && (
+                                  <span
+                                    className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase border ${
+                                      track.moderationStatus === 'rejected'
+                                        ? 'bg-[var(--danger)]/10 text-[var(--danger)] border-[var(--danger)]/30'
+                                        : 'bg-[var(--surface-2)] text-[var(--violet)] border-[var(--border)]'
+                                    }`}
+                                  >
+                                    {track.moderationStatus === 'rejected'
+                                      ? isNy
+                                        ? 'Iyenera kukonzedwa'
+                                        : 'Needs attention'
+                                      : track.moderationStatus === 'in_review'
+                                      ? isNy
+                                        ? 'Ikuyang\'aniridwa'
+                                        : 'In review'
+                                      : isNy
+                                      ? 'Zolembedwa'
+                                      : 'Draft'}
+                                  </span>
+                                )}
                               </div>
+
+                              {track.moderationFeedback && (
+                                <div className="p-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-[11px] text-[var(--text)]">
+                                  <span className="font-bold text-[var(--violet)]">
+                                    {isNy ? 'Malangizo a woyang\'anira: ' : 'Moderation note: '}
+                                  </span>
+                                  <span>{track.moderationFeedback}</span>
+                                </div>
+                              )}
 
                               {/* Real-time Firestore Playback Metrics Strip */}
                               <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-xs font-mono tabular-nums text-[var(--text-muted)]">

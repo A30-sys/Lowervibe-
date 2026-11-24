@@ -1,13 +1,13 @@
 import { CheckCircle2, Download, FileText, Lock } from 'lucide-react';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { AdminAccessDeniedView } from './components/admin/AdminAccessDeniedView';
 import { AdminLoginView } from './components/admin/AdminLoginView';
-import { AdminPortal } from './components/AdminPortal';
 import { ArtistProfileModal } from './components/ArtistProfileModal';
 import { ReauthModal } from './components/auth/ReauthModal';
 import { AuthModal } from './components/AuthModal';
 import { CelebrationModal } from './components/CelebrationModal';
 import { CookieBanner } from './components/common/CookieBanner';
+import { LowervibeBanner } from './components/common/LowervibeBanner';
 import { PullToRefresh } from './components/common/PullToRefresh';
 import { StickyMobileCta } from './components/common/StickyMobileCta';
 import { CrashRecoveryHandler } from './components/CrashRecoveryHandler';
@@ -27,23 +27,19 @@ import { StickyHeader } from './components/layout/StickyHeader';
 import { BottomPlayer } from './components/player/BottomPlayer';
 import { GlobalSearchModal } from './components/search/GlobalSearchModal';
 import { AccountView } from './components/views/AccountView';
-import { ArtistPublicPageView } from './components/views/ArtistPublicPageView';
 import { ArtistsRosterView } from './components/views/ArtistsRosterView';
 import { AuthPortalView } from './components/views/AuthPortalView';
 import { DiscoverView } from './components/views/DiscoverView';
 import { HomeView } from './components/views/HomeView';
-import { LegalPageView } from './components/views/LegalPageView';
 import { LibraryView } from './components/views/LibraryView';
 import { NotFoundView } from './components/views/NotFoundView';
 import { SearchResultsView } from './components/views/SearchResultsView';
 import { ServerErrorView } from './components/views/ServerErrorView';
-import { StudioView } from './components/views/StudioView';
 import { ThankYouView } from './components/views/ThankYouView';
-import { TrackPublicPageView } from './components/views/TrackPublicPageView';
 import { AudioProvider, useAudio } from './context/AudioContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
-import { NotificationProvider } from './context/NotificationContext';
+import { NotificationProvider, useNotifications } from './context/NotificationContext';
 import { OfflineQueueProvider } from './context/OfflineQueueContext';
 import { RouterProvider, useRouter } from './context/RouterContext';
 import { ThemeProvider } from './context/ThemeContext';
@@ -59,9 +55,26 @@ import { usePinnedPlayerSession } from './utils/playerSessionStore';
 import { setActivePwaManifest } from './utils/pwaManifest';
 import { applyArtistSeoMeta, applyRouteSeoMeta, applyTrackSeoMeta } from './utils/seoMeta';
 
+const AdminPortal = lazy(() => import('./components/AdminPortal').then((m) => ({ default: m.AdminPortal })));
+const StudioView = lazy(() => import('./components/views/StudioView').then((m) => ({ default: m.StudioView })));
+const LegalPageView = lazy(() => import('./components/views/LegalPageView').then((m) => ({ default: m.LegalPageView })));
+const ArtistPublicPageView = lazy(() =>
+  import('./components/views/ArtistPublicPageView').then((m) => ({ default: m.ArtistPublicPageView }))
+);
+const TrackPublicPageView = lazy(() =>
+  import('./components/views/TrackPublicPageView').then((m) => ({ default: m.TrackPublicPageView }))
+);
+
+const PageLoader: React.FC = () => (
+  <div className="py-16 flex items-center justify-center">
+    <div className="w-8 h-8 rounded-full border-2 border-[var(--border-strong)] border-t-[var(--accent)] animate-spin" />
+  </div>
+);
+
 function AppContent() {
   const { currentRoute, navigate, searchParams } = useRouter();
   const { language, t } = useLanguage();
+  const { visibleBanners, dismissBanner } = useNotifications();
   const isNy = language === 'ny';
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isPageTransitioning, setIsPageTransitioning] = useState(false);
@@ -271,12 +284,13 @@ function AppContent() {
     const handleSwMessage = (event: MessageEvent) => {
       const data = event.data as { type?: string; url?: string } | undefined;
       if (data?.type === 'LOWERVIBE_NAVIGATE' && typeof data.url === 'string' && data.url) {
+        dismissAllModals();
         navigate(data.url);
       }
     };
     navigator.serviceWorker.addEventListener('message', handleSwMessage);
     return () => navigator.serviceWorker.removeEventListener('message', handleSwMessage);
-  }, [navigate]);
+  }, [navigate, dismissAllModals]);
 
   // When an approved artist launches the standalone WebApp, open straight into Artist Creator
   useEffect(() => {
@@ -345,6 +359,47 @@ function AppContent() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Capture runtime errors into a bounded local buffer for Admin System Health inspection
+  useEffect(() => {
+    const pushRuntimeError = (message: string, source: string) => {
+      try {
+        const key = 'lowervibe_runtime_errors_v1';
+        const raw = localStorage.getItem(key);
+        const existing = raw ? JSON.parse(raw) : [];
+        const next = [
+          {
+            id: `err-${Date.now()}`,
+            message: message.slice(0, 240),
+            source,
+            at: new Date().toISOString(),
+          },
+          ...(Array.isArray(existing) ? existing : []),
+        ].slice(0, 20);
+        localStorage.setItem(key, JSON.stringify(next));
+      } catch {}
+    };
+
+    const onError = (event: ErrorEvent) => {
+      if (event?.message) pushRuntimeError(event.message, event.filename || 'window.error');
+    };
+    const onRejection = (event: PromiseRejectionEvent) => {
+      const reason =
+        event?.reason instanceof Error
+          ? event.reason.message
+          : typeof event?.reason === 'string'
+          ? event.reason
+          : 'Unhandled promise rejection';
+      pushRuntimeError(reason, 'unhandledrejection');
+    };
+
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection);
+    };
   }, []);
 
   // Initialize analytics when cookie consent permits
@@ -446,7 +501,8 @@ function AppContent() {
   const isLegalDocRoute =
     currentRoute.route === 'terms' ||
     currentRoute.route === 'privacy' ||
-    currentRoute.route === 'copyright';
+    currentRoute.route === 'copyright' ||
+    currentRoute.route === 'about';
   const isSignedOutThankYouRoute =
     currentRoute.route === 'thank_you' && !currentUser && !isGuestMode;
   const isMinimalPublicRoute = isLegalDocRoute || isSignedOutThankYouRoute;
@@ -465,7 +521,9 @@ function AppContent() {
     ) {
       return (
         <div className="min-h-screen bg-[var(--bg)] text-[var(--text)] p-4 sm:p-8 max-w-6xl mx-auto">
-          <AdminPortal onBackToExplore={() => navigate('/')} />
+          <Suspense fallback={<PageLoader />}>
+            <AdminPortal onBackToExplore={() => navigate('/')} />
+          </Suspense>
         </div>
       );
     }
@@ -620,7 +678,9 @@ function AppContent() {
           }`}
         >
           {isLegalDocRoute ? (
-            <LegalPageView docType={currentRoute.route as 'terms' | 'privacy' | 'copyright'} />
+            <Suspense fallback={<PageLoader />}>
+              <LegalPageView docType={currentRoute.route as 'terms' | 'privacy' | 'copyright' | 'about'} />
+            </Suspense>
           ) : (
             <ThankYouView />
           )}
@@ -746,6 +806,29 @@ function AppContent() {
                 isPlayerMounted && !isPlayerExiting ? 'pb-40 md:pb-28' : 'pb-20 md:pb-0'
               }`}
             >
+              {visibleBanners.length > 0 && (
+                <div className="space-y-3 mb-5">
+                  {visibleBanners.map((banner) => (
+                    <LowervibeBanner
+                      key={banner.id}
+                      id={banner.id}
+                      type={banner.type}
+                      title={banner.title}
+                      message={banner.message}
+                      artworkUrl={banner.artworkUrl}
+                      actionLabel={banner.actionLabel}
+                      actionRoute={banner.actionRoute}
+                      dismissible={banner.dismissible}
+                      tone={banner.tone}
+                      category={banner.category}
+                      onAction={banner.onAction}
+                      onDismiss={() => dismissBanner(banner.id)}
+                      onNavigate={navigate}
+                    />
+                  ))}
+                </div>
+              )}
+
               <div key={currentRoute.pathname} className="animate-fadeIn">
                 {currentRoute.route === 'home' && (
                   <HomeView
@@ -766,16 +849,26 @@ function AppContent() {
 
                 {currentRoute.route === 'artists' && <ArtistsRosterView />}
 
-                {currentRoute.route === 'artist_detail' && <ArtistPublicPageView />}
+                {currentRoute.route === 'artist_detail' && (
+                  <Suspense fallback={<PageLoader />}>
+                    <ArtistPublicPageView />
+                  </Suspense>
+                )}
 
-                {currentRoute.route === 'track_detail' && <TrackPublicPageView />}
+                {currentRoute.route === 'track_detail' && (
+                  <Suspense fallback={<PageLoader />}>
+                    <TrackPublicPageView />
+                  </Suspense>
+                )}
 
                 {currentRoute.route === 'library' && (
                   <LibraryView onOpenTrackDetails={handleOpenTrackDetails} />
                 )}
 
                 {currentRoute.route === 'studio' && (
-                  <StudioView onOpenTrackDetails={handleOpenTrackDetails} />
+                  <Suspense fallback={<PageLoader />}>
+                    <StudioView onOpenTrackDetails={handleOpenTrackDetails} />
+                  </Suspense>
                 )}
 
                 {currentRoute.route === 'account' && <AccountView />}

@@ -460,6 +460,11 @@ export function applyRouteSeoMeta(route: string, searchQuery = ''): void {
       description:
         'Understand LOWERVIBE original audio rules, rights-holder verification, and how to submit a copyright infringement or DMCA takedown notice.',
     },
+    about: {
+      title: 'About LOWERVIBE — African Independent Music',
+      description:
+        'Learn about LOWERVIBE, our Malawi and African independent music platform, creator tools, and direct support contacts.',
+    },
     thank_you: {
       title: 'Confirmation & Next Steps — LOWERVIBE',
       description:

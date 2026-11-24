@@ -502,7 +502,7 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
         <div
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
-          className={`rounded-2xl bg-[var(--lv-surface)]/95 backdrop-blur-2xl border border-[var(--lv-border-strong)] shadow-2xl ${
+          className={`lv-player-surface rounded-2xl bg-[var(--lv-surface)]/95 backdrop-blur-2xl border border-[var(--lv-border-strong)] shadow-2xl ${
             isExiting
               ? 'animate-player-slide-down pointer-events-none'
               : 'animate-player-pop-up pointer-events-auto'
@@ -598,13 +598,20 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
               }}
               aria-label={`Open full player for ${displayTrack.title}`}
             >
-              <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl overflow-hidden shrink-0 border border-[var(--lv-border)] bg-[var(--lv-elevated)]">
+              <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl overflow-hidden shrink-0 border border-[var(--lv-border)] bg-[var(--lv-elevated)] shadow-sm">
                 <img
-                  src={displayTrack.coverArt || LOWERVIBE_ICON_ARTWORK}
+                  src={displayTrack.coverArt || '/icons/pwa-512x512.png'}
                   alt={displayTrack.title}
+                  loading="eager"
                   referrerPolicy="no-referrer"
                   onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src = LOWERVIBE_ICON_ARTWORK;
+                    const img = e.currentTarget as HTMLImageElement;
+                    if (!img.dataset.fallbackTried) {
+                      img.dataset.fallbackTried = '1';
+                      img.src = '/icons/pwa-512x512.png';
+                    } else {
+                      img.src = LOWERVIBE_ICON_ARTWORK;
+                    }
                   }}
                   className="w-full h-full object-cover"
                 />
@@ -633,22 +640,49 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
             </div>
 
             {/* Primary Transport Controls */}
-            <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
               <button
                 type="button"
                 onClick={() => {
                   triggerHaptic('tap');
                   toggleShuffle();
                 }}
-                className={`hidden md:flex items-center justify-center rounded-xl min-h-[44px] min-w-[40px] transition active:scale-95 cursor-pointer ${
+                className={`hidden sm:flex items-center justify-center rounded-xl min-h-[42px] min-w-[40px] transition active:scale-95 cursor-pointer ${
                   effectiveShuffling
-                    ? 'text-[var(--lv-accent-text)]'
+                    ? 'text-[var(--lv-accent-text)] bg-[var(--lv-accent)]/12'
                     : 'text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
                 }`}
-                title={effectiveShuffling ? (isNy ? 'Kusakaniza kwayatsidwa' : 'Shuffle on') : (isNy ? 'Kusakaniza kwazimitsidwa' : 'Shuffle off')}
+                title={
+                  effectiveShuffling
+                    ? isNy
+                      ? 'Kusakaniza kwayatsidwa'
+                      : 'Shuffle on'
+                    : isNy
+                    ? 'Kusakaniza kwazimitsidwa'
+                    : 'Shuffle off'
+                }
                 aria-label={t('shuffle')}
               >
                 <Shuffle className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={handleLike}
+                className={`flex items-center justify-center rounded-xl border transition active:scale-90 min-h-[38px] min-w-[38px] sm:min-h-[42px] sm:min-w-[42px] cursor-pointer ${
+                  isLiked
+                    ? 'bg-rose-500/15 border-rose-500/40 text-rose-500'
+                    : 'bg-[var(--lv-elevated)]/65 border-[var(--lv-border)] text-[var(--lv-muted)] hover:text-rose-400'
+                }`}
+                title={isLiked ? t('unlike') : t('like')}
+                aria-label={isLiked ? t('unlike') : t('like')}
+                aria-pressed={isLiked}
+              >
+                <Heart
+                  className={`w-4 h-4 sm:w-[18px] sm:h-[18px] ${isLiked ? 'fill-rose-500' : ''} ${
+                    likePopping ? 'animate-heart-pop' : ''
+                  }`}
+                />
               </button>
 
               <button
@@ -657,7 +691,7 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                   triggerHaptic('tap');
                   playPrevTrack();
                 }}
-                className="flex items-center justify-center rounded-xl text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition active:scale-95 min-h-[44px] min-w-[36px] sm:min-w-[44px] cursor-pointer"
+                className="hidden sm:flex items-center justify-center rounded-xl text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition active:scale-95 min-h-[42px] min-w-[40px] cursor-pointer"
                 title={t('previous')}
                 aria-label={t('previous')}
               >
@@ -687,7 +721,7 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                   triggerHaptic('tap');
                   playNextTrack();
                 }}
-                className="flex items-center justify-center rounded-xl text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition active:scale-95 min-h-[44px] min-w-[36px] sm:min-w-[44px] cursor-pointer"
+                className="flex items-center justify-center rounded-xl text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition active:scale-95 min-h-[38px] min-w-[34px] sm:min-h-[42px] sm:min-w-[40px] cursor-pointer"
                 title={t('next_track')}
                 aria-label={t('next_track')}
               >
@@ -700,39 +734,30 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                   triggerHaptic('tap');
                   cycleRepeatMode();
                 }}
-                className={`hidden md:flex items-center justify-center rounded-xl min-h-[44px] min-w-[40px] transition active:scale-95 cursor-pointer ${
+                className={`relative flex items-center justify-center rounded-xl border transition active:scale-95 min-h-[38px] min-w-[38px] sm:min-h-[42px] sm:min-w-[42px] cursor-pointer ${
                   effectiveRepeatMode !== 'off'
-                    ? 'text-[var(--lv-accent-text)]'
-                    : 'text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
+                    ? 'bg-[var(--lv-accent)]/15 border-[var(--lv-accent)]/45 text-[var(--lv-accent-text)]'
+                    : 'bg-[var(--lv-elevated)]/65 border-[var(--lv-border)] text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
                 }`}
                 title={`${t('repeat')}: ${effectiveRepeatMode}`}
                 aria-label={`${t('repeat')}: ${effectiveRepeatMode}`}
+                aria-pressed={effectiveRepeatMode !== 'off'}
               >
                 {effectiveRepeatMode === 'one' ? (
-                  <Repeat1 className="w-4 h-4" />
+                  <Repeat1 className="w-4 h-4 sm:w-[18px] sm:h-[18px]" />
                 ) : (
-                  <Repeat className="w-4 h-4" />
+                  <Repeat className="w-4 h-4 sm:w-[18px] sm:h-[18px]" />
+                )}
+                {effectiveRepeatMode === 'all' && (
+                  <span
+                    className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-[var(--lv-accent)]"
+                    aria-hidden="true"
+                  />
                 )}
               </button>
 
-              <button
-                type="button"
-                onClick={handleLike}
-                className={`hidden sm:flex items-center justify-center rounded-xl transition active:scale-90 min-h-[44px] min-w-[40px] cursor-pointer ${
-                  isLiked ? 'text-rose-500' : 'text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
-                }`}
-                title={isLiked ? t('unlike') : t('like')}
-                aria-label={isLiked ? t('unlike') : t('like')}
-              >
-                <Heart
-                  className={`w-4 h-4 sm:w-5 sm:h-5 ${isLiked ? 'fill-rose-500' : ''} ${
-                    likePopping ? 'animate-heart-pop' : ''
-                  }`}
-                />
-              </button>
-
               {/* Volume meter & mute on sm+ */}
-              <div className="hidden sm:flex items-center gap-1 px-1">
+              <div className="hidden md:flex items-center gap-1 px-1">
                 <button
                   type="button"
                   onClick={() => {
@@ -773,7 +798,7 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                   triggerHaptic('tap');
                   onOpenFullscreen();
                 }}
-                className="flex items-center justify-center rounded-xl text-[var(--text-muted)] hover:text-[var(--text)] transition active:scale-95 min-h-[44px] min-w-[36px] sm:min-w-[42px] cursor-pointer"
+                className="hidden sm:flex items-center justify-center rounded-xl text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition active:scale-95 min-h-[42px] min-w-[40px] cursor-pointer"
                 title={t('expand_player')}
                 aria-label={t('expand_player')}
               >
@@ -783,7 +808,7 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
               <button
                 type="button"
                 onClick={handleClose}
-                className="hidden sm:flex items-center justify-center rounded-xl text-[var(--text-muted)] hover:text-[var(--text)] transition active:scale-95 min-h-[44px] min-w-[40px] cursor-pointer"
+                className="hidden sm:flex items-center justify-center rounded-xl text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition active:scale-95 min-h-[42px] min-w-[40px] cursor-pointer"
                 title={t('close_player')}
                 aria-label={t('close_player')}
               >
@@ -792,15 +817,28 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
             </div>
           </div>
 
-          {/* Mobile quick player strip so Shuffle, Repeat, Like, Mute, Queue, and Close stay within thumb reach */}
+          {/* Mobile secondary control bar for Previous, Shuffle, Mute, Full Player/Queue, and Close */}
           <div className="flex sm:hidden items-center justify-between px-2.5 py-1 border-t border-[var(--lv-border)]/70">
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('tap');
+                playPrevTrack();
+              }}
+              className="min-h-[40px] min-w-[44px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition cursor-pointer"
+              title={t('previous')}
+              aria-label={t('previous')}
+            >
+              <SkipBack className="w-4 h-4 fill-current" />
+            </button>
+
             <button
               type="button"
               onClick={() => {
                 triggerHaptic('tap');
                 toggleShuffle();
               }}
-              className={`min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center transition cursor-pointer ${
+              className={`min-h-[40px] min-w-[44px] rounded-lg flex items-center justify-center transition cursor-pointer ${
                 effectiveShuffling ? 'text-[var(--lv-accent-text)]' : 'text-[var(--lv-muted)]'
               }`}
               title={t('shuffle')}
@@ -813,44 +851,9 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
               type="button"
               onClick={() => {
                 triggerHaptic('tap');
-                cycleRepeatMode();
-              }}
-              className={`min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center transition cursor-pointer ${
-                effectiveRepeatMode !== 'off' ? 'text-[var(--lv-accent-text)]' : 'text-[var(--lv-muted)]'
-              }`}
-              title={`${t('repeat')}: ${effectiveRepeatMode}`}
-              aria-label={`${t('repeat')}: ${effectiveRepeatMode}`}
-            >
-              {effectiveRepeatMode === 'one' ? (
-                <Repeat1 className="w-4 h-4" />
-              ) : (
-                <Repeat className="w-4 h-4" />
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={handleLike}
-              className={`min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center transition cursor-pointer ${
-                isLiked ? 'text-rose-500' : 'text-[var(--lv-muted)]'
-              }`}
-              title={isLiked ? t('unlike') : t('like')}
-              aria-label={isLiked ? t('unlike') : t('like')}
-            >
-              <Heart
-                className={`w-4 h-4 ${isLiked ? 'fill-rose-500' : ''} ${
-                  likePopping ? 'animate-heart-pop' : ''
-                }`}
-              />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                triggerHaptic('tap');
                 toggleMute();
               }}
-              className="min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] transition cursor-pointer"
+              className="min-h-[40px] min-w-[44px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] transition cursor-pointer"
               title={effectiveMuted ? (isNy ? 'Yatsani phokoso' : 'Unmute') : (isNy ? 'Zimitsani phokoso' : 'Mute')}
               aria-label={effectiveMuted ? (isNy ? 'Yatsani phokoso' : 'Unmute') : (isNy ? 'Zimitsani phokoso' : 'Mute')}
             >
@@ -867,7 +870,7 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                 triggerHaptic('tap');
                 onOpenFullscreen();
               }}
-              className="min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] transition cursor-pointer"
+              className="min-h-[40px] min-w-[44px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] transition cursor-pointer"
               title={`${t('up_next')} & ${t('lyrics')}`}
               aria-label={`${t('up_next')} & ${t('lyrics')}`}
             >
@@ -876,8 +879,21 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
 
             <button
               type="button"
+              onClick={() => {
+                triggerHaptic('tap');
+                onOpenFullscreen();
+              }}
+              className="min-h-[40px] min-w-[44px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] transition cursor-pointer"
+              title={t('expand_player')}
+              aria-label={t('expand_player')}
+            >
+              <Maximize2 className="w-4 h-4" />
+            </button>
+
+            <button
+              type="button"
               onClick={handleClose}
-              className="min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] transition cursor-pointer"
+              className="min-h-[40px] min-w-[44px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] transition cursor-pointer"
               title={t('close_player')}
               aria-label={t('close_player')}
             >

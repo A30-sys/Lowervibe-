@@ -7,6 +7,7 @@ import {
   FileText,
   Lock,
   Mail,
+  Music2,
   Send,
   Shield,
 } from 'lucide-react';
@@ -19,7 +20,7 @@ import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
 
 interface LegalPageViewProps {
-  docType: 'terms' | 'privacy' | 'copyright';
+  docType: 'terms' | 'privacy' | 'copyright' | 'about';
 }
 
 interface SectionBlock {
@@ -55,6 +56,8 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
       ? t('footer_terms')
       : docType === 'privacy'
       ? t('footer_privacy')
+      : docType === 'about'
+      ? t('about_title', 'About LOWERVIBE')
       : t('footer_copyright');
 
   const summaryBullets =
@@ -105,6 +108,23 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
           'Repeated verified copyright violations lead to permanent account suspension.',
           `Direct legal notices can also be sent to ${LEGAL_CONFIG.copyrightEmail}.`,
         ];
+
+  const finalSummaryBullets =
+    docType === 'about'
+      ? isNy
+        ? [
+            'LOWERVIBE ndi malo omvera nyimbo za oimba odziyimira okha a ku Malawi ndi mu Africa monse.',
+            'Oimba amasunga ufulu wawo 100% wa nyimbo zawo ndi kupeza chiwerengero chenicheni cha omvera.',
+            'Omvera amamvera nyimbo mwachangu, kusunga nyimbo popanda intaneti, ndi kupanga mindandanda.',
+            'Tikukhazikika ku Nsanje, M1 Road, Malawi, ndipo timalankhulana mwachindunji kudzera pa odulamw@gmail.com.',
+          ]
+        : [
+            'LOWERVIBE is an independent African music streaming platform rooted in Malawi and built for creators across Africa.',
+            'Artists keep 100% ownership of their masters while tracking real, verified plays and fan engagement.',
+            'Listeners stream smoothly even on low-end mobile devices, build personal playlists, and save eligible tracks offline.',
+            `Headquartered at ${LEGAL_CONFIG.physicalAddress} with direct support at ${LEGAL_CONFIG.supportEmail}.`,
+          ]
+      : summaryBullets;
 
   const termsSections: SectionBlock[] = [
     {
@@ -453,8 +473,75 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
     },
   ];
 
+  const aboutSections: SectionBlock[] = [
+    {
+      id: 'about-mission',
+      title: isNy ? '1. Cholinga cha LOWERVIBE' : '1. Our mission',
+      body: (
+        <div className="space-y-3">
+          <p>
+            {isNy
+              ? 'LOWERVIBE idapangidwa kuti oimba a ku Malawi ndi mayiko ena aku Africa akhale ndi malo olemekezeka ofalitsira nyimbo zawo, popanda malonda abodza kapena chiwerengero chonyenga.'
+              : 'LOWERVIBE gives independent musicians across Malawi and Africa a dependable streaming home without inflated vanity numbers or cluttered ad feeds.'}
+          </p>
+          <div className="flex flex-wrap gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => navigate('/discover')}
+              className="px-4 py-2 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer min-h-[40px]"
+            >
+              {isNy ? 'Onani Nyimbo' : 'Explore Music'}
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/artistcreator')}
+              className="px-4 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border-strong)] text-[var(--text)] text-xs font-semibold cursor-pointer min-h-[40px]"
+            >
+              {t('artist_creator', 'Artist Creator')}
+            </button>
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: 'about-trust',
+      title: isNy ? '2. Zowerengeka zenizeni ndi chinsinsi' : '2. Real data & transparent creator standards',
+      body: (
+        <p>
+          {isNy
+            ? 'Chiwerengero cha omvera, otsatira, ndi zokondedwa pa LOWERVIBE chimachokera ku zochita zenizeni za anthu pa nsanja yathu. Oimba amasunga ufulu wawo wonse ndipo ndemanga zimayang\'aniridwa kuti malo akhale abwino.'
+            : 'Every play count, favorite, and follower count on LOWERVIBE reflects verified platform activity. Artists retain full master ownership and clear upload moderation feedback.'}
+        </p>
+      ),
+    },
+    {
+      id: 'about-contact',
+      title: isNy ? '3. Kulumikizana nafe' : '3. Direct support & office',
+      body: (
+        <div className="space-y-2">
+          <p>
+            <strong>{LEGAL_CONFIG.operatorName}</strong>
+          </p>
+          <p>{LEGAL_CONFIG.physicalAddress}</p>
+          <p>
+            Email:{' '}
+            <a href={`mailto:${LEGAL_CONFIG.supportEmail}`} className="underline text-[var(--accent-text)]">
+              {LEGAL_CONFIG.supportEmail}
+            </a>
+          </p>
+        </div>
+      ),
+    },
+  ];
+
   const activeSections =
-    docType === 'terms' ? termsSections : docType === 'privacy' ? privacySections : copyrightSections;
+    docType === 'terms'
+      ? termsSections
+      : docType === 'privacy'
+      ? privacySections
+      : docType === 'about'
+      ? aboutSections
+      : copyrightSections;
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)] pb-20">
@@ -473,6 +560,17 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
           <span className="text-sm font-bold text-[var(--text)] truncate">{title}</span>
 
           <div className="flex items-center gap-1 text-xs">
+            <button
+              type="button"
+              onClick={() => navigate('/about')}
+              className={`px-2.5 py-1.5 rounded-lg font-medium cursor-pointer ${
+                docType === 'about'
+                  ? 'bg-[var(--surface-2)] text-[var(--accent-text)]'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+              }`}
+            >
+              {isNy ? 'Zambiri' : 'About'}
+            </button>
             <button
               type="button"
               onClick={() => navigate('/terms')}
@@ -518,8 +616,9 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
             {docType === 'terms' && <FileText className="w-4 h-4" />}
             {docType === 'privacy' && <Lock className="w-4 h-4" />}
             {docType === 'copyright' && <Copyright className="w-4 h-4" />}
+            {docType === 'about' && <Music2 className="w-4 h-4" />}
             <span>
-              {LEGAL_CONFIG.brandName} {isNy ? 'Malamulo' : 'Legal'}
+              {LEGAL_CONFIG.brandName} {docType === 'about' ? (isNy ? 'Nkhani Yathu' : 'Platform') : isNy ? 'Malamulo' : 'Legal'}
             </span>
           </div>
           <h1 className="text-3xl font-extrabold tracking-tight text-[var(--text)]">{title}</h1>
@@ -536,7 +635,7 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
             <span>{isNy ? 'Mwachidule' : 'The short version'}</span>
           </div>
           <ul className="space-y-2 text-[15px] text-[var(--text-muted)]">
-            {summaryBullets.map((item, idx) => (
+            {finalSummaryBullets.map((item, idx) => (
               <li key={idx} className="flex items-start gap-2.5">
                 <span className="mt-2 w-1.5 h-1.5 rounded-full bg-[var(--accent)] shrink-0" />
                 <span>{item}</span>

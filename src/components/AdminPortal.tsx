@@ -71,6 +71,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
     playTrack,
     auditLogs,
     toggleDerankTrack,
+    setTrackModerationStatus,
+    deleteTrackComment,
+    moderateTrackComment,
+    isCatalogLoaded,
+    catalogError,
     selectedCountry,
     upsertGenre,
     monetizationConfig,
@@ -97,12 +102,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
     logout,
   } = useAuth();
 
-  const { sendNotification } = useNotifications();
+  const {
+    banners,
+    sendNotification,
+    savePlatformBanner,
+    togglePlatformBanner,
+    deletePlatformBanner,
+  } = useNotifications();
   const { navigate } = useRouter();
   const { showToast } = useToast();
 
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'users' | 'applications' | 'catalog' | 'reports' | 'royalties' | 'support' | 'audit' | 'settings'
+    'overview' | 'users' | 'applications' | 'catalog' | 'banners' | 'reports' | 'royalties' | 'support' | 'audit' | 'settings'
   >('overview');
 
   // Firestore Real-time Users & Reports
@@ -193,6 +204,32 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
   const [payoutFailReason, setPayoutFailReason] = useState('');
   const [ticketReplyId, setTicketReplyId] = useState<string | null>(null);
   const [ticketReplyText, setTicketReplyText] = useState('');
+
+  // Platform Banner CMS state
+  const [bannerTitle, setBannerTitle] = useState('');
+  const [bannerMessage, setBannerMessage] = useState('');
+  const [bannerType, setBannerType] = useState<'platform_announcement' | 'maintenance' | 'new_feature' | 'new_release' | 'account_security'>('platform_announcement');
+  const [bannerCategory, setBannerCategory] = useState<'essential' | 'promotional'>('promotional');
+  const [bannerAudience, setBannerAudience] = useState<'all' | 'listeners' | 'artists'>('all');
+  const [bannerActionLabel, setBannerActionLabel] = useState('');
+  const [bannerActionRoute, setBannerActionRoute] = useState('');
+  const [isSavingBanner, setIsSavingBanner] = useState(false);
+
+  // Track moderation note input
+  const [moderatingTrackId, setModeratingTrackId] = useState<string | null>(null);
+  const [moderationStatusDraft, setModerationStatusDraft] = useState<'published' | 'in_review' | 'rejected' | 'draft'>('published');
+  const [moderationFeedbackDraft, setModerationFeedbackDraft] = useState('');
+
+  // Runtime client error log snapshot
+  const [runtimeErrors, setRuntimeErrors] = useState<Array<{ time: string; message: string; source?: string }>>(() => {
+    try {
+      const raw = localStorage.getItem('lowervibe_runtime_errors_v1');
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
 
   const resetUploadForm = () => {
     const detected = detectDefaultCountry();
@@ -805,6 +842,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
           { id: 'users', label: `Users (${dbUsers.length})`, icon: Users },
           { id: 'applications', label: `Artist Requests (${pendingApplicationsCount})`, icon: FileCheck },
           { id: 'catalog', label: `Songs (${tracks.length})`, icon: Music },
+          { id: 'banners', label: `Banners (${banners.filter((b) => b.active).length})`, icon: Bell },
           { id: 'royalties', label: `Monetization & Payouts (${pendingMonetizationCount + pendingPayoutsCount})`, icon: DollarSign },
           { id: 'reports', label: `Reports (${pendingReportsCount})`, icon: ShieldAlert },
           { id: 'support', label: `Support (${openTicketsCount})`, icon: HelpCircle },
@@ -982,6 +1020,67 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
               </button>
             </div>
           </form>
+
+          {/* System Health & Error Monitor */}
+          <div className="p-6 rounded-3xl bg-[var(--surface)] border border-[var(--border)] space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold font-heading text-[var(--text)]">
+                  System Health &amp; Error Monitor
+                </h3>
+                <p className="text-xs text-[var(--text-muted)]">
+                  Live Firestore catalog status, active platform banners, and client error diagnostics.
+                </p>
+              </div>
+              {runtimeErrors.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.removeItem('lowervibe_runtime_errors_v1');
+                    setRuntimeErrors([]);
+                    showToast('Error log cleared.');
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
+                >
+                  Clear log
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)]">
+                <div className="text-[10px] font-mono uppercase text-[var(--text-muted)]">Catalog Sync</div>
+                <div className={`text-sm font-bold mt-1 ${catalogError ? 'text-[var(--danger)]' : 'text-[var(--accent-text)]'}`}>
+                  {catalogError ? 'Error' : isCatalogLoaded ? 'Connected' : 'Loading...'}
+                </div>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)]">
+                <div className="text-[10px] font-mono uppercase text-[var(--text-muted)]">Active Banners</div>
+                <div className="text-sm font-bold text-[var(--text)] mt-1">
+                  {banners.filter((b) => b.active).length} active
+                </div>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)]">
+                <div className="text-[10px] font-mono uppercase text-[var(--text-muted)]">Recorded Errors</div>
+                <div className={`text-sm font-bold mt-1 ${runtimeErrors.length > 0 ? 'text-[var(--danger)]' : 'text-[var(--text)]'}`}>
+                  {runtimeErrors.length}
+                </div>
+              </div>
+            </div>
+
+            {runtimeErrors.length > 0 && (
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {runtimeErrors.slice(0, 6).map((errItem, idx) => (
+                  <div key={`${errItem.time}-${idx}`} className="p-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-[11px] flex items-start justify-between gap-2">
+                    <span className="text-[var(--text)] break-all">{errItem.message}</span>
+                    <span className="font-mono text-[10px] text-[var(--text-muted)] shrink-0">
+                      {new Date(errItem.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1380,13 +1479,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
                         <td className="p-3.5 text-[var(--text-muted)] font-mono">{formatTime(track.durationSeconds)}</td>
                         <td className="p-3.5 font-mono text-[var(--text)] font-bold">{track.plays || 0}</td>
                         <td className="p-3.5">
-                          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)]">
-                            {track.isDeranked ? 'Hidden' : track.isDraft ? 'Draft' : 'Live'}
-                          </span>
+                          <div className="flex flex-col gap-1">
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-mono bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] w-fit">
+                              {track.isDeranked ? 'Hidden' : track.isDraft ? 'Draft' : track.moderationStatus || 'published'}
+                            </span>
+                            {track.moderationFeedback && (
+                              <span className="text-[10px] text-[var(--text-muted)] truncate max-w-[140px]" title={track.moderationFeedback}>
+                                {track.moderationFeedback}
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         <td className="p-3.5 text-right pr-4">
-                          <div className="flex items-center justify-end gap-1.5">
+                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
                             <button
                               type="button"
                               onClick={() => playTrack(track)}
@@ -1400,6 +1506,22 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
                               className="px-2.5 py-1 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[10px] font-mono text-[var(--text)] cursor-pointer"
                             >
                               {track.isDeranked ? 'Restore' : 'Hide'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setModeratingTrackId(moderatingTrackId === track.id ? null : track.id);
+                                const rawMod = track.moderationStatus;
+                                setModerationStatusDraft(
+                                  rawMod === 'in_review' || rawMod === 'rejected' || rawMod === 'draft'
+                                    ? rawMod
+                                    : 'published'
+                                );
+                                setModerationFeedbackDraft(track.moderationFeedback || '');
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[10px] font-mono text-[var(--violet)] cursor-pointer"
+                            >
+                              Status
                             </button>
                             {confirmDeleteTrackId === track.id ? (
                               <>
@@ -1437,6 +1559,38 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
                               </button>
                             )}
                           </div>
+                          {moderatingTrackId === track.id && (
+                            <div className="mt-2 p-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex flex-col sm:flex-row items-stretch sm:items-center gap-2 text-left">
+                              <select
+                                value={moderationStatusDraft}
+                                onChange={(e) => setModerationStatusDraft(e.target.value as any)}
+                                className="px-2.5 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[11px] text-[var(--text)]"
+                              >
+                                <option value="published">Published / Approved</option>
+                                <option value="in_review">In Review</option>
+                                <option value="rejected">Needs Attention / Rejected</option>
+                                <option value="draft">Draft</option>
+                              </select>
+                              <input
+                                type="text"
+                                value={moderationFeedbackDraft}
+                                onChange={(e) => setModerationFeedbackDraft(e.target.value)}
+                                placeholder="Respectful feedback for the artist..."
+                                className="flex-1 px-2.5 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[11px] text-[var(--text)]"
+                              />
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await setTrackModerationStatus(track.id, moderationStatusDraft, moderationFeedbackDraft.trim() || undefined);
+                                  setModeratingTrackId(null);
+                                  showToast(`Updated moderation for "${track.title}"`);
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--accent-contrast)] text-[11px] font-bold cursor-pointer"
+                              >
+                                Save
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -1445,6 +1599,189 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* TAB 4B: PLATFORM BANNERS & ALERTS CMS */}
+      {activeTab === 'banners' && (
+        <div className="space-y-6">
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!bannerTitle.trim() || !bannerMessage.trim()) {
+                showToast('Enter headline and message.');
+                return;
+              }
+              setIsSavingBanner(true);
+              try {
+                await savePlatformBanner({
+                  type: bannerType,
+                  category: bannerCategory,
+                  title: bannerTitle.trim(),
+                  message: bannerMessage.trim(),
+                  audience: bannerAudience,
+                  priority: 50,
+                  actionLabel: bannerActionLabel.trim() || undefined,
+                  actionRoute: bannerActionRoute.trim() || undefined,
+                  dismissible: bannerType !== 'maintenance',
+                  active: true,
+                });
+                setBannerTitle('');
+                setBannerMessage('');
+                setBannerActionLabel('');
+                setBannerActionRoute('');
+                showToast('Platform banner published.');
+              } catch {
+                showToast('Could not save banner.');
+              } finally {
+                setIsSavingBanner(false);
+              }
+            }}
+            className="p-6 rounded-3xl bg-[var(--surface)] border border-[var(--border)] space-y-4"
+          >
+            <div>
+              <h2 className="text-base font-bold font-heading text-[var(--text)]">
+                Create Platform Banner
+              </h2>
+              <p className="text-xs text-[var(--text-muted)]">
+                Publish a structured LOWERVIBE banner (announcements, maintenance, new features, or release highlights).
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <select
+                value={bannerType}
+                onChange={(e) => {
+                  const val = e.target.value as any;
+                  setBannerType(val);
+                  if (val === 'maintenance' || val === 'account_security') {
+                    setBannerCategory('essential');
+                  }
+                }}
+                className="px-3.5 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+              >
+                <option value="platform_announcement">Platform Announcement</option>
+                <option value="new_feature">New Feature</option>
+                <option value="new_release">New Music Release</option>
+                <option value="maintenance">Service Maintenance</option>
+                <option value="account_security">Account / Security Alert</option>
+              </select>
+
+              <select
+                value={bannerCategory}
+                onChange={(e) => setBannerCategory(e.target.value as any)}
+                className="px-3.5 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+              >
+                <option value="promotional">Promotional (Respects user opt-out)</option>
+                <option value="essential">Essential (Always shown)</option>
+              </select>
+
+              <select
+                value={bannerAudience}
+                onChange={(e) => setBannerAudience(e.target.value as any)}
+                className="px-3.5 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+              >
+                <option value="all">All Users</option>
+                <option value="listeners">Listeners Only</option>
+                <option value="artists">Artists Only</option>
+              </select>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <input
+                type="text"
+                required
+                value={bannerTitle}
+                onChange={(e) => setBannerTitle(e.target.value)}
+                placeholder="Banner headline..."
+                className="px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+              />
+              <input
+                type="text"
+                required
+                value={bannerMessage}
+                onChange={(e) => setBannerMessage(e.target.value)}
+                placeholder="Clear concise banner message..."
+                className="md:col-span-2 px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input
+                type="text"
+                value={bannerActionLabel}
+                onChange={(e) => setBannerActionLabel(e.target.value)}
+                placeholder="Optional CTA button label (e.g. Explore)"
+                className="px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+              />
+              <input
+                type="text"
+                value={bannerActionRoute}
+                onChange={(e) => setBannerActionRoute(e.target.value)}
+                placeholder="Optional route (e.g. /discover)"
+                className="px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+              />
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={isSavingBanner}
+                className="px-5 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer disabled:opacity-50"
+              >
+                {isSavingBanner ? 'Publishing...' : 'Publish Banner'}
+              </button>
+            </div>
+          </form>
+
+          <div className="rounded-3xl bg-[var(--surface)] border border-[var(--border)] overflow-hidden">
+            <div className="px-5 py-4 border-b border-[var(--border)]">
+              <h3 className="text-sm font-bold text-[var(--text)] font-heading">
+                Active &amp; Saved Banners ({banners.length})
+              </h3>
+            </div>
+            {banners.length === 0 ? (
+              <div className="p-8 text-center text-xs text-[var(--text-muted)]">
+                No platform banners published yet.
+              </div>
+            ) : (
+              <div className="divide-y divide-[var(--border)]">
+                {banners.map((bn) => (
+                  <div key={bn.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-[var(--text)]">{bn.title}</span>
+                        <span className="px-2 py-0.5 rounded-full text-[9px] font-mono uppercase bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)]">
+                          {bn.category} · {bn.audience}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-mono uppercase ${bn.active ? 'bg-[var(--accent)]/15 text-[var(--accent-text)]' : 'bg-[var(--surface-2)] text-[var(--text-muted)]'}`}>
+                          {bn.active ? 'Active' : 'Paused'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[var(--text-muted)]">{bn.message}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => togglePlatformBanner(bn.id, !bn.active)}
+                        className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer"
+                      >
+                        {bn.active ? 'Pause' : 'Activate'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deletePlatformBanner(bn.id)}
+                        className="p-2 rounded-xl bg-[var(--surface-2)] text-[var(--text-muted)] hover:text-[var(--danger)] cursor-pointer"
+                        aria-label="Delete banner"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1781,7 +2118,31 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
                     <div className="p-3 rounded-2xl bg-[var(--surface-2)] text-xs text-[var(--text)]">"{rep.details}"</div>
                   )}
                   {rep.status === 'pending' && (
-                    <div className="flex items-center gap-2 pt-1">
+                    <div className="flex items-center flex-wrap gap-2 pt-1">
+                      {rep.type === 'comment' && rep.trackId && rep.commentId && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await moderateTrackComment(rep.trackId, rep.commentId, true);
+                              await handleResolveReport(rep.id, 'resolved');
+                            }}
+                            className="px-4 py-2 rounded-full bg-[var(--violet)] text-white text-xs font-bold cursor-pointer"
+                          >
+                            Hide Comment
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await deleteTrackComment(rep.trackId, rep.commentId);
+                              await handleResolveReport(rep.id, 'resolved');
+                            }}
+                            className="px-4 py-2 rounded-full bg-[var(--danger)] text-white text-xs font-bold cursor-pointer"
+                          >
+                            Delete Comment
+                          </button>
+                        </>
+                      )}
                       <button
                         type="button"
                         onClick={() => handleResolveReport(rep.id, 'resolved')}

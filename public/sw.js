@@ -4,7 +4,7 @@
  * and native notification click navigation.
  */
 
-const CACHE_NAME = 'lowervibe-cache-v7';
+const CACHE_NAME = 'lowervibe-cache-v8';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
@@ -47,8 +47,17 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const rawTarget = (event.notification.data && event.notification.data.url) || '/';
-  const fullTargetUrl = new URL(rawTarget, self.location.origin).href;
-  const relativeTarget = new URL(fullTargetUrl).pathname + new URL(fullTargetUrl).search;
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(String(rawTarget), self.location.origin);
+    if (parsedUrl.origin !== self.location.origin) {
+      parsedUrl = new URL('/', self.location.origin);
+    }
+  } catch {
+    parsedUrl = new URL('/', self.location.origin);
+  }
+  const fullTargetUrl = parsedUrl.href;
+  const relativeTarget = `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}` || '/';
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clients) => {
@@ -59,12 +68,13 @@ self.addEventListener('notificationclick', (event) => {
           } catch {}
           try {
             client.postMessage({ type: 'LOWERVIBE_NAVIGATE', url: relativeTarget });
+            return;
           } catch {
             if ('navigate' in client && typeof client.navigate === 'function') {
               await client.navigate(fullTargetUrl).catch(() => {});
+              return;
             }
           }
-          return;
         }
       }
       if (self.clients.openWindow) {

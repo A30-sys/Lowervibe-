@@ -161,6 +161,13 @@ interface AudioContextType {
   clearHistory: () => void;
   addCommentToTrack: (trackId: string, comment: Omit<TrackComment, 'id' | 'createdAt' | 'likes'>) => void;
   likeComment: (trackId: string, commentId: string) => void;
+  deleteTrackComment: (trackId: string, commentId: string) => Promise<{ success: boolean; error?: string }>;
+  moderateTrackComment: (trackId: string, commentId: string, hidden: boolean) => Promise<{ success: boolean; error?: string }>;
+  setTrackModerationStatus: (
+    trackId: string,
+    status: NonNullable<Track['moderationStatus']>,
+    feedback?: string
+  ) => Promise<{ success: boolean; error?: string }>;
   addNewArtist: (artist: Omit<Artist, 'id' | 'followersCount' | 'monthlyListeners' | 'joinedDate' | 'verified'>) => Artist;
   addNewTrack: (
     trackData: Omit<Track, 'id' | 'plays' | 'likes' | 'reposts' | 'releaseDate' | 'comments'> &
@@ -250,6 +257,7 @@ interface AudioContextType {
     type: ReportRecord['type'];
     trackId?: string;
     trackTitle?: string;
+    commentId?: string;
     artistId?: string;
     artistName?: string;
     reason: string;
@@ -337,7 +345,11 @@ function inferMediaImageMimeType(url: string): string | undefined {
   return undefined;
 }
 
-function buildMediaSessionArtwork(coverArt?: string): MediaImage[] {
+function buildMediaSessionArtwork(coverArt?: string): {
+  artwork: MediaImage[];
+  trackCoverUrl: string | null;
+  fallbackIcons: MediaImage[];
+} {
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const fallbackIcons: MediaImage[] = origin
     ? [
@@ -357,7 +369,7 @@ function buildMediaSessionArtwork(coverArt?: string): MediaImage[] {
     rawCover.startsWith('data:image/svg+xml');
 
   if (isDefaultFallbackPath) {
-    return fallbackIcons;
+    return { artwork: fallbackIcons, trackCoverUrl: null, fallbackIcons };
   }
 
   let absoluteCover = rawCover;
@@ -365,16 +377,22 @@ function buildMediaSessionArtwork(coverArt?: string): MediaImage[] {
     try {
       absoluteCover = origin ? new URL(rawCover, origin).href : rawCover;
     } catch {
-      return fallbackIcons;
+      return { artwork: fallbackIcons, trackCoverUrl: null, fallbackIcons };
     }
   }
 
   const mimeType = inferMediaImageMimeType(absoluteCover);
+  // Provide only the real song artwork at standard sizes so Android Chrome lockscreen
+  // never overrides the track cover with a locally-cached fallback app icon.
   const trackArtwork: MediaImage[] = ['96x96', '128x128', '192x192', '256x256', '384x384', '512x512'].map(
     (sizes) => (mimeType ? { src: absoluteCover, sizes, type: mimeType } : { src: absoluteCover, sizes })
   );
 
-  return [...trackArtwork, ...fallbackIcons];
+  return {
+    artwork: trackArtwork,
+    trackCoverUrl: absoluteCover,
+    fallbackIcons,
+  };
 }
 
 function syncMediaSessionPositionState(position: number, duration: number, playbackRate: number) {
@@ -1720,10 +1738,24 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       pinPlayerSession({ isPlaying: false });
     };
 
+    audioEngine.onExternalPlayState = (playing: boolean) => {
+      setIsPlaying(playing);
+      pinPlayerSession({
+        isPlaying: playing,
+        currentTime: mediaControlRef.current.currentTime,
+      });
+      if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+        try {
+          navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+        } catch {}
+      }
+    };
+
     return () => {
       audioEngine.onTimeUpdate = null;
       audioEngine.onEnded = null;
       audioEngine.onError = null;
+      audioEngine.onExternalPlayState = null;
     };
   }, [
     repeatMode,
@@ -2113,20 +2145,39 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return;
     }
 
-    const artwork = buildMediaSessionArtwork(currentTrack.coverArt);
-    const albumLabel =
-      currentTrack.recordLabel?.trim() ||
-      currentTrack.genre?.trim() ||
-      'LOWERVIBE';
+    let cancelled = false;
+    const { artwork, trackCoverUrl, fallbackIcons } = buildMediaSessionArtwork(currentTrack.coverArt);
+    const baseLabel = currentTrack.recordLabel?.trim() || currentTrack.genre?.trim();
+    const albumLabel = baseLabel
+      ? baseLabel.toLowerCase().includes('lowervibe')
+        ? baseLabel
+        : `${baseLabel} · LOWERVIBE`
+      : 'LOWERVIBE Music';
 
-    try {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: currentTrack.title || 'Untitled Track',
-        artist: currentTrack.artistName || 'LOWERVIBE Artist',
-        album: albumLabel,
-        artwork,
-      });
-    } catch {}
+    const applyMetadata = (chosenArtwork: MediaImage[]) => {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: currentTrack.title || 'Untitled Track',
+          artist: currentTrack.artistName || 'LOWERVIBE Artist',
+          album: albumLabel,
+          artwork: chosenArtwork,
+        });
+      } catch {}
+    };
+
+    applyMetadata(artwork);
+
+    // Verify remote track artwork resolves; fall back to PNG LOWERVIBE icons if broken
+    if (trackCoverUrl && !trackCoverUrl.startsWith('data:')) {
+      const probe = new Image();
+      probe.referrerPolicy = 'no-referrer';
+      probe.onerror = () => {
+        if (!cancelled) {
+          applyMetadata(fallbackIcons);
+        }
+      };
+      probe.src = trackCoverUrl;
+    }
 
     syncMediaSessionPositionState(
       mediaControlRef.current.currentTime,
@@ -2144,7 +2195,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     registerHandler('play', () => {
-      if (!audioEngine.getIsActive()) {
+      if (!audioEngine.getIsCustomAudio()) {
         mediaControlRef.current.togglePlayPause();
       } else {
         audioEngine.resume();
@@ -2201,6 +2252,10 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     registerHandler('stop', () => {
       mediaControlRef.current.clearActiveTrack();
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     currentTrack?.id,
     currentTrack?.title,
@@ -2220,7 +2275,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } catch {}
       syncMediaSessionPositionState(
         mediaControlRef.current.currentTime,
-        mediaControlRef.current.duration,
+        mediaControlRef.current.duration || currentTrack.durationSeconds || 0,
         mediaControlRef.current.playbackRate
       );
     };
@@ -2234,7 +2289,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [currentTrack?.id, isPlaying]);
+  }, [currentTrack?.id, currentTrack?.durationSeconds, isPlaying]);
 
   // Synchronize 1-person-per-like optimistic counts
   const prevLikedIds = useRef<string[]>(currentUser?.likedTrackIds || []);
@@ -2463,6 +2518,10 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const downloadTrack = async (track: Track) => {
+    if (track.downloadable === false || !track.audioUrl) {
+      setPlaybackError('Offline saving is not enabled for this release.');
+      return;
+    }
     if (!currentUser) {
       requireAuth(() => downloadTrack(track), `Sign in to save "${track.title}" offline`);
       return;
@@ -3722,6 +3781,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     type: ReportRecord['type'];
     trackId?: string;
     trackTitle?: string;
+    commentId?: string;
     artistId?: string;
     artistName?: string;
     reason: string;
@@ -3734,6 +3794,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       type: input.type || 'track_report',
       trackId: input.trackId || '',
       trackTitle: input.trackTitle || input.artistName || 'Platform Report',
+      ...(input.commentId ? { commentId: input.commentId } : {}),
       ...(input.artistId ? { artistId: input.artistId } : {}),
       ...(input.artistName ? { artistName: input.artistName } : {}),
       reporterEmail: currentUser?.email || 'anonymous@lowervibe.mw',
@@ -3843,6 +3904,128 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return t;
       })
     );
+  };
+
+  const deleteTrackComment = async (
+    trackId: string,
+    commentId: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const targetTrack = tracks.find((t) => t.id === trackId);
+    if (!targetTrack) return { success: false, error: 'Track not found.' };
+    const targetComment = (targetTrack.comments || []).find((c) => c.id === commentId);
+    if (!targetComment) return { success: false, error: 'Comment not found.' };
+
+    const isAdminUser = isVerifiedAdminGoogleSession();
+    const isCommentAuthor = Boolean(currentUser && targetComment.userId === currentUser.id);
+    const isTrackOwner = isUserOwnerOfTrack(targetTrack);
+    if (!isAdminUser && !isCommentAuthor && !isTrackOwner) {
+      return { success: false, error: 'Permission denied.' };
+    }
+
+    const nextComments = (targetTrack.comments || []).filter((c) => c.id !== commentId);
+    setTracks((prev) => prev.map((t) => (t.id === trackId ? { ...t, comments: nextComments } : t)));
+    setCurrentTrack((prev) => (prev && prev.id === trackId ? { ...prev, comments: nextComments } : prev));
+    setActiveDetailTrack((prev) => (prev && prev.id === trackId ? { ...prev, comments: nextComments } : prev));
+    try {
+      await updateDoc(doc(db, 'tracks', trackId), { comments: nextComments });
+      if (isAdminUser) {
+        addAuditLog('DELETE_COMMENT', 'track', trackId, `Removed comment ${commentId}`);
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: formatFirebaseError(err, 'Could not remove comment') };
+    }
+  };
+
+  const moderateTrackComment = async (
+    trackId: string,
+    commentId: string,
+    hidden: boolean
+  ): Promise<{ success: boolean; error?: string }> => {
+    const targetTrack = tracks.find((t) => t.id === trackId);
+    if (!targetTrack) return { success: false, error: 'Track not found.' };
+    const isAdminUser = isVerifiedAdminGoogleSession();
+    if (!isAdminUser && !isUserOwnerOfTrack(targetTrack)) {
+      return { success: false, error: 'Permission denied.' };
+    }
+
+    const nextComments = (targetTrack.comments || []).map((c) =>
+      c.id === commentId ? { ...c, hiddenByModeration: hidden } : c
+    );
+    setTracks((prev) => prev.map((t) => (t.id === trackId ? { ...t, comments: nextComments } : t)));
+    setCurrentTrack((prev) => (prev && prev.id === trackId ? { ...prev, comments: nextComments } : prev));
+    setActiveDetailTrack((prev) => (prev && prev.id === trackId ? { ...prev, comments: nextComments } : prev));
+    try {
+      await updateDoc(doc(db, 'tracks', trackId), { comments: nextComments });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: formatFirebaseError(err, 'Could not update comment visibility') };
+    }
+  };
+
+  const setTrackModerationStatus = async (
+    trackId: string,
+    status: NonNullable<Track['moderationStatus']>,
+    feedback?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!isVerifiedAdminGoogleSession()) {
+      return { success: false, error: 'Admin verification required.' };
+    }
+    const targetTrack = tracks.find((t) => t.id === trackId);
+    if (!targetTrack) return { success: false, error: 'Track not found.' };
+
+    const isRejected = status === 'rejected';
+    const isPublished = status === 'approved' || status === 'published';
+    const nowIso = new Date().toISOString();
+    const updates: Partial<Track> = {
+      moderationStatus: status,
+      moderationFeedback: feedback?.trim() || undefined,
+      isDeranked: isRejected ? true : isPublished ? false : targetTrack.isDeranked,
+      isDraft: status === 'draft' ? true : isPublished ? false : targetTrack.isDraft,
+      updatedAt: nowIso,
+    };
+
+    try {
+      await updateDoc(doc(db, 'tracks', trackId), {
+        moderationStatus: status,
+        moderationFeedback: feedback?.trim() || null,
+        isDeranked: updates.isDeranked ?? false,
+        isDraft: updates.isDraft ?? false,
+        updatedAt: nowIso,
+      });
+      setTracks((prev) => prev.map((t) => (t.id === trackId ? { ...t, ...updates } : t)));
+      addAuditLog('MODERATE_TRACK', 'track', trackId, `Set ${targetTrack.title} status to ${status}`);
+
+      if (targetTrack.uploadedByUserId) {
+        const notifId = `notif-mod-${trackId}-${Date.now()}`;
+        const notifType = isRejected ? 'artist_rejected' : isPublished ? 'upload_completed' : 'system';
+        void setDoc(doc(db, 'notifications', notifId), {
+          id: notifId,
+          userId: targetTrack.uploadedByUserId,
+          type: notifType,
+          category: 'essential',
+          title: isRejected
+            ? `Release requires attention: ${targetTrack.title}`
+            : isPublished
+            ? `Release published: ${targetTrack.title}`
+            : `Release status updated: ${targetTrack.title}`,
+          message:
+            feedback?.trim() ||
+            (isRejected
+              ? 'This upload was flagged during moderation review. Open Studio for details.'
+              : isPublished
+              ? 'Your release passed review and is live on LOWERVIBE.'
+              : `Release status is now "${status.replace('_', ' ')}".`),
+          readBy: [],
+          createdAt: nowIso,
+          createdBy: currentUser?.email || PRIMARY_ADMIN_EMAIL,
+          actionRoute: '/artistcreator?tab=tracks',
+        }).catch(() => {});
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: formatFirebaseError(err, 'Could not update moderation status') };
+    }
   };
 
   const toggleVisualizer = () => setIsVisualizerActive((prev) => !prev);
@@ -3979,6 +4162,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         clearHistory,
         addCommentToTrack,
         likeComment,
+        deleteTrackComment,
+        moderateTrackComment,
+        setTrackModerationStatus,
         addNewArtist,
         addNewTrack,
         saveNewTrack,
