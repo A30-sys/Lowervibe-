@@ -8,6 +8,7 @@ import {
   Radio,
 } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
+import { useLanguage } from '../../context/LanguageContext';
 import { Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG } from '../../utils/artworkFallback';
 import { CountUpValue } from './CountUpValue';
@@ -37,12 +38,15 @@ export const StudioSongEarningsPanel: React.FC<StudioSongEarningsPanelProps> = (
   fallbackTracks,
   onPlayTrack,
   onOpenTrackDetails,
-  title = 'Real-time earnings per song',
+  title,
   subtitle,
   maxRows,
   replayKey = 0,
 }) => {
+  const { language } = useLanguage();
+  const isNy = language === 'ny';
   const [sortBy, setSortBy] = useState<SortMode>('earnings');
+  const displayTitle = title || (isNy ? 'Ndalama za nyimbo iliyonse panthawiyi' : 'Real-time earnings per song');
 
   const { songs, totalEarningsMwk, isSynced, listenerError } = useStudioLiveTrackMetrics({
     artistId,
@@ -76,19 +80,23 @@ export const StudioSongEarningsPanel: React.FC<StudioSongEarningsPanelProps> = (
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-sm sm:text-base font-bold text-[var(--text)] flex items-center gap-2">
               <DollarSign className="w-4 h-4 text-[var(--accent-text)]" />
-              <span>{title}</span>
+              <span>{displayTitle}</span>
             </h3>
             {isSynced && (
               <span className="inline-flex items-center gap-1 text-[11px] font-mono text-[var(--accent-text)]">
                 <Radio className="w-3 h-3" />
-                <span>Synced</span>
+                <span>{isNy ? 'Zikugwirizana' : 'Synced'}</span>
               </span>
             )}
           </div>
           <p className="text-xs text-[var(--text-muted)]">
             {subtitle ||
               (isMonetized
-                ? `Synced from Firestore · ${ratePerPlayMwk} MWK per qualifying play`
+                ? isNy
+                  ? `Kuchokera ku Firestore · ${ratePerPlayMwk} MWK pa kuwerenga koyenera`
+                  : `Synced from Firestore · ${ratePerPlayMwk} MWK per qualifying play`
+                : isNy
+                ? 'Kuchokera ku Firestore · Ndalama zimatseguka mukakwaniritsa zofunikira'
                 : 'Synced from Firestore · Earnings unlock automatically when eligibility is met')}
           </p>
         </div>
@@ -109,7 +117,18 @@ export const StudioSongEarningsPanel: React.FC<StudioSongEarningsPanelProps> = (
             >
               <ArrowUpDown className="w-3 h-3" />
               <span>
-                Sort: {sortBy === 'earnings' ? 'Earned' : sortBy === 'plays' ? 'Plays' : 'Newest'}
+                {isNy ? 'Sankhani: ' : 'Sort: '}
+                {sortBy === 'earnings'
+                  ? isNy
+                    ? 'Ndalama'
+                    : 'Earned'
+                  : sortBy === 'plays'
+                  ? isNy
+                    ? 'Zalira'
+                    : 'Plays'
+                  : isNy
+                  ? 'Zatsopano'
+                  : 'Newest'}
               </span>
             </button>
           )}
@@ -127,7 +146,9 @@ export const StudioSongEarningsPanel: React.FC<StudioSongEarningsPanelProps> = (
         <div className="p-6 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-center space-y-2">
           <Music className="w-6 h-6 text-[var(--text-muted)] mx-auto" />
           <p className="text-xs text-[var(--text-muted)]">
-            No songs found yet. Upload a track to see real-time per-song earnings.
+            {isNy
+              ? 'Palibe nyimbo pakadali pano. Kwezani nyimbo kuti muone ndalama zake panthawiyi.'
+              : 'No songs found yet. Upload a track to see real-time per-song earnings.'}
           </p>
         </div>
       ) : (
@@ -153,7 +174,7 @@ export const StudioSongEarningsPanel: React.FC<StudioSongEarningsPanelProps> = (
                         e.stopPropagation();
                         onPlayTrack(track);
                       }}
-                      aria-label={`Play ${track.title}`}
+                      aria-label={`${isNy ? 'Liza' : 'Play'} ${track.title}`}
                       className="absolute inset-0 bg-black/40 flex items-center justify-center text-white opacity-0 hover:opacity-100 transition-opacity cursor-pointer"
                     >
                       <Play className="w-4 h-4 fill-current ml-0.5" />
@@ -167,16 +188,24 @@ export const StudioSongEarningsPanel: React.FC<StudioSongEarningsPanelProps> = (
                       {track.title}
                     </span>
                     <span className="text-[11px] text-[var(--text-muted)]">
-                      · {track.isDraft ? 'Draft' : 'Published'}
+                      · {track.isDraft ? (isNy ? 'Zolembedwa' : 'Draft') : isNy ? 'Zotulutsidwa' : 'Published'}
                     </span>
                   </div>
 
                   <div className="text-[11px] font-mono tabular-nums text-[var(--text-muted)] flex items-center gap-2 flex-wrap">
-                    <span>{effectivePlays.toLocaleString()} plays</span>
+                    <span>
+                      {effectivePlays.toLocaleString()} {isNy ? 'zalira' : 'plays'}
+                    </span>
                     {verifiedLedgerPlays > 0 && (
-                      <span>· {verifiedLedgerPlays.toLocaleString()} verified ledger</span>
+                      <span>
+                        · {verifiedLedgerPlays.toLocaleString()} {isNy ? 'zotsimikizika' : 'verified ledger'}
+                      </span>
                     )}
-                    {isMonetized && totalEarningsMwk > 0 && <span>· {sharePct}% of total</span>}
+                    {isMonetized && totalEarningsMwk > 0 && (
+                      <span>
+                        · {sharePct}% {isNy ? 'pa zonse' : 'of total'}
+                      </span>
+                    )}
                   </div>
 
                   {isMonetized && totalEarningsMwk > 0 && (
@@ -197,7 +226,7 @@ export const StudioSongEarningsPanel: React.FC<StudioSongEarningsPanelProps> = (
                       {earnedMwk.toLocaleString()} MWK
                     </div>
                     <div className="text-[10px] text-[var(--text-muted)] font-mono">
-                      @{ratePerPlayMwk} MWK/play
+                      @{ratePerPlayMwk} {isNy ? 'MWK/nyimbo' : 'MWK/play'}
                     </div>
                   </>
                 ) : (

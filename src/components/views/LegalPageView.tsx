@@ -14,6 +14,7 @@ import React, { useState } from 'react';
 import { LEGAL_CONFIG } from '../../config/legalConfig';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
 
@@ -32,6 +33,8 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
   const { currentUser } = useAuth();
   const { submitContentReportRecord } = useAudio();
   const { showToast } = useToast();
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [dmcaSubmitted, setDmcaSubmitted] = useState(false);
@@ -49,27 +52,51 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
 
   const title =
     docType === 'terms'
-      ? 'Terms of Service'
+      ? t('footer_terms')
       : docType === 'privacy'
-      ? 'Privacy Policy'
-      : 'Copyright & Takedowns';
+      ? t('footer_privacy')
+      : t('footer_copyright');
 
   const summaryBullets =
     docType === 'terms'
-      ? [
-          'Artists keep 100% ownership of their recordings and songs.',
-          'You only upload music and cover art you made or have clear rights to share.',
-          'Listeners stream music for personal enjoyment, not to rip or redistribute files.',
-          'Payouts, where active, are calculated from verified real plays and never fake numbers.',
-          'These terms are governed by the laws of the Republic of Malawi.',
-        ]
+      ? isNy
+        ? [
+            'Oimba amakhala eni ake 100% a nyimbo ndi zojambula zawo.',
+            'Kwezani zokha nyimbo ndi zithunzi zomwe munapanga kapena muli ndi chilolezo chogawana.',
+            'Omvera amamvera nyimbo paokha, osati kubera kapena kugawiranso mafayilo.',
+            'Malipiro amawerengedwa kutengera kumvera kwenikweni kosati nambala zabodza.',
+            'Malamulowa amatsatira malamulo a dziko la Republic of Malawi.',
+          ]
+        : [
+            'Artists keep 100% ownership of their recordings and songs.',
+            'You only upload music and cover art you made or have clear rights to share.',
+            'Listeners stream music for personal enjoyment, not to rip or redistribute files.',
+            'Payouts, where active, are calculated from verified real plays and never fake numbers.',
+            'These terms are governed by the laws of the Republic of Malawi.',
+          ]
       : docType === 'privacy'
+      ? isNy
+        ? [
+            'Timatenga zofunikira zokha zothandiza kuti LOWERVIBE igwire ntchito: akaunti, mindandanda, zokondedwa ndi mbiri yakale.',
+            'Sitigulitsa mbiri yanu kapena manambala anu ku makampani otsatsa malonda.',
+            'Nyimbo zotsitsidwa popanda intaneti zimasungidwa pa chipangizo chanu ndipo mungathe kuzichotsa nthawi iliyonse.',
+            'Mutha kutsitsa deta yanu yonse kapena kufufuta akaunti yanu mu Zokonda za Mbiri Yanu.',
+            'Zimatetezedwa motsatira malamulo a chinsinsi a ku Malawi ndi mayiko ena.',
+          ]
+        : [
+            'We collect only what makes LOWERVIBE work: your account, playlists, likes, and play history.',
+            'We do not sell your listening history or personal contact details to ad networks.',
+            'Offline saved tracks live locally in your browser storage so you can clear them anytime.',
+            'You can download a full JSON copy of your account data or delete your account inside Profile Settings.',
+            'Protected under our data practices aligned with Malawi Electronic Transactions & Cyber Security law and international privacy standards.',
+          ]
+      : isNy
       ? [
-          'We collect only what makes LOWERVIBE work: your account, playlists, likes, and play history.',
-          'We do not sell your listening history or personal contact details to ad networks.',
-          'Offline saved tracks live locally in your browser storage so you can clear them anytime.',
-          'You can download a full JSON copy of your account data or delete your account inside Profile Settings.',
-          'Protected under our data practices aligned with Malawi Electronic Transactions & Cyber Security law and international privacy standards.',
+          'Kwezani zokha nyimbo ndi chithunzi chomwe munapanga kapena muli ndi chilolezo.',
+          'Ngati nyimbo yanu yakwezedwa popanda chilolezo, tumizani pempho loichotsa pansipa.',
+          'Timayang\'anira madandaulo enieni mwachangu ndi kuchotsa nyimbo zobera.',
+          'Kuphwanya ufulu wa nyimbo mobwerezabwereza kumabweretsa kutsekedwa kwa akaunti.',
+          `Mauthenga azamalamulo angatumizidwenso ku ${LEGAL_CONFIG.copyrightEmail}.`,
         ]
       : [
           'Only upload audio and square artwork you created or are licensed to publish.',
@@ -232,14 +259,14 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
               onClick={() => navigate('/account#privacy-data')}
               className="px-4 py-2 rounded-xl text-sm font-semibold border border-[var(--border-strong)] bg-[var(--surface-2)] text-[var(--text)] hover:border-[var(--accent)] transition cursor-pointer"
             >
-              Download my data
+              {isNy ? 'Tsitsani deta yanga' : 'Download my data'}
             </button>
             <button
               type="button"
               onClick={() => navigate('/account#danger-zone')}
               className="px-4 py-2 rounded-xl text-sm font-semibold border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10 transition cursor-pointer"
             >
-              Delete my account
+              {isNy ? 'Fufutani akaunti yanga' : 'Delete my account'}
             </button>
           </div>
           <p className="text-sm text-[var(--text-muted)]">
@@ -285,11 +312,13 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
             <div className="p-5 rounded-2xl border border-[var(--accent)]/40 bg-[var(--surface-2)] space-y-2">
               <div className="flex items-center gap-2 font-bold text-[var(--accent-text)]">
                 <CheckCircle2 className="w-5 h-5" />
-                <span>Takedown notice received</span>
+                <span>{isNy ? 'Pempho lochotsa nyimbo lalandiridwa' : 'Takedown notice received'}</span>
               </div>
               <p className="text-sm text-[var(--text-muted)]">
-                Your copyright claim has been logged for review by LOWERVIBE moderation. Our legal team will follow up
-                at <strong>{claimantEmail}</strong>.
+                {isNy
+                  ? 'Dandaulo lanu la ufulu wa nyimbo lalemba kuti liyang\'aniridwe ndi gulu la LOWERVIBE. Tidzayankha ku '
+                  : 'Your copyright claim has been logged for review by LOWERVIBE moderation. Our legal team will follow up at '}
+                <strong>{claimantEmail}</strong>.
               </p>
             </div>
           ) : (
@@ -297,11 +326,17 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
               onSubmit={async (e) => {
                 e.preventDefault();
                 if (!claimantName.trim() || !claimantEmail.trim() || !workTitle.trim() || !infringingUrl.trim()) {
-                  showToast('Please fill in all required takedown fields');
+                  showToast(
+                    isNy ? 'Chonde lembani madera onse ofunikira' : 'Please fill in all required takedown fields'
+                  );
                   return;
                 }
                 if (!goodFaith) {
-                  showToast('Please confirm the good-faith rights statement');
+                  showToast(
+                    isNy
+                      ? 'Chonde tsimikizirani kuti ndinu mwini wake wa nyimboyi'
+                      : 'Please confirm the good-faith rights statement'
+                  );
                   return;
                 }
                 setDmcaSubmitting(true);
@@ -315,9 +350,11 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
                 setDmcaSubmitting(false);
                 if (res.success) {
                   setDmcaSubmitted(true);
-                  showToast('Copyright takedown request submitted');
+                  showToast(isNy ? 'Pempho lochotsa nyimbo latumizidwa' : 'Copyright takedown request submitted');
                 } else {
-                  showToast(res.error || 'Could not submit copyright takedown request');
+                  showToast(
+                    res.error || (isNy ? 'Sitinathe kutumiza pempho lochotsa nyimbo' : 'Could not submit copyright takedown request')
+                  );
                 }
               }}
               className="space-y-4"
@@ -430,7 +467,7 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
             className="flex items-center gap-1.5 text-sm font-semibold text-[var(--text)] hover:text-[var(--accent-text)] transition cursor-pointer min-h-[44px] pr-2"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Back</span>
+            <span>{t('back')}</span>
           </button>
 
           <span className="text-sm font-bold text-[var(--text)] truncate">{title}</span>
@@ -445,7 +482,7 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
                   : 'text-[var(--text-muted)] hover:text-[var(--text)]'
               }`}
             >
-              Terms
+              {isNy ? 'Malamulo' : 'Terms'}
             </button>
             <button
               type="button"
@@ -456,7 +493,7 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
                   : 'text-[var(--text-muted)] hover:text-[var(--text)]'
               }`}
             >
-              Privacy
+              {isNy ? 'Chinsinsi' : 'Privacy'}
             </button>
             <button
               type="button"
@@ -467,7 +504,7 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
                   : 'text-[var(--text-muted)] hover:text-[var(--text)]'
               }`}
             >
-              Copyright
+              {isNy ? 'Ufulu' : 'Copyright'}
             </button>
           </div>
         </div>
@@ -481,11 +518,14 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
             {docType === 'terms' && <FileText className="w-4 h-4" />}
             {docType === 'privacy' && <Lock className="w-4 h-4" />}
             {docType === 'copyright' && <Copyright className="w-4 h-4" />}
-            <span>{LEGAL_CONFIG.brandName} Legal</span>
+            <span>
+              {LEGAL_CONFIG.brandName} {isNy ? 'Malamulo' : 'Legal'}
+            </span>
           </div>
           <h1 className="text-3xl font-extrabold tracking-tight text-[var(--text)]">{title}</h1>
           <p className="text-sm text-[var(--text-muted)]">
-            Last updated: {LEGAL_CONFIG.lastUpdated} · Jurisdiction: {LEGAL_CONFIG.jurisdiction}
+            {isNy ? 'Zinasinthidwa komaliza:' : 'Last updated:'} {LEGAL_CONFIG.lastUpdated} ·{' '}
+            {isNy ? 'Malamulo a:' : 'Jurisdiction:'} {LEGAL_CONFIG.jurisdiction}
           </p>
         </div>
 
@@ -493,7 +533,7 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
         <section className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-5 sm:p-6 space-y-3">
           <div className="flex items-center gap-2 text-sm font-bold text-[var(--text)]">
             <Shield className="w-4 h-4 text-[var(--accent-text)]" />
-            <span>The short version</span>
+            <span>{isNy ? 'Mwachidule' : 'The short version'}</span>
           </div>
           <ul className="space-y-2 text-[15px] text-[var(--text-muted)]">
             {summaryBullets.map((item, idx) => (
@@ -508,7 +548,7 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
         {/* Table of contents anchor links */}
         <nav aria-label="Document sections" className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-4">
           <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)] mb-2">
-            Sections
+            {isNy ? 'Zigawo' : 'Sections'}
           </div>
           <div className="flex flex-wrap gap-2">
             {activeSections.map((sec) => (
@@ -566,7 +606,7 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
             <div className="flex items-center gap-2">
               <Mail className="w-4 h-4 shrink-0" />
               <span>
-                Questions? Contact{' '}
+                {isNy ? 'Mafunso? Lumikizanani ndi ' : 'Questions? Contact '}
                 <a href={`mailto:${LEGAL_CONFIG.supportEmail}`} className="underline text-[var(--text)]">
                   {LEGAL_CONFIG.supportEmail}
                 </a>
@@ -576,7 +616,9 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docType }) => {
               {LEGAL_CONFIG.physicalAddress}
             </div>
           </div>
-          <span className="shrink-0">Version {LEGAL_CONFIG.currentTermsVersion}</span>
+          <span className="shrink-0">
+            {isNy ? 'Mtundu' : 'Version'} {LEGAL_CONFIG.currentTermsVersion}
+          </span>
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Clock, Disc3, Play, Search, UserCheck, X } from 'lucide-react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { useRouter } from '../../context/RouterContext';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../../utils/artworkFallback';
 import { formatTime } from '../../utils/formatters';
@@ -50,6 +51,8 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
 }) => {
   const { tracks, artists, playlists, playTrack } = useAudio();
   const { currentUser, updateCurrentUser } = useAuth();
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
   const { navigate } = useRouter();
   const [rawQuery, setRawQuery] = useState('');
   const [query, setQuery] = useState('');
@@ -75,8 +78,8 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
   }, [isOpen]);
 
   useEffect(() => {
-    const t = window.setTimeout(() => setQuery(rawQuery), 300);
-    return () => window.clearTimeout(t);
+    const timer = window.setTimeout(() => setQuery(rawQuery), 300);
+    return () => window.clearTimeout(timer);
   }, [rawQuery]);
 
   const recordSearch = (term: string) => {
@@ -94,8 +97,8 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
     if (!q) return { tracks: [], artists: [], playlists: [] };
     return {
       tracks: tracks
-        .filter((t) => !t.isDraft && !t.isDeranked)
-        .filter((t) => fuzzyMatch(q, `${t.title} ${t.artistName} ${t.genre}`))
+        .filter((tItem) => !tItem.isDraft && !tItem.isDeranked)
+        .filter((tItem) => fuzzyMatch(q, `${tItem.title} ${tItem.artistName} ${tItem.genre}`))
         .slice(0, 6),
       artists: artists.filter((a) => fuzzyMatch(q, `${a.name} ${a.handle}`)).slice(0, 4),
       playlists: playlists
@@ -129,12 +132,13 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                 navigate(`/search?q=${encodeURIComponent(rawQuery.trim())}`);
               }
             }}
-            placeholder="Search songs, artists, playlists..."
+            placeholder={t('search_placeholder', 'Search songs, artists, playlists...')}
             className="flex-1 bg-transparent text-sm text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none"
           />
           <button
             type="button"
             onClick={onClose}
+            aria-label={t('close', 'Close')}
             className="p-2 rounded-full bg-[var(--surface-2)] text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -146,7 +150,9 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
             <div className="space-y-4">
               {recentSearches.length > 0 && (
                 <div className="space-y-2">
-                  <div className="text-xs font-bold text-[var(--text-muted)]">Recent</div>
+                  <div className="text-xs font-bold text-[var(--text-muted)]">
+                    {isNy ? 'Zomwe munafufuza posachedwa' : 'Recent'}
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     {recentSearches.map((term) => (
                       <button
@@ -173,20 +179,22 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                 }}
                 className="w-full py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer"
               >
-                Open full search page
+                {isNy ? 'Tsegulani tsamba lonse lofufuzira' : 'Open full search page'}
               </button>
             </div>
           ) : (
             <div className="space-y-4">
               {results.tracks.length === 0 && results.artists.length === 0 && results.playlists.length === 0 ? (
                 <div className="py-8 text-center text-xs text-[var(--text-muted)]">
-                  No matches for "{query}".
+                  {isNy ? `Palibe chapezeka pa "${query}".` : `No matches for "${query}".`}
                 </div>
               ) : (
                 <>
                   {results.artists.length > 0 && (
                     <div className="space-y-2">
-                      <div className="text-xs font-bold text-[var(--text-muted)]">Artists</div>
+                      <div className="text-xs font-bold text-[var(--text-muted)]">
+                        {t('artists', 'Artists')}
+                      </div>
                       <div className="grid grid-cols-2 gap-2">
                         {results.artists.map((a) => (
                           <button
@@ -207,7 +215,9 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                             />
                             <div className="min-w-0">
                               <div className="text-xs font-bold text-[var(--text)] truncate">{a.name}</div>
-                              <div className="text-[10px] text-[var(--text-muted)] truncate">{a.country || 'Artist'}</div>
+                              <div className="text-[10px] text-[var(--text-muted)] truncate">
+                                {a.country || (isNy ? 'Woimba' : 'Artist')}
+                              </div>
                             </div>
                           </button>
                         ))}
@@ -217,32 +227,34 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
 
                   {results.tracks.length > 0 && (
                     <div className="space-y-2">
-                      <div className="text-xs font-bold text-[var(--text-muted)]">Songs</div>
-                      {results.tracks.map((t) => (
+                      <div className="text-xs font-bold text-[var(--text-muted)]">
+                        {t('songs', 'Songs')}
+                      </div>
+                      {results.tracks.map((tr) => (
                         <button
-                          key={t.id}
+                          key={tr.id}
                           type="button"
                           onClick={() => {
                             recordSearch(query);
-                            playTrack(t);
+                            playTrack(tr);
                             onClose();
                           }}
                           className="w-full p-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-between gap-3 text-left cursor-pointer"
                         >
                           <div className="flex items-center gap-2.5 min-w-0">
                             <img
-                              src={t.coverArt || DEFAULT_ARTWORK_SVG}
-                              alt={t.title}
+                              src={tr.coverArt || DEFAULT_ARTWORK_SVG}
+                              alt={tr.title}
                               referrerPolicy="no-referrer"
                               className="w-10 h-10 rounded-lg object-cover shrink-0"
                             />
                             <div className="min-w-0">
-                              <div className="text-xs font-bold text-[var(--text)] truncate">{t.title}</div>
-                              <div className="text-[11px] text-[var(--text-muted)] truncate">{t.artistName}</div>
+                              <div className="text-xs font-bold text-[var(--text)] truncate">{tr.title}</div>
+                              <div className="text-[11px] text-[var(--text-muted)] truncate">{tr.artistName}</div>
                             </div>
                           </div>
                           <span className="text-[11px] font-mono text-[var(--text-muted)] shrink-0">
-                            {formatTime(t.metadata?.Duration || t.durationSeconds || 0)}
+                            {formatTime(tr.metadata?.Duration || tr.durationSeconds || 0)}
                           </span>
                         </button>
                       ))}
@@ -258,7 +270,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                     }}
                     className="w-full py-2.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer"
                   >
-                    See all results
+                    {isNy ? 'Onani zonse zopezeka' : 'See all results'}
                   </button>
                 </>
               )}

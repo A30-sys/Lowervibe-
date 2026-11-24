@@ -2,10 +2,12 @@ import { Heart, Pause, Play, Share2 } from 'lucide-react';
 import React, { useMemo } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { useToast } from '../../context/ToastContext';
 import { matchesLocationFilter } from '../../data/regions';
 import { DEFAULT_ARTWORK_SVG } from '../../utils/artworkFallback';
 import { formatTime, getTrackLikeCount, isTrackLikedByUser } from '../../utils/formatters';
+import { translateGenreCategory } from '../../utils/genreCategories';
 import { LazySlideImage } from '../common/LazySlideImage';
 
 interface HeroFeaturedCardProps {
@@ -31,12 +33,13 @@ export const HeroFeaturedCard: React.FC<HeroFeaturedCardProps> = ({
     selectedCountry,
   } = useAudio();
   const { currentUser, toggleLikeTrack } = useAuth();
+  const { language, t } = useLanguage();
   const { showToast } = useToast();
 
   const { featuredTrack, spotlightLabel } = useMemo(() => {
-    const playableTracks = tracks.filter((t) => !t.isDraft && !t.isDeranked);
+    const playableTracks = tracks.filter((tr) => !tr.isDraft && !tr.isDeranked);
     if (playableTracks.length === 0) {
-      return { featuredTrack: null, spotlightLabel: 'Featured Pick' };
+      return { featuredTrack: null, spotlightLabel: t('featured_pick', 'Featured Pick') };
     }
 
     const activeLocation =
@@ -68,8 +71,8 @@ export const HeroFeaturedCard: React.FC<HeroFeaturedCardProps> = ({
       return {
         featuredTrack: curatedTrack,
         spotlightLabel: activeLocation && activeLocation !== 'Global'
-          ? `Featured Pick · ${activeLocation}`
-          : 'Featured Pick',
+          ? `${t('featured_pick', 'Featured Pick')} · ${activeLocation}`
+          : t('featured_pick', 'Featured Pick'),
       };
     }
 
@@ -80,7 +83,7 @@ export const HeroFeaturedCard: React.FC<HeroFeaturedCardProps> = ({
         const localBest = [...localMatches].sort((a, b) => scoreTrack(b) - scoreTrack(a))[0];
         return {
           featuredTrack: localBest,
-          spotlightLabel: `Featured Pick · ${activeLocation}`,
+          spotlightLabel: `${t('featured_pick', 'Featured Pick')} · ${activeLocation}`,
         };
       }
     }
@@ -89,9 +92,9 @@ export const HeroFeaturedCard: React.FC<HeroFeaturedCardProps> = ({
     const mostTrending = [...playableTracks].sort((a, b) => scoreTrack(b) - scoreTrack(a))[0];
     return {
       featuredTrack: mostTrending,
-      spotlightLabel: 'Most Trending',
+      spotlightLabel: t('trending', 'Most Trending'),
     };
-  }, [tracks, artists, featuredVibe?.trackId, selectedCountry, currentUser?.country]);
+  }, [tracks, artists, featuredVibe?.trackId, selectedCountry, currentUser?.country, t]);
 
   if (!featuredTrack) return null;
 
@@ -110,7 +113,11 @@ export const HeroFeaturedCard: React.FC<HeroFeaturedCardProps> = ({
 
   const handleLike = () => {
     toggleLikeTrack(featuredTrack.id);
-    showToast(isLiked ? 'Removed from Liked songs' : 'Added to Liked songs');
+    showToast(
+      isLiked
+        ? t('removed_from_liked', 'Removed from Liked songs')
+        : t('added_to_liked', 'Added to Liked songs')
+    );
   };
 
   return (
@@ -155,7 +162,7 @@ export const HeroFeaturedCard: React.FC<HeroFeaturedCardProps> = ({
                     onClick={() => onSelectCategory?.(featuredTrack.genre)}
                     className="hover:text-[var(--lv-text)] cursor-pointer"
                   >
-                    {featuredTrack.genre}
+                    {translateGenreCategory(featuredTrack.genre, language)}
                   </button>
                 </>
               )}
@@ -165,7 +172,11 @@ export const HeroFeaturedCard: React.FC<HeroFeaturedCardProps> = ({
 
           {/* Monospace Track Metadata */}
           <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 text-xs font-mono text-[var(--lv-muted)]">
-            <span>{(featuredTrack.plays || 0).toLocaleString()} plays</span>
+            <span>
+              {t('plays_count', '{count} plays', {
+                count: (featuredTrack.plays || 0).toLocaleString(),
+              })}
+            </span>
             <span>·</span>
             <span>{formatTime(featuredTrack.durationSeconds)}</span>
             {featuredTrack.bpm > 0 && (
@@ -186,12 +197,12 @@ export const HeroFeaturedCard: React.FC<HeroFeaturedCardProps> = ({
               {isCurrentPlaying ? (
                 <>
                   <Pause className="w-4 h-4 fill-[#0A0B0A]" />
-                  <span>Pause</span>
+                  <span>{t('pause', 'Pause')}</span>
                 </>
               ) : (
                 <>
                   <Play className="w-4 h-4 fill-[#0A0B0A]" />
-                  <span>Play now</span>
+                  <span>{t('play_now', 'Play now')}</span>
                 </>
               )}
             </button>
@@ -204,7 +215,7 @@ export const HeroFeaturedCard: React.FC<HeroFeaturedCardProps> = ({
                   ? 'bg-rose-500/15 border-rose-500/35 text-rose-500'
                   : 'bg-[var(--lv-elevated)] border-[var(--lv-border)] text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
               }`}
-              aria-label={isLiked ? 'Unlike' : 'Like'}
+              aria-label={isLiked ? t('unlike', 'Unlike') : t('like', 'Like')}
             >
               <Heart className={`w-4 h-4 ${isLiked ? 'fill-rose-500' : ''}`} />
               <span>{likeCount}</span>
@@ -214,8 +225,8 @@ export const HeroFeaturedCard: React.FC<HeroFeaturedCardProps> = ({
               type="button"
               onClick={() => setActiveShareTrack(featuredTrack)}
               className="p-3 rounded-2xl bg-[var(--lv-elevated)] hover:opacity-90 border border-[var(--lv-border)] text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition active:scale-95 min-h-[48px] min-w-[48px] flex items-center justify-center cursor-pointer"
-              title="Share"
-              aria-label="Share featured song"
+              title={t('share', 'Share')}
+              aria-label={t('share', 'Share')}
             >
               <Share2 className="w-4 h-4" />
             </button>
@@ -225,7 +236,7 @@ export const HeroFeaturedCard: React.FC<HeroFeaturedCardProps> = ({
               onClick={onOpenTrackDetails}
               className="px-4 rounded-2xl bg-[var(--lv-elevated)] hover:opacity-90 border border-[var(--lv-border)] text-[var(--lv-text)] text-xs font-semibold transition active:scale-95 min-h-[48px] cursor-pointer"
             >
-              Details
+              {t('track_details', 'Details')}
             </button>
           </div>
         </div>

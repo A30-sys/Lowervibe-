@@ -14,10 +14,12 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useAudio } from '../../context/AudioContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { useRouter } from '../../context/RouterContext';
 import { Artist, Playlist, Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../../utils/artworkFallback';
 import { formatTime } from '../../utils/formatters';
+import { normalizeGenreCategory, translateGenreCategory } from '../../utils/genreCategories';
 
 const RECENT_SEARCHES_KEY = 'lowervibe_recent_searches_v1';
 
@@ -81,6 +83,8 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
     setActiveDetailTrack,
   } = useAudio();
   const { currentRoute, navigate } = useRouter();
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
 
   const initialQuery = currentRoute.searchQuery || '';
   const [rawQuery, setRawQuery] = useState(initialQuery);
@@ -153,7 +157,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
   const trendingGenres = useMemo(() => {
     const counts = new Map<string, { name: string; count: number; plays: number }>();
     publicTracks.forEach((t) => {
-      const g = (t.genre || 'Other').trim();
+      const g = normalizeGenreCategory(t.genre);
       const prev = counts.get(g) || { name: g, count: 0, plays: 0 };
       prev.count += 1;
       prev.plays += t.plays || 0;
@@ -186,7 +190,9 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
         score: Math.max(
           fuzzyScore(q, t.title),
           fuzzyScore(q, t.artistName) * 0.9,
-          fuzzyScore(q, t.genre) * 0.7
+          fuzzyScore(q, t.genre) * 0.7,
+          fuzzyScore(q, normalizeGenreCategory(t.genre)) * 0.7,
+          fuzzyScore(q, translateGenreCategory(t.genre, language)) * 0.7
         ),
       }))
       .filter((x) => x.score > 0)
@@ -213,7 +219,9 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score);
 
-    const scoredGenres = trendingGenres.filter((g) => fuzzyScore(q, g.name) > 0);
+    const scoredGenres = trendingGenres.filter(
+      (g) => fuzzyScore(q, g.name) > 0 || fuzzyScore(q, translateGenreCategory(g.name, language)) > 0
+    );
 
     const bestArtist = scoredArtists[0];
     const bestTrack = scoredTracks[0];
@@ -240,7 +248,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
       matchedGenres: scoredGenres,
       topResult: best,
     };
-  }, [debouncedQuery, publicTracks, artists, playlists, trendingGenres]);
+  }, [debouncedQuery, publicTracks, artists, playlists, trendingGenres, language]);
 
   const totalMatches =
     matchedTracks.length + matchedArtists.length + matchedPlaylists.length + matchedGenres.length;
@@ -254,7 +262,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
           type="text"
           value={rawQuery}
           onChange={(e) => setRawQuery(e.target.value)}
-          placeholder="Search songs, artists, playlists, or genres..."
+          placeholder={t('search_placeholder', 'Search songs, artists, playlists, or genres...')}
           className="w-full pl-12 pr-24 py-3.5 rounded-2xl bg-[var(--surface)] border border-[var(--border)] text-sm text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-text)]"
         />
         {rawQuery && (
@@ -274,7 +282,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
           type="submit"
           className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer"
         >
-          Search
+          {t('search', 'Search')}
         </button>
       </form>
 
@@ -284,13 +292,15 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
           {recentSearches.length > 0 && (
             <section className="space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-bold text-[var(--text)]">Recent searches</h2>
+                <h2 className="text-sm font-bold text-[var(--text)]">
+                  {isNy ? 'Zomwe munasaka posachedwa' : 'Recent searches'}
+                </h2>
                 <button
                   type="button"
                   onClick={clearRecentSearches}
                   className="text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
                 >
-                  Clear all
+                  {isNy ? 'Chotsani zonse' : 'Clear all'}
                 </button>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -314,9 +324,13 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
           )}
 
           <section className="space-y-3">
-            <h2 className="text-sm font-bold text-[var(--text)]">Trending genres</h2>
+            <h2 className="text-sm font-bold text-[var(--text)]">
+              {isNy ? 'Mitundu yotchuka' : 'Trending genres'}
+            </h2>
             {trendingGenres.length === 0 ? (
-              <p className="text-xs text-[var(--text-muted)]">Start typing to search music on LOWERVIBE.</p>
+              <p className="text-xs text-[var(--text-muted)]">
+                {t('search_empty_prompt', 'Start typing to search music on LOWERVIBE.')}
+              </p>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {trendingGenres.map((g) => (
@@ -330,9 +344,13 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                     }}
                     className="p-4 rounded-2xl bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-strong)] text-left transition cursor-pointer space-y-1"
                   >
-                    <div className="text-sm font-bold text-[var(--text)] truncate">{g.name}</div>
+                    <div className="text-sm font-bold text-[var(--text)] truncate">
+                      {translateGenreCategory(g.name, language)}
+                    </div>
                     <div className="text-[11px] text-[var(--text-muted)]">
-                      {g.count} song{g.count === 1 ? '' : 's'}
+                      {t('songs_count_label', `${g.count} song${g.count === 1 ? '' : 's'}`, {
+                        count: g.count,
+                      })}
                     </div>
                   </button>
                 ))}
@@ -346,11 +364,11 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
           {/* Category Filter Chips */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
             {[
-              { id: 'all' as const, label: `All (${totalMatches})` },
-              { id: 'tracks' as const, label: `Songs (${matchedTracks.length})` },
-              { id: 'artists' as const, label: `Artists (${matchedArtists.length})` },
-              { id: 'playlists' as const, label: `Playlists (${matchedPlaylists.length})` },
-              { id: 'genres' as const, label: `Genres (${matchedGenres.length})` },
+              { id: 'all' as const, label: `${t('all', 'All')} (${totalMatches})` },
+              { id: 'tracks' as const, label: `${t('artist_songs', 'Songs')} (${matchedTracks.length})` },
+              { id: 'artists' as const, label: `${t('artists', 'Artists')} (${matchedArtists.length})` },
+              { id: 'playlists' as const, label: `${t('playlists', 'Playlists')} (${matchedPlaylists.length})` },
+              { id: 'genres' as const, label: `${isNy ? 'Mitundu' : 'Genres'} (${matchedGenres.length})` },
             ].map((chip) => (
               <button
                 key={chip.id}
@@ -370,9 +388,13 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
           {totalMatches === 0 ? (
             <div className="p-10 rounded-[24px] bg-[var(--surface)] border border-[var(--border)] text-center space-y-2">
               <Search className="w-8 h-8 text-[var(--text-muted)] mx-auto" />
-              <div className="text-sm font-bold text-[var(--text)]">No results for "{debouncedQuery}"</div>
+              <div className="text-sm font-bold text-[var(--text)]">
+                {isNy ? `Palibe zopezeka za "${debouncedQuery}"` : `No results for "${debouncedQuery}"`}
+              </div>
               <p className="text-xs text-[var(--text-muted)]">
-                Check the spelling or try another artist name, song title, or genre.
+                {isNy
+                  ? 'Yang\'anani kalembedwe kapena yesani dzina lina la woimba, nyimbo kapena mtundu.'
+                  : 'Check the spelling or try another artist name, song title, or genre.'}
               </p>
             </div>
           ) : (
@@ -380,7 +402,9 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
               {/* TOP RESULT */}
               {activeCategory === 'all' && topResult && (
                 <section className="space-y-2.5">
-                  <h2 className="text-sm font-bold text-[var(--text)]">Top result</h2>
+                  <h2 className="text-sm font-bold text-[var(--text)]">
+                    {isNy ? 'Chotsogola' : 'Top result'}
+                  </h2>
                   {topResult.kind === 'artist' ? (
                     <div
                       onClick={() => {
@@ -401,12 +425,13 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                             {topResult.item.name}
                           </div>
                           <div className="text-xs text-[var(--text-muted)]">
-                            Artist · {topResult.item.country || 'Malawi'} · {topResult.item.followersCount || 0} followers
+                            {t('artist', 'Artist')} · {topResult.item.country || 'Malawi'} ·{' '}
+                            {topResult.item.followersCount || 0} {isNy ? 'otsatira' : 'followers'}
                           </div>
                         </div>
                       </div>
                       <span className="px-4 py-2 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold shrink-0">
-                        View artist
+                        {isNy ? 'Onani woimba' : 'View artist'}
                       </span>
                     </div>
                   ) : topResult.kind === 'track' ? (
@@ -430,7 +455,8 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                             {topResult.item.title}
                           </div>
                           <div className="text-xs text-[var(--text-muted)]">
-                            Song · {topResult.item.artistName} · {topResult.item.genre}
+                            {isNy ? 'Nyimbo' : 'Song'} · {topResult.item.artistName} ·{' '}
+                            {translateGenreCategory(topResult.item.genre, language)}
                           </div>
                         </div>
                       </div>
@@ -462,7 +488,10 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                       <div>
                         <div className="text-base font-extrabold text-[var(--text)]">{topResult.item.name}</div>
                         <div className="text-xs text-[var(--text-muted)]">
-                          Playlist · {topResult.item.trackIds.length} songs
+                          {isNy ? 'Mndandanda' : 'Playlist'} ·{' '}
+                          {t('songs_count_label', `${topResult.item.trackIds.length} songs`, {
+                            count: topResult.item.trackIds.length,
+                          })}
                         </div>
                       </div>
                     </div>
@@ -473,48 +502,48 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
               {/* SONGS */}
               {(activeCategory === 'all' || activeCategory === 'tracks') && matchedTracks.length > 0 && (
                 <section className="space-y-2.5">
-                  <h2 className="text-sm font-bold text-[var(--text)]">Songs</h2>
+                  <h2 className="text-sm font-bold text-[var(--text)]">{t('artist_songs', 'Songs')}</h2>
                   <div className="rounded-[20px] bg-[var(--surface)] border border-[var(--border)] divide-y divide-[var(--border)] overflow-hidden">
-                    {matchedTracks.slice(0, activeCategory === 'tracks' ? 30 : 6).map((t) => {
-                      const active = currentTrack?.id === t.id;
+                    {matchedTracks.slice(0, activeCategory === 'tracks' ? 30 : 6).map((tItem) => {
+                      const active = currentTrack?.id === tItem.id;
                       return (
                         <div
-                          key={t.id}
+                          key={tItem.id}
                           onClick={() => {
                             saveSearchTerm(debouncedQuery);
                             if (active) togglePlayPause();
-                            else playTrack(t);
+                            else playTrack(tItem);
                           }}
                           className="p-3.5 flex items-center justify-between gap-3 hover:bg-[var(--surface-2)]/60 transition cursor-pointer"
                         >
                           <div className="flex items-center gap-3 min-w-0">
                             <img
-                              src={t.coverArt || DEFAULT_ARTWORK_SVG}
-                              alt={t.title}
+                              src={tItem.coverArt || DEFAULT_ARTWORK_SVG}
+                              alt={tItem.title}
                               referrerPolicy="no-referrer"
                               className="w-11 h-11 rounded-xl object-cover shrink-0 border border-[var(--border)]"
                             />
                             <div className="min-w-0">
-                              <div className="text-sm font-semibold text-[var(--text)] truncate">{t.title}</div>
+                              <div className="text-sm font-semibold text-[var(--text)] truncate">{tItem.title}</div>
                               <div className="text-xs text-[var(--text-muted)] truncate">
-                                {t.artistName} · {t.genre}
+                                {tItem.artistName} · {translateGenreCategory(tItem.genre, language)}
                               </div>
                             </div>
                           </div>
                           <div className="flex items-center gap-3 shrink-0">
                             <span className="text-xs font-mono text-[var(--text-muted)]">
-                              {formatTime(t.metadata?.Duration || t.durationSeconds || 0)}
+                              {formatTime(tItem.metadata?.Duration || tItem.durationSeconds || 0)}
                             </span>
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setActiveDetailTrack(t);
-                                onOpenTrackDetails(t);
+                                setActiveDetailTrack(tItem);
+                                onOpenTrackDetails(tItem);
                               }}
                               className="px-2.5 py-1 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-semibold text-[var(--text)] cursor-pointer"
                             >
-                              Details
+                              {isNy ? 'Zambiri' : 'Details'}
                             </button>
                           </div>
                         </div>
@@ -527,7 +556,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
               {/* ARTISTS */}
               {(activeCategory === 'all' || activeCategory === 'artists') && matchedArtists.length > 0 && (
                 <section className="space-y-2.5">
-                  <h2 className="text-sm font-bold text-[var(--text)]">Artists</h2>
+                  <h2 className="text-sm font-bold text-[var(--text)]">{t('artists', 'Artists')}</h2>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                     {matchedArtists.slice(0, 8).map((a) => (
                       <div
@@ -547,7 +576,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                         <div>
                           <div className="text-xs font-bold text-[var(--text)] truncate">{a.name}</div>
                           <div className="text-[11px] text-[var(--text-muted)] truncate">
-                            {a.country || 'Artist'}
+                            {a.country || t('artist', 'Artist')}
                           </div>
                         </div>
                       </div>
@@ -559,7 +588,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
               {/* PLAYLISTS */}
               {(activeCategory === 'all' || activeCategory === 'playlists') && matchedPlaylists.length > 0 && (
                 <section className="space-y-2.5">
-                  <h2 className="text-sm font-bold text-[var(--text)]">Playlists</h2>
+                  <h2 className="text-sm font-bold text-[var(--text)]">{t('playlists', 'Playlists')}</h2>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {matchedPlaylists.map((pl) => (
                       <div
@@ -579,7 +608,10 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                         <div className="min-w-0">
                           <div className="text-sm font-bold text-[var(--text)] truncate">{pl.name}</div>
                           <div className="text-xs text-[var(--text-muted)]">
-                            {pl.trackIds.length} songs · {pl.creatorName}
+                            {t('songs_count_label', `${pl.trackIds.length} songs`, {
+                              count: pl.trackIds.length,
+                            })}{' '}
+                            · {pl.creatorName}
                           </div>
                         </div>
                       </div>
@@ -591,7 +623,9 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
               {/* GENRES */}
               {(activeCategory === 'all' || activeCategory === 'genres') && matchedGenres.length > 0 && (
                 <section className="space-y-2.5">
-                  <h2 className="text-sm font-bold text-[var(--text)]">Albums &amp; Genres</h2>
+                  <h2 className="text-sm font-bold text-[var(--text)]">
+                    {isNy ? 'Ma Alubamu & Mitundu' : 'Albums & Genres'}
+                  </h2>
                   <div className="flex flex-wrap gap-2">
                     {matchedGenres.map((g) => (
                       <button
@@ -600,7 +634,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                         onClick={() => navigate(`/discover?genre=${encodeURIComponent(g.name)}`)}
                         className="px-4 py-2 rounded-full bg-[var(--surface)] border border-[var(--border)] text-xs font-bold text-[var(--text)] cursor-pointer"
                       >
-                        {g.name} ({g.count})
+                        {translateGenreCategory(g.name, language)} ({g.count})
                       </button>
                     ))}
                   </div>

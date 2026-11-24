@@ -29,11 +29,13 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { useLanguage } from '../../context/LanguageContext';
 import { db } from '../../services/firebase';
 import { Track } from '../../types';
 import { CountUpValue } from './CountUpValue';
 import { formatTime } from '../../utils/formatters';
 import { DEFAULT_ARTWORK_SVG } from '../../utils/artworkFallback';
+import { translateGenreCategory } from '../../utils/genreCategories';
 
 interface StudioStatsTabProps {
   artistId?: string;
@@ -68,6 +70,8 @@ export const StudioStatsTab: React.FC<StudioStatsTabProps> = ({
   onOpenTrackDetails,
   onGoToUpload,
 }) => {
+  const { language } = useLanguage();
+  const isNy = language === 'ny';
   const [liveArtistTracks, setLiveArtistTracks] = useState<Track[] | null>(null);
   const [chartMode, setChartMode] = useState<'plays_likes' | 'reach'>('plays_likes');
 
@@ -172,22 +176,26 @@ export const StudioStatsTab: React.FC<StudioStatsTabProps> = ({
         <div className="w-14 h-14 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center mx-auto text-[var(--accent-text)]">
           <BarChart3 className="w-7 h-7" />
         </div>
-        <div className="space-y-1">
-          <h3 className="text-lg font-bold text-[var(--text)]">No analytics yet</h3>
-          <p className="text-xs text-[var(--text-muted)] max-w-md mx-auto">
-            Upload your first track to see real-time plays, likes, and listener regions.
-          </p>
+          <div className="space-y-1">
+            <h3 className="text-lg font-bold text-[var(--text)]">
+              {isNy ? 'Palibe ziwerengero pakadali pano' : 'No analytics yet'}
+            </h3>
+            <p className="text-xs text-[var(--text-muted)] max-w-md mx-auto">
+              {isNy
+                ? 'Kwezani nyimbo yanu yoyamba kuti muone kuwerenga, okonda ndi maiko omwe akumvera panthawiyi.'
+                : 'Upload your first track to see real-time plays, likes, and listener regions.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onGoToUpload}
+            className="px-5 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer"
+          >
+            {isNy ? 'Kwezani nyimbo' : 'Upload track'}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onGoToUpload}
-          className="px-5 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer"
-        >
-          Upload track
-        </button>
-      </div>
-    );
-  }
+      );
+    }
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -195,7 +203,7 @@ export const StudioStatsTab: React.FC<StudioStatsTabProps> = ({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="p-4 rounded-[20px] bg-[var(--surface)] border border-[var(--border)] space-y-1">
           <div className="flex items-center justify-between text-[11px] font-semibold text-[var(--text-muted)]">
-            <span>Total plays</span>
+            <span>{isNy ? 'Kuwerenga konke' : 'Total plays'}</span>
             <Play className="w-3.5 h-3.5 text-[var(--accent-text)]" />
           </div>
           <div className="text-2xl font-extrabold text-[var(--text)] tabular-nums">
@@ -205,7 +213,7 @@ export const StudioStatsTab: React.FC<StudioStatsTabProps> = ({
 
         <div className="p-4 rounded-[20px] bg-[var(--surface)] border border-[var(--border)] space-y-1">
           <div className="flex items-center justify-between text-[11px] font-semibold text-[var(--text-muted)]">
-            <span>Unique likes</span>
+            <span>{isNy ? 'Okonda nyimbo' : 'Unique likes'}</span>
             <Heart className="w-3.5 h-3.5 text-[var(--violet)]" />
           </div>
           <div className="text-2xl font-extrabold text-[var(--text)] tabular-nums">
@@ -215,7 +223,7 @@ export const StudioStatsTab: React.FC<StudioStatsTabProps> = ({
 
         <div className="p-4 rounded-[20px] bg-[var(--surface)] border border-[var(--border)] space-y-1">
           <div className="flex items-center justify-between text-[11px] font-semibold text-[var(--text-muted)]">
-            <span>Tracks</span>
+            <span>{isNy ? 'Nyimbo' : 'Tracks'}</span>
             <Disc3 className="w-3.5 h-3.5 text-[var(--text-muted)]" />
           </div>
           <div className="text-2xl font-extrabold text-[var(--text)] tabular-nums">
@@ -225,7 +233,15 @@ export const StudioStatsTab: React.FC<StudioStatsTabProps> = ({
 
         <div className="p-4 rounded-[20px] bg-[var(--surface)] border border-[var(--border)] space-y-1">
           <div className="flex items-center justify-between text-[11px] font-semibold text-[var(--text-muted)]">
-            <span>{isMonetized ? 'Total Earnings' : 'Regions'}</span>
+            <span>
+              {isMonetized
+                ? isNy
+                  ? 'Ndalama Zonse'
+                  : 'Total Earnings'
+                : isNy
+                ? 'Madera'
+                : 'Regions'}
+            </span>
             {isMonetized ? (
               <TrendingUp className="w-3.5 h-3.5 text-[var(--accent-text)]" />
             ) : (
@@ -248,10 +264,12 @@ export const StudioStatsTab: React.FC<StudioStatsTabProps> = ({
           <div>
             <h3 className="text-base font-bold text-[var(--text)] flex items-center gap-2">
               <Activity className="w-4 h-4 text-[var(--accent-text)]" />
-              <span>Track performance</span>
+              <span>{isNy ? 'Mmene nyimbo zikuyendera' : 'Track performance'}</span>
             </h3>
             <p className="text-xs text-[var(--text-muted)]">
-              Updated live from stored play and like events
+              {isNy
+                ? 'Zimasintha panthawiyi kutengera kuwerenga ndi kukonda kwenikweni'
+                : 'Updated live from stored play and like events'}
             </p>
           </div>
 
@@ -265,7 +283,7 @@ export const StudioStatsTab: React.FC<StudioStatsTabProps> = ({
                   : 'text-[var(--text-muted)]'
               }`}
             >
-              Plays &amp; Likes
+              {isNy ? 'Zalira & Okonda' : 'Plays & Likes'}
             </button>
             <button
               type="button"
@@ -276,7 +294,7 @@ export const StudioStatsTab: React.FC<StudioStatsTabProps> = ({
                   : 'text-[var(--text-muted)]'
               }`}
             >
-              Top Regions
+              {isNy ? 'Maiko Otsogola' : 'Top Regions'}
             </button>
           </div>
         </div>
@@ -306,23 +324,29 @@ export const StudioStatsTab: React.FC<StudioStatsTabProps> = ({
                     return (
                       <div className="p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-xl text-xs space-y-1">
                         <div className="font-bold text-[var(--text)]">{row.fullTitle}</div>
-                        <div className="text-[var(--text-muted)]">Plays: {row.plays.toLocaleString()}</div>
-                        <div className="text-[var(--text-muted)]">Likes: {row.likes.toLocaleString()}</div>
+                        <div className="text-[var(--text-muted)]">
+                          {isNy ? 'Zalira:' : 'Plays:'} {row.plays.toLocaleString()}
+                        </div>
+                        <div className="text-[var(--text-muted)]">
+                          {isNy ? 'Okonda:' : 'Likes:'} {row.likes.toLocaleString()}
+                        </div>
                       </div>
                     );
                   }}
                 />
-                <Bar dataKey="plays" name="Plays" radius={[6, 6, 0, 0]} maxBarSize={38}>
+                <Bar dataKey="plays" name={isNy ? 'Zalira' : 'Plays'} radius={[6, 6, 0, 0]} maxBarSize={38}>
                   {trackChartData.map((_, idx) => (
                     <Cell key={idx} fill={idx === 0 ? '#C6FF3D' : '#7C5CFF'} />
                   ))}
                 </Bar>
-                <Bar dataKey="likes" name="Likes" fill="#A1A1AA" radius={[6, 6, 0, 0]} maxBarSize={24} />
+                <Bar dataKey="likes" name={isNy ? 'Okonda' : 'Likes'} fill="#A1A1AA" radius={[6, 6, 0, 0]} maxBarSize={24} />
               </BarChart>
             </ResponsiveContainer>
           ) : regionChartData.length === 0 ? (
             <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">
-              No country play breakdown recorded yet.
+              {isNy
+                ? 'Palibe deta ya maiko yomwe yasungidwa pakadali pano.'
+                : 'No country play breakdown recorded yet.'}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -353,7 +377,9 @@ export const StudioStatsTab: React.FC<StudioStatsTabProps> = ({
                     return (
                       <div className="p-2.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-xl text-xs">
                         <div className="font-bold text-[var(--text)]">{row.name}</div>
-                        <div className="text-[var(--text-muted)]">{row.plays.toLocaleString()} plays</div>
+                        <div className="text-[var(--text-muted)]">
+                          {row.plays.toLocaleString()} {isNy ? 'zalira' : 'plays'}
+                        </div>
                       </div>
                     );
                   }}
@@ -376,7 +402,9 @@ export const StudioStatsTab: React.FC<StudioStatsTabProps> = ({
         <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between">
           <h3 className="text-sm font-bold text-[var(--text)] flex items-center gap-2">
             <Disc3 className="w-4 h-4 text-[var(--accent-text)]" />
-            <span>Tracks ({artistTracks.length})</span>
+            <span>
+              {isNy ? 'Nyimbo' : 'Tracks'} ({artistTracks.length})
+            </span>
           </h3>
         </div>
 
@@ -420,7 +448,7 @@ export const StudioStatsTab: React.FC<StudioStatsTabProps> = ({
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-[var(--text)] truncate">{track.title}</div>
                     <div className="text-[11px] text-[var(--text-muted)] truncate flex items-center gap-2">
-                      <span>{track.genre}</span>
+                      <span>{translateGenreCategory(track.genre, language)}</span>
                       <span>•</span>
                       <span className="font-mono flex items-center gap-1">
                         <Clock className="w-3 h-3" />
@@ -433,19 +461,21 @@ export const StudioStatsTab: React.FC<StudioStatsTabProps> = ({
                 <div className="flex items-center gap-4 text-xs font-mono tabular-nums shrink-0">
                   <div className="text-right">
                     <div className="font-bold text-[var(--text)]">{(track.plays || 0).toLocaleString()}</div>
-                    <div className="text-[10px] text-[var(--text-muted)]">Plays</div>
+                    <div className="text-[10px] text-[var(--text-muted)]">{isNy ? 'Zalira' : 'Plays'}</div>
                   </div>
                   <div className="text-right hidden sm:block">
                     <div className="font-bold text-[var(--text)]">{(track.likes || 0).toLocaleString()}</div>
-                    <div className="text-[10px] text-[var(--text-muted)]">Likes</div>
+                    <div className="text-[10px] text-[var(--text-muted)]">{isNy ? 'Okonda' : 'Likes'}</div>
                   </div>
                   <div className="text-right min-w-[78px]">
                     <div className={`font-bold ${isMonetized ? 'text-[var(--accent-text)]' : 'text-[var(--text-muted)]'}`}>
                       {isMonetized
                         ? `${Math.round((track.plays || 0) * ratePerPlayMwk).toLocaleString()} MWK`
+                        : isNy
+                        ? 'Zotsekedwa'
                         : 'Locked'}
                     </div>
-                    <div className="text-[10px] text-[var(--text-muted)]">Earned</div>
+                    <div className="text-[10px] text-[var(--text-muted)]">{isNy ? 'Zopeza' : 'Earned'}</div>
                   </div>
                 </div>
               </div>

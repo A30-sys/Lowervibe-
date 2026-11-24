@@ -1,7 +1,9 @@
 import { Disc3 } from 'lucide-react';
 import React, { useMemo } from 'react';
 import { useAudio } from '../../context/AudioContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { matchesLocationFilter } from '../../data/regions';
+import { normalizeGenreCategory, translateGenreCategory } from '../../utils/genreCategories';
 
 interface VibeTrendsShelfProps {
   onFilterVibe: (category: string) => void;
@@ -9,13 +11,14 @@ interface VibeTrendsShelfProps {
 
 export const VibeTrendsShelf: React.FC<VibeTrendsShelfProps> = ({ onFilterVibe }) => {
   const { tracks, selectedCountry } = useAudio();
+  const { language, t } = useLanguage();
 
   const hasCountryScope = Boolean(
     selectedCountry && selectedCountry !== 'Global' && selectedCountry !== 'Africa'
   );
 
   const genres = useMemo(() => {
-    const publicTracks = tracks.filter((t) => !t.isDraft && !t.isDeranked && Boolean(t.genre));
+    const publicTracks = tracks.filter((tr) => !tr.isDraft && !tr.isDeranked && Boolean(tr.genre));
     if (publicTracks.length === 0) return [];
 
     const byGenre = new Map<
@@ -24,8 +27,8 @@ export const VibeTrendsShelf: React.FC<VibeTrendsShelfProps> = ({ onFilterVibe }
     >();
 
     for (const track of publicTracks) {
-      const name = track.genre.trim();
-      if (!name) continue;
+      const name = normalizeGenreCategory(track.genre);
+      if (!name || name === 'Other') continue;
       const existing = byGenre.get(name) || { name, count: 0, totalPlays: 0, localScore: 0 };
       const plays = track.plays || 0;
       const isLocal = hasCountryScope && matchesLocationFilter(track.region, selectedCountry);
@@ -46,12 +49,12 @@ export const VibeTrendsShelf: React.FC<VibeTrendsShelfProps> = ({ onFilterVibe }
     <section className="space-y-4">
       <div>
         <h2 className="text-lg sm:text-xl font-extrabold font-heading text-[var(--lv-text)]">
-          Browse by genre
+          {t('vibe_frequencies', 'Browse by Genre')}
         </h2>
         <p className="text-xs text-[var(--lv-muted)]">
           {hasCountryScope
-            ? `Popular genres in ${selectedCountry}`
-            : 'Sounds active across the catalog'}
+            ? t('trending_in_country', 'Trending in {country}', { country: selectedCountry })
+            : t('vibe_subheading', 'Explore sounds across Malawi, Nigeria, and Africa')}
         </p>
       </div>
 
@@ -66,14 +69,19 @@ export const VibeTrendsShelf: React.FC<VibeTrendsShelfProps> = ({ onFilterVibe }
             <div className="flex items-center justify-between gap-2">
               <Disc3 className="w-4 h-4 text-[var(--lv-violet)] shrink-0" />
               <span className="text-[11px] font-mono text-[var(--lv-muted)]">
-                {genre.count} {genre.count === 1 ? 'song' : 'songs'}
+                {genre.count}{' '}
+                {genre.count === 1
+                  ? t('song_singular', 'song')
+                  : t('song_plural', 'songs')}
               </span>
             </div>
             <div className="font-bold text-sm text-[var(--lv-text)] line-clamp-1">
-              {genre.name}
+              {translateGenreCategory(genre.name, language)}
             </div>
             <div className="text-[11px] font-mono text-[var(--lv-muted)]">
-              {genre.totalPlays.toLocaleString()} plays
+              {t('plays_count', '{count} plays', {
+                count: genre.totalPlays.toLocaleString(),
+              })}
             </div>
           </button>
         ))}

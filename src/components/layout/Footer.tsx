@@ -1,5 +1,7 @@
-import { Instagram, Music2, Twitter, Youtube } from 'lucide-react';
+import { Globe, Instagram, Music2, Twitter, Youtube } from 'lucide-react';
 import React from 'react';
+import { useAuth } from '../../context/AuthContext';
+import { LANGUAGES, useLanguage } from '../../context/LanguageContext';
 import { LowerVibeLogo } from '../brand/LowerVibeLogo';
 
 interface FooterProps {
@@ -14,6 +16,9 @@ const SOCIAL_LINKS = [
 ];
 
 export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
+  const { language, setLanguage, t } = useLanguage();
+  const { updateUserSettings } = useAuth();
+
   return (
     <footer className="mt-16 pt-10 pb-4 border-t border-[var(--border)] text-[var(--text-muted)] transition-colors duration-200">
       <div className="space-y-8">
@@ -21,11 +26,43 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
           <div className="space-y-2 max-w-md">
             <LowerVibeLogo size="md" showTagline={false} />
             <p className="text-xs sm:text-sm text-[var(--text-muted)] leading-relaxed">
-              Independent music from Malawi, Nigeria, and across Africa. Built for listeners and artists everywhere.
+              {t(
+                'footer_tagline',
+                'Independent music from Malawi, Nigeria, and across Africa. Built for listeners and artists everywhere.'
+              )}
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* 1-Tap Language Switcher (English / Chichewa) */}
+            <div
+              className="flex items-center gap-1 p-1 rounded-2xl bg-[var(--surface)] border border-[var(--border)] min-h-[44px]"
+              role="group"
+              aria-label={t('footer_language', 'Language')}
+            >
+              <Globe className="w-3.5 h-3.5 text-[var(--accent-text)] ml-2 mr-1 shrink-0" />
+              {LANGUAGES.map((opt) => {
+                const active = language === opt.code;
+                return (
+                  <button
+                    key={opt.code}
+                    type="button"
+                    onClick={() => {
+                      setLanguage(opt.code);
+                      void updateUserSettings({ appearance: { language: opt.code } });
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer min-h-[36px] whitespace-nowrap ${
+                      active
+                        ? 'bg-[var(--accent)] text-[var(--accent-contrast)] font-bold'
+                        : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+
             {SOCIAL_LINKS.map((s) => {
               const Icon = s.icon;
               return (
@@ -46,7 +83,9 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 pt-6 border-t border-[var(--border)] text-xs">
           <div className="space-y-2.5">
-            <h4 className="font-semibold text-[var(--text)] text-xs">Explore</h4>
+            <h4 className="font-semibold text-[var(--text)] text-xs">
+              {t('footer_explore', 'Explore')}
+            </h4>
             <ul className="space-y-2">
               <li>
                 <button
@@ -54,7 +93,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   onClick={() => onNavigate?.('/')}
                   className="hover:text-[var(--text)] transition cursor-pointer text-left"
                 >
-                  Home
+                  {t('home', 'Home')}
                 </button>
               </li>
               <li>
@@ -63,7 +102,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   onClick={() => onNavigate?.('/search')}
                   className="hover:text-[var(--text)] transition cursor-pointer text-left"
                 >
-                  Search music
+                  {t('footer_search_music', 'Search music')}
                 </button>
               </li>
               <li>
@@ -72,7 +111,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   onClick={() => onNavigate?.('/artists')}
                   className="hover:text-[var(--text)] transition cursor-pointer text-left"
                 >
-                  Artists
+                  {t('artists', 'Artists')}
                 </button>
               </li>
               <li>
@@ -81,14 +120,16 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   onClick={() => onNavigate?.('/library')}
                   className="hover:text-[var(--text)] transition cursor-pointer text-left"
                 >
-                  Your Library
+                  {t('footer_your_library', 'Your Library')}
                 </button>
               </li>
             </ul>
           </div>
 
           <div className="space-y-2.5">
-            <h4 className="font-semibold text-[var(--text)] text-xs">Artists</h4>
+            <h4 className="font-semibold text-[var(--text)] text-xs">
+              {t('footer_artists', 'Artists')}
+            </h4>
             <ul className="space-y-2">
               <li>
                 <button
@@ -96,7 +137,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   onClick={() => onNavigate?.('/artistcreator')}
                   className="hover:text-[var(--text)] transition cursor-pointer text-left"
                 >
-                  Artist Creator
+                  {t('artist_creator', 'Artist Creator')}
                 </button>
               </li>
               <li>
@@ -105,14 +146,16 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   onClick={() => onNavigate?.('/account')}
                   className="hover:text-[var(--text)] transition cursor-pointer text-left"
                 >
-                  Your Profile
+                  {t('footer_your_profile', 'Your Profile')}
                 </button>
               </li>
             </ul>
           </div>
 
           <div className="space-y-2.5">
-            <h4 className="font-semibold text-[var(--text)] text-xs">Legal</h4>
+            <h4 className="font-semibold text-[var(--text)] text-xs">
+              {t('footer_legal', 'Legal')}
+            </h4>
             <ul className="space-y-2">
               <li>
                 <button
@@ -120,7 +163,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   onClick={() => onNavigate?.('/terms')}
                   className="hover:text-[var(--text)] transition cursor-pointer text-left"
                 >
-                  Terms of Service
+                  {t('footer_terms', 'Terms of Service')}
                 </button>
               </li>
               <li>
@@ -129,7 +172,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   onClick={() => onNavigate?.('/privacy')}
                   className="hover:text-[var(--text)] transition cursor-pointer text-left"
                 >
-                  Privacy Policy
+                  {t('footer_privacy', 'Privacy Policy')}
                 </button>
               </li>
               <li>
@@ -138,14 +181,16 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   onClick={() => onNavigate?.('/copyright')}
                   className="hover:text-[var(--text)] transition cursor-pointer text-left"
                 >
-                  Copyright &amp; Takedown
+                  {t('footer_copyright', 'Copyright & Takedown')}
                 </button>
               </li>
             </ul>
           </div>
 
           <div className="space-y-2.5">
-            <h4 className="font-semibold text-[var(--text)] text-xs">Contact</h4>
+            <h4 className="font-semibold text-[var(--text)] text-xs">
+              {t('footer_contact', 'Contact')}
+            </h4>
             <address className="not-italic space-y-1.5 leading-relaxed text-[var(--text-muted)]">
               <div className="font-semibold text-[var(--text)]">LOWERVIBE Media House</div>
               <div>Nsanje, M1 Road</div>
@@ -155,7 +200,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   href="mailto:odulamw@gmail.com"
                   className="hover:text-[var(--accent-text)] underline"
                 >
-                  Support: odulamw@gmail.com
+                  odulamw@gmail.com
                 </a>
               </div>
             </address>
@@ -167,7 +212,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
             <Music2 className="w-3.5 h-3.5 text-[var(--violet)]" />
             <span>&copy; {new Date().getFullYear()} LOWERVIBE</span>
           </div>
-          <span>Built by brownjnr</span>
+          <span>{t('footer_built_by', 'Built by brownjnr')}</span>
         </div>
       </div>
     </footer>

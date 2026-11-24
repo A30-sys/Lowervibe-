@@ -19,10 +19,12 @@ import {
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
+import { LANGUAGES, useLanguage } from '../../context/LanguageContext';
 import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
 import { detectDefaultCountry } from '../../data/regions';
 import { DEFAULT_AVATAR_SVG } from '../../utils/artworkFallback';
+import { translateGenreCategory } from '../../utils/genreCategories';
 import { LowerVibeLogo } from '../brand/LowerVibeLogo';
 import { RegionSelect } from '../common/RegionSelect';
 
@@ -43,11 +45,11 @@ const SIGNUP_STARTER_GENRES = [
 
 type GenderOption = 'male' | 'female' | 'non-binary' | 'prefer_not_to_say';
 
-const GENDER_OPTIONS: Array<{ value: GenderOption; label: string }> = [
-  { value: 'male', label: 'Male' },
-  { value: 'female', label: 'Female' },
-  { value: 'non-binary', label: 'Non-binary' },
-  { value: 'prefer_not_to_say', label: 'Prefer not to say' },
+const getGenderOptions = (isNy: boolean): Array<{ value: GenderOption; label: string }> => [
+  { value: 'male', label: isNy ? 'Mwamuna' : 'Male' },
+  { value: 'female', label: isNy ? 'Mkazi' : 'Female' },
+  { value: 'non-binary', label: isNy ? 'Zina' : 'Non-binary' },
+  { value: 'prefer_not_to_say', label: isNy ? 'Osafuna kunena' : 'Prefer not to say' },
 ];
 
 const DIAL_CODES = [
@@ -114,6 +116,9 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
   const { artists, tracks, setSelectedCountry } = useAudio();
   const { navigate } = useRouter();
   const { showToast } = useToast();
+  const { language, setLanguage, t } = useLanguage();
+  const isNy = language === 'ny';
+  const genderOptions = getGenderOptions(isNy);
 
   const [screen, setScreen] = useState<AuthScreen>(() => {
     if (initialMode === 'login') return 'email_signin';
@@ -154,7 +159,16 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
   const [otpResendSeconds, setOtpResendSeconds] = useState(60);
   const otpInputsRef = useRef<(HTMLInputElement | null)[]>([]);
 
-  const passwordChecks = useMemo(() => getPasswordChecks(password), [password]);
+  const passwordChecks = useMemo(() => {
+    const raw = getPasswordChecks(password);
+    const labelMap: Record<string, string> = {
+      Weak: isNy ? 'Yofooka' : 'Weak',
+      Fair: isNy ? 'Yapakatikati' : 'Fair',
+      Good: isNy ? 'Yabwino' : 'Good',
+      Strong: isNy ? 'Yolimba' : 'Strong',
+    };
+    return { ...raw, label: raw.label ? labelMap[raw.label] || raw.label : '' };
+  }, [password, isNy]);
 
   const genrePool = useMemo(() => {
     const liveGenres = Array.from(
@@ -245,7 +259,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
     const res = await signInWithGoogle(true);
     setLoading(false);
     if (res.success) {
-      showToast('Signed in with Google');
+      showToast(isNy ? 'Mwalowa ndi Google' : 'Signed in with Google');
       finishAuthSuccess();
     } else if (res.error) {
       setError(res.error);
@@ -261,11 +275,11 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
 
     const cleanEmail = email.trim();
     if (!cleanEmail || !cleanEmail.includes('@')) {
-      setError('Enter a valid email address.');
+      setError(isNy ? 'Lembani imelo yolondola.' : 'Enter a valid email address.');
       return;
     }
     if (!password) {
-      setError('Enter your password.');
+      setError(isNy ? 'Lembani mawu achinsinsi anu.' : 'Enter your password.');
       return;
     }
 
@@ -277,13 +291,17 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
       if (res.needsVerification) {
         setResendSeconds(60);
         setScreen('verify_inbox');
-        setInfo('Please verify your email address to unlock all actions.');
+        setInfo(
+          isNy
+            ? 'Chonde tsimikizirani imelo yanu kuti mugwiritse ntchito zinthu zonse.'
+            : 'Please verify your email address to unlock all actions.'
+        );
         return;
       }
-      showToast('Welcome back');
+      showToast(isNy ? 'Takulandirani kachiwiri' : 'Welcome back');
       finishAuthSuccess();
     } else {
-      setError(res.error || 'Could not sign in.');
+      setError(res.error || (isNy ? 'Sitinathe kulowa.' : 'Could not sign in.'));
       setErrorCode(res.errorCode || '');
     }
   };
@@ -295,19 +313,31 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
     const cleanEmail = email.trim();
     const displayName = role === 'artist' ? stageName.trim() || name.trim() : name.trim();
     if (!displayName) {
-      setError(role === 'artist' ? 'Enter your artist or stage name.' : 'Enter your name.');
+      setError(
+        role === 'artist'
+          ? isNy
+            ? 'Lembani dzina lanu la woimba kapena la pasiteji.'
+            : 'Enter your artist or stage name.'
+          : isNy
+          ? 'Lembani dzina lanu.'
+          : 'Enter your name.'
+      );
       return;
     }
     if (!cleanEmail || !cleanEmail.includes('@')) {
-      setError('Enter a valid email address.');
+      setError(isNy ? 'Lembani imelo yolondola.' : 'Enter a valid email address.');
       return;
     }
     if (!passwordChecks.isValid) {
-      setError('Password needs at least 8 characters with letters and a number.');
+      setError(
+        isNy
+          ? 'Mawu achinsinsi ayenera kukhala ndi zilembo zosachepera 8 ndi nambala.'
+          : 'Password needs at least 8 characters with letters and a number.'
+      );
       return;
     }
     if (password !== confirmPassword) {
-      setError('Passwords do not match.');
+      setError(isNy ? 'Mawu achinsinsi sakufanana.' : 'Passwords do not match.');
       return;
     }
     setSignupStep(2);
@@ -317,12 +347,12 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
     setError('');
     setErrorCode('');
     if (!gender) {
-      setError('Choose your gender option to continue.');
+      setError(isNy ? 'Sankhani jenda yanu kuti mupitilize.' : 'Choose your gender option to continue.');
       return;
     }
     const parsedAge = Number(age);
     if (!age.trim() || !Number.isFinite(parsedAge) || parsedAge < 13 || parsedAge > 120) {
-      setError('Enter a valid age (minimum 13 years old).');
+      setError(isNy ? 'Lembani zaka zolondola (zosachepera 13).' : 'Enter a valid age (minimum 13 years old).');
       return;
     }
     setSignupStep(3);
@@ -340,30 +370,46 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
 
     if (!displayName) {
       setSignupStep(1);
-      setError(role === 'artist' ? 'Enter your artist or stage name.' : 'Enter your name.');
+      setError(
+        role === 'artist'
+          ? isNy
+            ? 'Lembani dzina lanu la woimba kapena la pasiteji.'
+            : 'Enter your artist or stage name.'
+          : isNy
+          ? 'Lembani dzina lanu.'
+          : 'Enter your name.'
+      );
       return;
     }
     if (!cleanEmail || !cleanEmail.includes('@')) {
       setSignupStep(1);
-      setError('Enter a valid email address.');
+      setError(isNy ? 'Lembani imelo yolondola.' : 'Enter a valid email address.');
       return;
     }
     if (!passwordChecks.isValid || password !== confirmPassword) {
       setSignupStep(1);
-      setError('Check your password details.');
+      setError(isNy ? 'Yang\'anani mawu achinsinsi anu.' : 'Check your password details.');
       return;
     }
     if (!gender || !Number.isFinite(parsedAge) || parsedAge < 13 || parsedAge > 120) {
       setSignupStep(2);
-      setError('Select your gender and enter a valid age (13+).');
+      setError(isNy ? 'Sankhani jenda ndi zaka zolondola (13+).' : 'Select your gender and enter a valid age (13+).');
       return;
     }
     if (selectedGenres.length === 0 && selectedArtistIds.length === 0) {
-      setError('Pick at least 1 favourite genre or artist to personalize your feed.');
+      setError(
+        isNy
+          ? 'Sankhani mtundu umodzi kapena woimba mmodzi yemwe mumakonda.'
+          : 'Pick at least 1 favourite genre or artist to personalize your feed.'
+      );
       return;
     }
     if (!termsAccepted) {
-      setError('Please accept the Terms of Service and Privacy Policy to continue.');
+      setError(
+        isNy
+          ? 'Chonde vomerezani Malamulo Ogwiritsira Ntchito ndi Chinsinsi cha Deta.'
+          : 'Please accept the Terms of Service and Privacy Policy to continue.'
+      );
       return;
     }
 
@@ -413,9 +459,13 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
       } catch {}
       setResendSeconds(60);
       setScreen('verify_inbox');
-      showToast('Account created! Verify your inbox or enter LOWERVIBE.');
+      showToast(
+        isNy
+          ? 'Akaunti yapangidwa! Tsimikizirani imelo yanu kapena lowani pa LOWERVIBE.'
+          : 'Account created! Verify your inbox or enter LOWERVIBE.'
+      );
     } else {
-      setError(res.error || 'Could not create your account.');
+      setError(res.error || (isNy ? 'Sitinathe kupanga akaunti yanu.' : 'Could not create your account.'));
       setErrorCode(res.errorCode || '');
     }
   };
@@ -426,10 +476,15 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
     const res = await refreshEmailVerification();
     setLoading(false);
     if (res.verified) {
-      showToast('Email verified');
+      showToast(isNy ? 'Imelo yatsimikiziridwa' : 'Email verified');
       finishAuthSuccess();
     } else {
-      setError(res.error || 'Not verified yet. Open the link in your inbox, then tap this button again.');
+      setError(
+        res.error ||
+          (isNy
+            ? 'Sinatsimikiziridwebe. Tsegulani ulalo m\'bokosi lanu la imelo, kenako dinaninso batani ili.'
+            : 'Not verified yet. Open the link in your inbox, then tap this button again.')
+      );
     }
   };
 
@@ -441,9 +496,9 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
     setLoading(false);
     if (res.success) {
       setResendSeconds(60);
-      setInfo('Fresh verification link sent to your inbox.');
+      setInfo(isNy ? 'Ulalo watsopano watumizidwa ku imelo yanu.' : 'Fresh verification link sent to your inbox.');
     } else {
-      setError(res.error || 'Could not resend verification email.');
+      setError(res.error || (isNy ? 'Sitinathe kutumizanso imelo yotsimikizira.' : 'Could not resend verification email.'));
     }
   };
 
@@ -453,7 +508,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
     setErrorCode('');
     const digits = phoneDigits.replace(/\D/g, '').replace(/^0+/, '');
     if (digits.length < 7) {
-      setError('Enter a valid phone number.');
+      setError(isNy ? 'Lembani nambala ya foni yolondola.' : 'Enter a valid phone number.');
       return;
     }
     const fullE164 = `${dialCode}${digits}`;
@@ -467,7 +522,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
       setScreen('phone_otp');
       window.setTimeout(() => otpInputsRef.current[0]?.focus(), 80);
     } else {
-      setError(res.error || 'Could not send SMS code.');
+      setError(res.error || (isNy ? 'Sitinathe kutumiza kodi ya SMS.' : 'Could not send SMS code.'));
       setErrorCode(res.errorCode || '');
     }
   };
@@ -477,22 +532,22 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
     setError('');
     setErrorCode('');
     if (!confirmationResult) {
-      setError('Request a fresh verification code first.');
+      setError(isNy ? 'Pemphani kodi yatsopano choyamba.' : 'Request a fresh verification code first.');
       return;
     }
     const code = otpDigits.join('');
     if (code.length < 6) {
-      setError('Enter all 6 digits from your SMS.');
+      setError(isNy ? 'Lembani manambala onse 6 ochokera mu SMS yanu.' : 'Enter all 6 digits from your SMS.');
       return;
     }
     setLoading(true);
     const res = await verifyPhoneCode(confirmationResult, code, true);
     setLoading(false);
     if (res.success) {
-      showToast('Signed in');
+      showToast(isNy ? 'Mwalowa' : 'Signed in');
       finishAuthSuccess();
     } else {
-      setError(res.error || 'That code did not match.');
+      setError(res.error || (isNy ? 'Kodi imeneyo sinafanane.' : 'That code did not match.'));
       setErrorCode(res.errorCode || '');
     }
   };
@@ -519,7 +574,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
     setError('');
     setInfo('');
     if (!email.trim() || !email.includes('@')) {
-      setError('Enter a valid email address.');
+      setError(isNy ? 'Lembani imelo yolondola.' : 'Enter a valid email address.');
       return;
     }
     setLoading(true);
@@ -533,28 +588,50 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
       {/* Recaptcha anchor for Firebase Phone Auth */}
       <div id="lv-recaptcha-container" />
 
-      {/* Brand Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-2">
+      {/* Brand Header + Language Switcher */}
+      <div className="space-y-2.5">
+        <div className="flex items-center justify-between gap-2">
           <LowerVibeLogo size="md" />
+          <div className="flex items-center gap-1.5">
+            <div className="inline-flex items-center p-0.5 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
+              {LANGUAGES.map((opt) => (
+                <button
+                  key={opt.code}
+                  type="button"
+                  onClick={() => setLanguage(opt.code)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                    language === opt.code
+                      ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
+                      : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {showCloseButton && onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label={t('close', 'Close')}
+                className="w-9 h-9 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer shrink-0"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="space-y-1">
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--text)]">
-            Your music. Your people.
+            {isNy ? 'Nyimbo zanu. Anthu anu.' : 'Your music. Your people.'}
           </h1>
           <p className="text-sm text-[var(--text-muted)]">
-            {promptReason || 'Stream independent music from Malawi and across Africa.'}
+            {promptReason ||
+              (isNy
+                ? 'Mverani nyimbo za oimba odziyimira okha a ku Malawi ndi Africa yonse.'
+                : 'Stream independent music from Malawi and across Africa.')}
           </p>
         </div>
-
-        {showCloseButton && onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="w-10 h-10 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer shrink-0"
-          >
-            ✕
-          </button>
-        )}
       </div>
 
       {/* Main Card Surface */}
@@ -575,7 +652,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
             className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Back</span>
+            <span>{t('back', 'Back')}</span>
           </button>
         )}
 
@@ -587,7 +664,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 <p className="font-semibold leading-relaxed">{error}</p>
                 {errorCode === 'auth/operation-not-allowed' && (
                   <p className="text-[11px] text-[var(--text-dim)] leading-relaxed">
-                    Google Sign-In is ready right now, or enable this provider under{' '}
+                    {isNy ? 'Kulowa ndi Google kuli wokonzeka tsopano, kapena yatsani njirayi mu ' : 'Google Sign-In is ready right now, or enable this provider under '}
                     <strong>Firebase Console → Authentication → Sign-in method</strong>.
                   </p>
                 )}
@@ -606,7 +683,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                   <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
                   <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
                 </svg>
-                <span>Continue with Google instead</span>
+                <span>{isNy ? 'Pitirizani ndi Google m\'malo mwake' : 'Continue with Google instead'}</span>
               </button>
             )}
           </div>
@@ -646,7 +723,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                   d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
                 />
               </svg>
-              <span>Continue with Google</span>
+              <span>{t('auth_continue_google', 'Continue with Google')}</span>
             </button>
 
             <button
@@ -658,7 +735,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
               className="w-full h-13 px-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] text-[var(--text)] font-semibold text-sm flex items-center justify-center gap-2.5 transition cursor-pointer"
             >
               <Phone className="w-4 h-4 text-[var(--accent-text)]" />
-              <span>Continue with phone</span>
+              <span>{isNy ? 'Pitirizani ndi foni' : 'Continue with phone'}</span>
             </button>
 
             <button
@@ -670,7 +747,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
               className="w-full h-13 px-4 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center justify-center gap-2.5 hover:brightness-95 transition cursor-pointer"
             >
               <Mail className="w-4 h-4" />
-              <span>Continue with email</span>
+              <span>{isNy ? 'Pitirizani ndi imelo' : 'Continue with email'}</span>
             </button>
 
             <div className="pt-2 text-center">
@@ -679,7 +756,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 onClick={handleBrowseWithoutAccount}
                 className="text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text)] underline underline-offset-4 cursor-pointer py-2"
               >
-                Browse without account
+                {t('auth_continue_guest', 'Browse without account')}
               </button>
             </div>
           </div>
@@ -694,7 +771,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 onClick={() => setScreen('email_signin')}
                 className="py-2 rounded-lg bg-[var(--accent)] text-[var(--accent-contrast)] cursor-pointer"
               >
-                Sign in
+                {t('auth_sign_in_tab', 'Sign in')}
               </button>
               <button
                 type="button"
@@ -705,12 +782,14 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 }}
                 className="py-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
               >
-                Create account
+                {t('auth_sign_up_tab', 'Create account')}
               </button>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">Email</label>
+              <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
+                {isNy ? 'Imelo' : 'Email'}
+              </label>
               <input
                 type="email"
                 required
@@ -723,7 +802,9 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-semibold text-[var(--text-muted)]">Password</label>
+                <label className="text-xs font-semibold text-[var(--text-muted)]">
+                  {t('auth_password', 'Password')}
+                </label>
                 <button
                   type="button"
                   onClick={() => {
@@ -733,7 +814,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                   }}
                   className="text-xs font-semibold text-[var(--accent-text)] hover:underline cursor-pointer"
                 >
-                  Forgot password?
+                  {t('auth_forgot_password', 'Forgot password?')}
                 </button>
               </div>
               <div className="relative">
@@ -742,13 +823,13 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
+                  placeholder={isNy ? 'Lembani mawu achinsinsi' : 'Enter your password'}
                   className="w-full h-14 pl-4 pr-12 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((prev) => !prev)}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-label={showPassword ? (isNy ? 'Bisani mawu achinsinsi' : 'Hide password') : isNy ? 'Onetsani mawu achinsinsi' : 'Show password'}
                   className="absolute right-3.5 top-4 text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
                 >
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
@@ -763,7 +844,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 onChange={(e) => setRememberMe(e.target.checked)}
                 className="accent-[var(--accent)]"
               />
-              <span>Remember me on this device</span>
+              <span>{t('auth_remember_device', 'Remember me on this device')}</span>
             </label>
 
             <button
@@ -771,7 +852,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
               disabled={loading}
               className="w-full h-13 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center justify-center gap-2 hover:brightness-95 transition cursor-pointer disabled:opacity-50"
             >
-              <span>{loading ? 'Signing in...' : 'Sign in'}</span>
+              <span>{loading ? (isNy ? 'Ikulowa...' : 'Signing in...') : t('sign_in', 'Sign in')}</span>
               {!loading && <ArrowRight className="w-4 h-4" />}
             </button>
 
@@ -780,7 +861,9 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 <div className="w-full border-t border-[var(--border)]" />
               </div>
               <div className="relative flex justify-center text-[11px] uppercase">
-                <span className="bg-[var(--surface)] px-2.5 text-[var(--text-muted)] font-semibold">or</span>
+                <span className="bg-[var(--surface)] px-2.5 text-[var(--text-muted)] font-semibold">
+                  {isNy ? 'kapena' : 'or'}
+                </span>
               </div>
             </div>
 
@@ -796,7 +879,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
               </svg>
-              <span>Continue with Google</span>
+              <span>{t('auth_continue_google', 'Continue with Google')}</span>
             </button>
           </form>
         )}
@@ -814,26 +897,32 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 }}
                 className="py-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
               >
-                Sign in
+                {t('auth_sign_in_tab', 'Sign in')}
               </button>
               <button
                 type="button"
                 onClick={() => setScreen('email_signup')}
                 className="py-2 rounded-lg bg-[var(--accent)] text-[var(--accent-contrast)] cursor-pointer"
               >
-                Create account
+                {t('auth_sign_up_tab', 'Create account')}
               </button>
             </div>
 
             {/* Step Progress Header */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-[11px] font-semibold text-[var(--text-muted)]">
-                <span>Step {signupStep} of 3</span>
+                <span>{isNy ? `Gawo ${signupStep} pa 3` : `Step ${signupStep} of 3`}</span>
                 <span className="text-[var(--accent-text)]">
                   {signupStep === 1
-                    ? 'Account details'
+                    ? isNy
+                      ? 'Zambiri za akaunti'
+                      : 'Account details'
                     : signupStep === 2
-                    ? 'Gender, age & country'
+                    ? isNy
+                      ? 'Jenda, zaka ndi dziko'
+                      : 'Gender, age & country'
+                    : isNy
+                    ? 'Mitundu & oimba omwe mumakonda'
                     : 'Your favourite genres & artists'}
                 </span>
               </div>
@@ -864,7 +953,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                   >
                     <div className="flex items-center gap-2 text-xs font-bold">
                       <Headphones className="w-4 h-4 text-[var(--accent-text)]" />
-                      <span>Listener</span>
+                      <span>{t('listener', 'Listener')}</span>
                     </div>
                   </button>
 
@@ -879,21 +968,31 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                   >
                     <div className="flex items-center gap-2 text-xs font-bold">
                       <Music className="w-4 h-4 text-[var(--accent-text)]" />
-                      <span>Artist</span>
+                      <span>{t('artist', 'Artist')}</span>
                     </div>
-                    <div className="text-[10px] text-[var(--text-muted)] mt-0.5">Requires approval</div>
+                    <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                      {isNy ? 'Pamafunika kuvomerezedwa' : 'Requires approval'}
+                    </div>
                   </button>
                 </div>
 
                 {role === 'artist' && (
                   <p className="text-[11px] text-[var(--text-muted)] bg-[var(--surface-2)] border border-[var(--border)] rounded-xl px-3 py-2 leading-relaxed">
-                    Your account opens as a listener immediately so you can install LOWERVIBE &amp; explore music, while your Artist Creator application is reviewed by Admin.
+                    {isNy
+                      ? 'Akaunti yanu itseguka ngati ya womvera kaye kuti muyambe kumvera nyimbo ndi kuika LOWERVIBE, pamene pempho lanu la Artist Creator likuwonedwa ndi oyang\'anira.'
+                      : 'Your account opens as a listener immediately so you can install LOWERVIBE & explore music, while your Artist Creator application is reviewed by Admin.'}
                   </p>
                 )}
 
                 <div>
                   <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
-                    {role === 'artist' ? 'Your full name' : 'Display name'}
+                    {role === 'artist'
+                      ? isNy
+                        ? 'Dzina lanu lonse'
+                        : 'Your full name'
+                      : isNy
+                      ? 'Dzina lowonekera'
+                      : 'Display name'}
                   </label>
                   <input
                     type="text"
@@ -908,21 +1007,23 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 {role === 'artist' && (
                   <div>
                     <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
-                      Artist / stage name
+                      {isNy ? 'Dzina la woimba / pasiteji' : 'Artist / stage name'}
                     </label>
                     <input
                       type="text"
                       required
                       value={stageName}
                       onChange={(e) => setStageName(e.target.value)}
-                      placeholder="How listeners see you"
+                      placeholder={isNy ? 'Mmene omvera adzakudziwireni' : 'How listeners see you'}
                       className="w-full h-12 px-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
                     />
                   </div>
                 )}
 
                 <div>
-                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Email</label>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                    {isNy ? 'Imelo' : 'Email'}
+                  </label>
                   <input
                     type="email"
                     required
@@ -934,20 +1035,22 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 </div>
 
                 <div className="space-y-2">
-                  <label className="block text-xs font-semibold text-[var(--text-muted)]">Password</label>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)]">
+                    {t('auth_password', 'Password')}
+                  </label>
                   <div className="relative">
                     <input
                       type={showPassword ? 'text' : 'password'}
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Create password"
+                      placeholder={isNy ? 'Pangani mawu achinsinsi' : 'Create password'}
                       className="w-full h-12 pl-4 pr-12 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword((prev) => !prev)}
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      aria-label={showPassword ? (isNy ? 'Bisani mawu achinsinsi' : 'Hide password') : isNy ? 'Onetsani mawu achinsinsi' : 'Show password'}
                       className="absolute right-3.5 top-3 text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
                     >
                       {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
@@ -975,13 +1078,16 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                       </div>
                       <div className="flex flex-wrap gap-3 text-[11px] text-[var(--text-muted)]">
                         <span className={passwordChecks.lengthOk ? 'text-[var(--accent-text)] font-medium' : ''}>
-                          {passwordChecks.lengthOk ? '✓ ' : '• '}8+ characters
+                          {passwordChecks.lengthOk ? '✓ ' : '• '}
+                          {isNy ? 'Zilembo 8+' : '8+ characters'}
                         </span>
                         <span className={passwordChecks.letterOk ? 'text-[var(--accent-text)] font-medium' : ''}>
-                          {passwordChecks.letterOk ? '✓ ' : '• '}Letter
+                          {passwordChecks.letterOk ? '✓ ' : '• '}
+                          {isNy ? 'Chilembo' : 'Letter'}
                         </span>
                         <span className={passwordChecks.numberOk ? 'text-[var(--accent-text)] font-medium' : ''}>
-                          {passwordChecks.numberOk ? '✓ ' : '• '}Number
+                          {passwordChecks.numberOk ? '✓ ' : '• '}
+                          {isNy ? 'Nambala' : 'Number'}
                         </span>
                       </div>
                     </div>
@@ -990,14 +1096,14 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
 
                 <div>
                   <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
-                    Confirm password
+                    {isNy ? 'Tsimikizirani mawu achinsinsi' : 'Confirm password'}
                   </label>
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="Repeat password"
+                    placeholder={isNy ? 'Lembaninso mawu achinsinsi' : 'Repeat password'}
                     className="w-full h-12 px-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
                   />
                 </div>
@@ -1007,7 +1113,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                   onClick={handleAdvanceSignupStep1}
                   className="w-full h-12 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center justify-center gap-2 hover:brightness-95 transition cursor-pointer"
                 >
-                  <span>Next: About you</span>
+                  <span>{isNy ? 'Pitilizani: Zambiri za inu' : 'Next: About you'}</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
 
@@ -1016,7 +1122,9 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                     <div className="w-full border-t border-[var(--border)]" />
                   </div>
                   <div className="relative flex justify-center text-[11px] uppercase">
-                    <span className="bg-[var(--surface)] px-2.5 text-[var(--text-muted)] font-semibold">or</span>
+                    <span className="bg-[var(--surface)] px-2.5 text-[var(--text-muted)] font-semibold">
+                      {isNy ? 'kapena' : 'or'}
+                    </span>
                   </div>
                 </div>
 
@@ -1032,7 +1140,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                     <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
                     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
                   </svg>
-                  <span>Continue with Google</span>
+                  <span>{t('auth_continue_google', 'Continue with Google')}</span>
                 </button>
               </div>
             )}
@@ -1043,10 +1151,10 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 <div className="space-y-2">
                   <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)]">
                     <Users className="w-3.5 h-3.5 text-[var(--accent-text)]" />
-                    <span>Gender</span>
+                    <span>{isNy ? 'Jenda' : 'Gender'}</span>
                   </label>
                   <div className="grid grid-cols-2 gap-2">
-                    {GENDER_OPTIONS.map((opt) => {
+                    {genderOptions.map((opt) => {
                       const active = gender === opt.value;
                       return (
                         <button
@@ -1070,7 +1178,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 <div className="space-y-1">
                   <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)]">
                     <Calendar className="w-3.5 h-3.5 text-[var(--accent-text)]" />
-                    <span>Age</span>
+                    <span>{isNy ? 'Zaka' : 'Age'}</span>
                   </label>
                   <input
                     type="number"
@@ -1083,12 +1191,14 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                     className="w-full h-12 px-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
                   />
                   <p className="text-[11px] text-[var(--text-muted)]">
-                    You must be at least 13 years old to join LOWERVIBE.
+                    {isNy ? 'Muyenera kukhala ndi zaka 13 kapena kuposerapo kuti mulowe pa LOWERVIBE.' : 'You must be at least 13 years old to join LOWERVIBE.'}
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Country</label>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                    {isNy ? 'Dziko' : 'Country'}
+                  </label>
                   <RegionSelect
                     value={country}
                     onChange={setCountry}
@@ -1106,14 +1216,14 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                     }}
                     className="h-12 px-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer"
                   >
-                    Back
+                    {t('back', 'Back')}
                   </button>
                   <button
                     type="button"
                     onClick={handleAdvanceSignupStep2}
                     className="flex-1 h-12 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center justify-center gap-2 hover:brightness-95 transition cursor-pointer"
                   >
-                    <span>Next: Pick your vibe</span>
+                    <span>{isNy ? 'Pitilizani: Sankhani nyimbo' : 'Next: Pick your vibe'}</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -1127,10 +1237,10 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                   <div className="flex items-center justify-between">
                     <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)]">
                       <Music className="w-3.5 h-3.5 text-[var(--accent-text)]" />
-                      <span>Favourite genres</span>
+                      <span>{isNy ? 'Mitundu yomwe mumakonda' : 'Favourite genres'}</span>
                     </label>
                     <span className="text-[11px] font-mono text-[var(--accent-text)]">
-                      {selectedGenres.length} picked
+                      {isNy ? `Zasankhidwa ${selectedGenres.length}` : `${selectedGenres.length} picked`}
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1">
@@ -1148,7 +1258,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                           }`}
                         >
                           {active && <Check className="w-3 h-3 stroke-[3]" />}
-                          <span>{g}</span>
+                          <span>{translateGenreCategory(g, language)}</span>
                         </button>
                       );
                     })}
@@ -1159,15 +1269,17 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                   <div className="flex items-center justify-between">
                     <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)]">
                       <UserPlus className="w-3.5 h-3.5 text-[var(--accent-text)]" />
-                      <span>Favourite artists</span>
+                      <span>{isNy ? 'Oimba omwe mumakonda' : 'Favourite artists'}</span>
                     </label>
                     <span className="text-[11px] font-mono text-[var(--accent-text)]">
-                      {selectedArtistIds.length} following
+                      {isNy ? `Mukutsatira ${selectedArtistIds.length}` : `${selectedArtistIds.length} following`}
                     </span>
                   </div>
                   {artistSuggestions.length === 0 ? (
                     <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text-muted)]">
-                      Your genre picks will tailor your home feed immediately while artists publish.
+                      {isNy
+                        ? 'Zomwe mwasankha zikuthandizani kukupezirani nyimbo zabwino.'
+                        : 'Your genre picks will tailor your home feed immediately while artists publish.'}
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
@@ -1220,21 +1332,21 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                     className="mt-0.5 accent-[var(--accent)]"
                   />
                   <span>
-                    I agree to the{' '}
+                    {isNy ? 'Ndikuvomereza ' : 'I agree to the '}
                     <button
                       type="button"
                       onClick={() => navigate('/terms')}
                       className="underline text-[var(--text)] hover:text-[var(--accent-text)] cursor-pointer"
                     >
-                      Terms of Service
+                      {t('footer_terms', 'Terms of Service')}
                     </button>{' '}
-                    and{' '}
+                    {isNy ? 'ndi ' : 'and '}
                     <button
                       type="button"
                       onClick={() => navigate('/privacy')}
                       className="underline text-[var(--text)] hover:text-[var(--accent-text)] cursor-pointer"
                     >
-                      Privacy Policy
+                      {t('footer_privacy', 'Privacy Policy')}
                     </button>
                     .
                   </span>
@@ -1249,14 +1361,22 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                     }}
                     className="h-12 px-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer"
                   >
-                    Back
+                    {t('back', 'Back')}
                   </button>
                   <button
                     type="submit"
                     disabled={loading}
                     className="flex-1 h-12 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center justify-center gap-2 hover:brightness-95 transition cursor-pointer disabled:opacity-50"
                   >
-                    <span>{loading ? 'Creating account...' : 'Create account & Enter'}</span>
+                    <span>
+                      {loading
+                        ? isNy
+                          ? 'Ikupanga akaunti...'
+                          : 'Creating account...'
+                        : isNy
+                        ? 'Pangani akaunti & Lowani'
+                        : 'Create account & Enter'}
+                    </span>
                     {!loading && <ArrowRight className="w-4 h-4" />}
                   </button>
                 </div>
@@ -1272,10 +1392,19 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
               <Mail className="w-6 h-6" />
             </div>
             <div className="space-y-1">
-              <h2 className="text-lg font-bold text-[var(--text)]">Check your inbox</h2>
+              <h2 className="text-lg font-bold text-[var(--text)]">
+                {isNy ? 'Yang\'anani imelo yanu' : 'Check your inbox'}
+              </h2>
               <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-                We sent a verification link to <strong>{email}</strong>. Tap the link in that email, then continue
-                below.
+                {isNy ? (
+                  <>
+                    Tatumiza ulalo wotsimikizira ku <strong>{email}</strong>. Dinani ulalowo, kenako pitirizani pansipa.
+                  </>
+                ) : (
+                  <>
+                    We sent a verification link to <strong>{email}</strong>. Tap the link in that email, then continue below.
+                  </>
+                )}
               </p>
             </div>
 
@@ -1287,19 +1416,31 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
                 className="w-full h-12 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 <Check className="w-4 h-4" />
-                <span>{loading ? 'Checking...' : "I've verified & enter"}</span>
+                <span>
+                  {loading
+                    ? isNy
+                      ? 'Ikuyang\'ana...'
+                      : 'Checking...'
+                    : isNy
+                    ? 'Ndatsimikizira & Lowani'
+                    : "I've verified & enter"}
+                </span>
               </button>
 
               <button
                 type="button"
                 disabled={loading}
                 onClick={() => {
-                  showToast('Welcome to LOWERVIBE! Verify your email anytime from Account.');
+                  showToast(
+                    isNy
+                      ? 'Takulandirani ku LOWERVIBE! Tsimikizirani imelo yanu nthawi ina mu Akaunti.'
+                      : 'Welcome to LOWERVIBE! Verify your email anytime from Account.'
+                  );
                   finishAuthSuccess();
                 }}
                 className="w-full h-11 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] flex items-center justify-center gap-2 hover:border-[var(--border-strong)] transition cursor-pointer"
               >
-                <span>Enter platform now</span>
+                <span>{isNy ? 'Lowani tsopano' : 'Enter platform now'}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
 
@@ -1311,7 +1452,13 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 <span>
-                  {resendSeconds > 0 ? `Resend link in ${resendSeconds}s` : 'Resend verification email'}
+                  {resendSeconds > 0
+                    ? isNy
+                      ? `Tumizaninso patatha ${resendSeconds}s`
+                      : `Resend link in ${resendSeconds}s`
+                    : isNy
+                    ? 'Tumizaninso imelo yotsimikizira'
+                    : 'Resend verification email'}
                 </span>
               </button>
             </div>
@@ -1322,9 +1469,13 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
         {screen === 'phone_entry' && (
           <form onSubmit={handleSendPhoneOtp} className="space-y-4">
             <div className="space-y-1">
-              <h2 className="text-lg font-bold text-[var(--text)]">Sign in with phone</h2>
+              <h2 className="text-lg font-bold text-[var(--text)]">
+                {isNy ? 'Lowani ndi nambala ya foni' : 'Sign in with phone'}
+              </h2>
               <p className="text-xs text-[var(--text-muted)]">
-                We will send a 6-digit SMS code to confirm your number.
+                {isNy
+                  ? 'Titumiza kodi ya SMS ya manambala 6 kuti titsimikizire nambala yanu.'
+                  : 'We will send a 6-digit SMS code to confirm your number.'}
               </p>
             </div>
 
@@ -1332,7 +1483,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
               <select
                 value={dialCode}
                 onChange={(e) => setDialCode(e.target.value)}
-                aria-label="Country code"
+                aria-label={isNy ? 'Kodi ya dziko' : 'Country code'}
                 className="h-14 px-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] focus:outline-none focus:border-[var(--focus-ring)]"
               >
                 {DIAL_CODES.map((d) => (
@@ -1357,7 +1508,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
               disabled={loading}
               className="w-full h-13 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center justify-center gap-2 hover:brightness-95 transition cursor-pointer disabled:opacity-50"
             >
-              <span>{loading ? 'Sending SMS...' : 'Send code'}</span>
+              <span>{loading ? (isNy ? 'Ikutumiza SMS...' : 'Sending SMS...') : isNy ? 'Tumizani kodi' : 'Send code'}</span>
               {!loading && <ArrowRight className="w-4 h-4" />}
             </button>
           </form>
@@ -1367,9 +1518,11 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
         {screen === 'phone_otp' && (
           <form onSubmit={handleVerifyPhoneOtp} className="space-y-5">
             <div className="space-y-1 text-center">
-              <h2 className="text-lg font-bold text-[var(--text)]">Enter 6-digit code</h2>
+              <h2 className="text-lg font-bold text-[var(--text)]">
+                {isNy ? 'Lembani kodi ya manambala 6' : 'Enter 6-digit code'}
+              </h2>
               <p className="text-xs text-[var(--text-muted)]">
-                Sent to {dialCode} {phoneDigits}
+                {isNy ? 'Yatumizidwa ku' : 'Sent to'} {dialCode} {phoneDigits}
               </p>
             </div>
 
@@ -1401,7 +1554,13 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
               disabled={loading}
               className="w-full h-13 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm cursor-pointer disabled:opacity-50"
             >
-              {loading ? 'Verifying...' : 'Verify & continue'}
+              {loading
+                ? isNy
+                  ? 'Ikutsimikizira...'
+                  : 'Verifying...'
+                : isNy
+                ? 'Tsimikizirani & Pitilizani'
+                : 'Verify & continue'}
             </button>
 
             <button
@@ -1410,7 +1569,13 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
               onClick={() => handleSendPhoneOtp()}
               className="w-full text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text)] disabled:opacity-50 cursor-pointer"
             >
-              {otpResendSeconds > 0 ? `Resend code in ${otpResendSeconds}s` : 'Resend SMS code'}
+              {otpResendSeconds > 0
+                ? isNy
+                  ? `Tumizaninso kodi patatha ${otpResendSeconds}s`
+                  : `Resend code in ${otpResendSeconds}s`
+                : isNy
+                ? 'Tumizaninso kodi ya SMS'
+                : 'Resend SMS code'}
             </button>
           </form>
         )}
@@ -1419,14 +1584,20 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
         {screen === 'forgot_password' && (
           <form onSubmit={handleForgotPassword} className="space-y-4">
             <div className="space-y-1">
-              <h2 className="text-lg font-bold text-[var(--text)]">Reset your password</h2>
+              <h2 className="text-lg font-bold text-[var(--text)]">
+                {isNy ? 'Bwezeretsani mawu achinsinsi' : 'Reset your password'}
+              </h2>
               <p className="text-xs text-[var(--text-muted)]">
-                Enter your email address to receive a password reset link.
+                {isNy
+                  ? 'Lembani imelo yanu kuti mulandire ulalo wokonzera mawu achinsinsi.'
+                  : 'Enter your email address to receive a password reset link.'}
               </p>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Email</label>
+              <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                {isNy ? 'Imelo' : 'Email'}
+              </label>
               <input
                 type="email"
                 required
@@ -1442,7 +1613,13 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
               disabled={loading}
               className="w-full h-13 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm cursor-pointer disabled:opacity-50"
             >
-              {loading ? 'Sending...' : 'Send reset link'}
+              {loading
+                ? isNy
+                  ? 'Ikutumiza...'
+                  : 'Sending...'
+                : isNy
+                ? 'Tumizani ulalo'
+                : 'Send reset link'}
             </button>
           </form>
         )}
@@ -1455,7 +1632,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
           onClick={() => navigate('/terms')}
           className="hover:text-[var(--text)] underline underline-offset-4 cursor-pointer"
         >
-          Terms
+          {isNy ? 'Malamulo' : 'Terms'}
         </button>
         <span aria-hidden="true">·</span>
         <button
@@ -1463,7 +1640,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
           onClick={() => navigate('/privacy')}
           className="hover:text-[var(--text)] underline underline-offset-4 cursor-pointer"
         >
-          Privacy
+          {isNy ? 'Chinsinsi' : 'Privacy'}
         </button>
         <span aria-hidden="true">·</span>
         <button
@@ -1471,7 +1648,7 @@ export const AuthFlowCard: React.FC<AuthFlowCardProps> = ({
           onClick={() => navigate('/copyright')}
           className="hover:text-[var(--text)] underline underline-offset-4 cursor-pointer"
         >
-          Copyright
+          {isNy ? 'Ufulu' : 'Copyright'}
         </button>
       </div>
     </div>

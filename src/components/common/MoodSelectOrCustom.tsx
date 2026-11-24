@@ -1,5 +1,6 @@
 import { Plus, Sparkles, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { useLanguage } from '../../context/LanguageContext';
 
 export const PRESET_MOODS = [
   'Chill',
@@ -30,9 +31,11 @@ export const MoodSelectOrCustom: React.FC<MoodSelectOrCustomProps> = ({
   value,
   onChange,
   className = '',
-  placeholder = 'Type custom mood (e.g. Nsanje Sunset, Heartbreak)...',
+  placeholder,
   allowSkip = true,
 }) => {
+  const { language } = useLanguage();
+  const isNy = language === 'ny';
   const trimmed = (value || '').trim();
   const isInPresetList =
     trimmed === '' ||
@@ -48,6 +51,12 @@ export const MoodSelectOrCustom: React.FC<MoodSelectOrCustomProps> = ({
 
   const matchedPreset =
     PRESET_MOODS.find((m) => m.toLowerCase() === trimmed.toLowerCase()) || '';
+
+  const resolvedPlaceholder =
+    placeholder ||
+    (isNy
+      ? 'Lembani maganizo anu (mwachitsanzo, Madzulo a ku Nsanje, Chikondi)...'
+      : 'Type custom mood (e.g. Nsanje Sunset, Heartbreak)...');
 
   return (
     <div className="space-y-1.5">
@@ -69,13 +78,19 @@ export const MoodSelectOrCustom: React.FC<MoodSelectOrCustomProps> = ({
               'flex-1 min-w-0 px-3 py-2.5 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl text-xs text-[var(--text)] focus:outline-none focus:border-[var(--accent)] cursor-pointer'
             }
           >
-            {allowSkip && <option value="">No mood (Skip — Optional)</option>}
+            {allowSkip && (
+              <option value="">
+                {isNy ? 'Palibe maganizo (Dumphani — Osakakamizidwa)' : 'No mood (Skip — Optional)'}
+              </option>
+            )}
             {PRESET_MOODS.map((m) => (
               <option key={m} value={m}>
                 {m}
               </option>
             ))}
-            <option value="__CUSTOM__">+ Create custom mood...</option>
+            <option value="__CUSTOM__">
+              {isNy ? '+ Lembani maganizo anu...' : '+ Create custom mood...'}
+            </option>
           </select>
         ) : (
           <input
@@ -83,7 +98,7 @@ export const MoodSelectOrCustom: React.FC<MoodSelectOrCustomProps> = ({
             maxLength={40}
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            placeholder={placeholder}
+            placeholder={resolvedPlaceholder}
             className={
               className ||
               'flex-1 min-w-0 px-3 py-2.5 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl text-xs text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]'
@@ -104,14 +119,18 @@ export const MoodSelectOrCustom: React.FC<MoodSelectOrCustomProps> = ({
             }
           }}
           className="px-3 py-2.5 rounded-xl bg-[var(--surface-2)] hover:border-[var(--border-strong)] border border-[var(--border)] text-[11px] font-bold text-[var(--text)] flex items-center gap-1 shrink-0 cursor-pointer transition"
-          title={customMode ? 'Pick from preset moods' : 'Write your own custom mood'}
+          title={
+            customMode
+              ? isNy ? 'Sankhani pa zokonzedwa' : 'Pick from preset moods'
+              : isNy ? 'Lembani maganizo anu' : 'Write your own custom mood'
+          }
         >
           {customMode ? (
-            <span>Presets</span>
+            <span>{isNy ? 'Zokonzedwa' : 'Presets'}</span>
           ) : (
             <>
               <Plus className="w-3.5 h-3.5 text-[var(--accent-text)]" />
-              <span>Custom</span>
+              <span>{isNy ? 'Wanu' : 'Custom'}</span>
             </>
           )}
         </button>
@@ -124,8 +143,8 @@ export const MoodSelectOrCustom: React.FC<MoodSelectOrCustomProps> = ({
               onChange('');
             }}
             className="p-2.5 rounded-xl bg-[var(--surface-2)] hover:border-[var(--border-strong)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] shrink-0 cursor-pointer transition"
-            title="Skip mood (leave empty)"
-            aria-label="Skip mood"
+            title={isNy ? 'Dumphani maganizo (siyani mopanda kanthu)' : 'Skip mood (leave empty)'}
+            aria-label={isNy ? 'Dumphani maganizo' : 'Skip mood'}
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -135,7 +154,11 @@ export const MoodSelectOrCustom: React.FC<MoodSelectOrCustomProps> = ({
       {customMode && (
         <p className="text-[10px] font-mono text-[var(--text-muted)] flex items-center gap-1">
           <Sparkles className="w-3 h-3 text-[var(--accent-text)] shrink-0" />
-          <span>Optional — leave blank or tap X if you prefer not to set a mood.</span>
+          <span>
+            {isNy
+              ? 'Osakakamizidwa — siyani chopanda kanthu kapena dinani X ngati simukufuna kuika.'
+              : 'Optional — leave blank or tap X if you prefer not to set a mood.'}
+          </span>
         </p>
       )}
     </div>

@@ -1,6 +1,7 @@
 import { CheckCircle2, Music, Sparkles, Upload, UserCheck, X } from 'lucide-react';
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { useRouter } from '../context/RouterContext';
 
 interface ArtistGateModalProps {
@@ -18,7 +19,9 @@ export const ArtistGateModal: React.FC<ArtistGateModalProps> = ({
   onOpenLogin,
 }) => {
   const { currentUser } = useAuth();
+  const { language, t } = useLanguage();
   const { navigate } = useRouter();
+  const isNy = language === 'ny';
 
   if (!isOpen) return null;
 
@@ -37,7 +40,7 @@ export const ArtistGateModal: React.FC<ArtistGateModalProps> = ({
         <button
           onClick={onClose}
           className="absolute top-4 right-4 p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:text-zinc-400 dark:hover:text-zinc-100 hover:bg-slate-100 dark:hover:bg-zinc-800 transition"
-          aria-label="Close"
+          aria-label={t('close')}
         >
           <X className="w-5 h-5" />
         </button>
@@ -50,13 +53,15 @@ export const ArtistGateModal: React.FC<ArtistGateModalProps> = ({
           <div className="space-y-1">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold tracking-wider uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
               <Sparkles className="w-3.5 h-3.5" />
-              Artist Account Required
+              {isNy ? 'Akaunti ya Woimba Ikufunika' : 'Artist Account Required'}
             </span>
             <h3 className="text-xl font-black font-heading text-slate-900 dark:text-white pt-1">
-              Share Music as an Artist
+              {isNy ? 'Gawani Nyimbo Ngati Woimba' : 'Share Music as an Artist'}
             </h3>
             <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed max-w-xs mx-auto">
-              Uploading songs and albums is reserved for registered artists and creators. Sign up with your artist stage name to share your music with listeners worldwide.
+              {isNy
+                ? 'Kukweza nyimbo ndi kwa oimba ovomerezeka. Lembani dzina lanu la woimba kuti mugawane nyimbo zanu ndi omvera padziko lonse.'
+                : 'Uploading songs and albums is reserved for registered artists and creators. Sign up with your artist stage name to share your music with listeners worldwide.'}
             </p>
           </div>
         </div>
@@ -65,22 +70,33 @@ export const ArtistGateModal: React.FC<ArtistGateModalProps> = ({
         <div className="bg-slate-50 dark:bg-zinc-950/60 rounded-2xl p-3.5 mb-5 border border-slate-200/80 dark:border-zinc-800 space-y-2 text-xs">
           <div className="flex items-center gap-2 text-slate-700 dark:text-zinc-300">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span>Upload MP3 / WAV songs, cover artwork & albums</span>
+            <span>
+              {isNy
+                ? 'Kwezani nyimbo za MP3 / WAV, zithunzi ndi ma alibamu'
+                : 'Upload MP3 / WAV songs, cover artwork & albums'}
+            </span>
           </div>
           <div className="flex items-center gap-2 text-slate-700 dark:text-zinc-300">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span>100% Artist retained copyright & master rights</span>
+            <span>
+              {isNy
+                ? '100% Ufulu wa nyimbo zanu ndi uwa woimba yekha'
+                : '100% Artist retained copyright & master rights'}
+            </span>
           </div>
           <div className="flex items-center gap-2 text-slate-700 dark:text-zinc-300">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span>Rank on Top 10 Music Chart & track downloads</span>
+            <span>
+              {isNy
+                ? 'Lowani pa Top Charts ndi kuona chiwerengero cha nyimbo'
+                : 'Rank on Top 10 Music Chart & track downloads'}
+            </span>
           </div>
         </div>
 
         {/* Actions */}
         <div className="space-y-2.5">
           {currentUser ? (
-            /* Logged in as listener -> 1-click Upgrade */
             <>
               <button
                 onClick={handleGoApplyInStudio}
@@ -89,7 +105,11 @@ export const ArtistGateModal: React.FC<ArtistGateModalProps> = ({
                 <UserCheck className="w-4 h-4" />
                 <span>
                   {currentUser.applicationStatus === 'pending'
-                    ? 'Check Artist Approval Status'
+                    ? isNy
+                      ? 'Onani Ngati Mwavomerezedwa'
+                      : 'Check Artist Approval Status'
+                    : isNy
+                    ? 'Lembani mu Situdiyo ya Woimba'
                     : 'Apply in Artist Creator Studio'}
                 </span>
               </button>
@@ -97,11 +117,10 @@ export const ArtistGateModal: React.FC<ArtistGateModalProps> = ({
                 onClick={onClose}
                 className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition"
               >
-                Stay as Listener
+                {isNy ? 'Pitirizani Ngati Womvera' : 'Stay as Listener'}
               </button>
             </>
           ) : (
-            /* Not logged in -> Prompt to register as artist or sign in */
             <>
               <button
                 onClick={() => {
@@ -111,7 +130,9 @@ export const ArtistGateModal: React.FC<ArtistGateModalProps> = ({
                 className="w-full py-3.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
               >
                 <Upload className="w-4 h-4" />
-                <span>Sign Up as Artist & Upload Music</span>
+                <span>
+                  {isNy ? 'Lembani Ngati Woimba & Kwezani' : 'Sign Up as Artist & Upload Music'}
+                </span>
               </button>
 
               <button
@@ -121,7 +142,7 @@ export const ArtistGateModal: React.FC<ArtistGateModalProps> = ({
                 }}
                 className="w-full py-2.5 px-4 rounded-2xl bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-750 text-slate-800 dark:text-zinc-200 font-semibold text-xs border border-slate-200 dark:border-zinc-700 transition flex items-center justify-center gap-1.5"
               >
-                <span>Already an Artist? Sign In</span>
+                <span>{isNy ? 'Muli ndi akaunti ya woimba? Lowani' : 'Already an Artist? Sign In'}</span>
               </button>
             </>
           )}

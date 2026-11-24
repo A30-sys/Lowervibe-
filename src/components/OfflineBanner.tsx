@@ -1,9 +1,12 @@
 import { RefreshCw, WifiOff } from 'lucide-react';
 import React from 'react';
+import { useLanguage } from '../context/LanguageContext';
 import { useOfflineQueue } from '../context/OfflineQueueContext';
 
 export const OfflineBanner: React.FC = () => {
   const { isOnline, queuedActions, replayQueuedActions } = useOfflineQueue();
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
 
   if (isOnline) return null;
 
@@ -14,12 +17,10 @@ export const OfflineBanner: React.FC = () => {
     >
       <div className="flex items-center gap-2 min-w-0">
         <WifiOff className="w-4 h-4 text-amber-500 shrink-0" />
-        <span className="font-semibold truncate">
-          You are offline. Saved tracks can still play.
-        </span>
+        <span className="font-semibold truncate">{t('offline_banner')}</span>
         {queuedActions.length > 0 && (
           <span className="hidden sm:inline font-mono text-[11px] text-[var(--lv-muted)]">
-            ({queuedActions.length} waiting to sync)
+            ({queuedActions.length} {isNy ? 'zikudikira' : 'waiting to sync'})
           </span>
         )}
       </div>
@@ -30,7 +31,7 @@ export const OfflineBanner: React.FC = () => {
         className="px-3 py-1.5 rounded-xl bg-[var(--lv-elevated)] hover:opacity-90 text-[var(--lv-text)] border border-[var(--lv-border)] text-xs font-semibold shrink-0 transition active:scale-95 cursor-pointer flex items-center gap-1.5 min-h-[36px]"
       >
         <RefreshCw className="w-3.5 h-3.5" />
-        <span>Retry</span>
+        <span>{t('try_again')}</span>
       </button>
     </div>
   );

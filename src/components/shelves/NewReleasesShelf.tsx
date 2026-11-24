@@ -1,9 +1,11 @@
 import { Pause, Play } from 'lucide-react';
 import React from 'react';
 import { useAudio } from '../../context/AudioContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG } from '../../utils/artworkFallback';
 import { formatTime } from '../../utils/formatters';
+import { translateGenreCategory } from '../../utils/genreCategories';
 import { LazySlideImage } from '../common/LazySlideImage';
 import { ShelfSkeleton } from '../common/LoadingSkeleton';
 
@@ -15,6 +17,7 @@ interface NewReleasesShelfProps {
 export const NewReleasesShelf: React.FC<NewReleasesShelfProps> = ({ onSelectArtist }) => {
   const { tracks, isCatalogLoaded, currentTrack, isPlaying, playTrack, togglePlayPause } =
     useAudio();
+  const { language, t } = useLanguage();
 
   const newReleases = [...tracks]
     .filter((t) => !t.isDraft && !t.isDeranked)
@@ -44,9 +47,11 @@ export const NewReleasesShelf: React.FC<NewReleasesShelfProps> = ({ onSelectArti
     <section className="space-y-4">
       <div>
         <h2 className="text-lg sm:text-xl font-extrabold font-heading text-[var(--lv-text)]">
-          New releases
+          {t('new_releases_title', 'New Releases')}
         </h2>
-        <p className="text-xs text-[var(--lv-muted)]">Fresh drops uploaded by independent artists</p>
+        <p className="text-xs text-[var(--lv-muted)]">
+          {t('new_releases_sub', 'Fresh songs just added to LOWERVIBE')}
+        </p>
       </div>
 
       <div className="flex items-stretch gap-3 overflow-x-auto pb-2 scrollbar-none snap-x snap-mandatory">
@@ -98,7 +103,7 @@ export const NewReleasesShelf: React.FC<NewReleasesShelfProps> = ({ onSelectArti
                   {track.artistName}
                 </button>
                 <span className="text-[11px] font-mono text-[var(--lv-muted)] block truncate">
-                  {track.genre} · {formatTime(track.durationSeconds)}
+                  {translateGenreCategory(track.genre, language)} · {formatTime(track.durationSeconds)}
                 </span>
               </div>
             </div>

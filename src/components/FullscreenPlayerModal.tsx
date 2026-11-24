@@ -29,11 +29,13 @@ import {
 import React, { useEffect, useMemo, useState } from 'react';
 import { AudioQualityPreference, isTrackLosslessSource, useAudio } from '../context/AudioContext';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { useRouter } from '../context/RouterContext';
 import { useToast } from '../context/ToastContext';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../utils/artworkFallback';
 import { ExtractedPalette, extractDominantColor } from '../utils/colorExtract';
 import { formatTime, getTrackLikeCount, isTrackLikedByUser } from '../utils/formatters';
+import { translateGenreCategory } from '../utils/genreCategories';
 import { parseLrc } from '../utils/lrcParser';
 
 export const FullscreenPlayerModal: React.FC = () => {
@@ -86,8 +88,10 @@ export const FullscreenPlayerModal: React.FC = () => {
   } = useAudio();
 
   const { currentUser, toggleLikeTrack } = useAuth();
+  const { language, t } = useLanguage();
   const { navigate } = useRouter();
   const { showToast } = useToast();
+  const isNy = language === 'ny';
 
   const [activeTab, setActiveTab] = useState<'playing' | 'queue' | 'lyrics' | 'comments'>('playing');
   const [commentText, setCommentText] = useState('');
@@ -179,7 +183,7 @@ export const FullscreenPlayerModal: React.FC = () => {
     setLikePopping(true);
     setTimeout(() => setLikePopping(false), 240);
     toggleLikeTrack(currentTrack.id);
-    showToast(isLiked ? 'Removed from Liked songs' : 'Added to Liked songs');
+    showToast(isLiked ? t('removed_from_liked') : t('added_to_liked'));
   };
 
   const handleOpenArtist = () => {
@@ -190,7 +194,9 @@ export const FullscreenPlayerModal: React.FC = () => {
 
   const handleWhatsAppShare = () => {
     const shareUrl = `${window.location.origin}?track=${currentTrack.id}`;
-    const text = `Listen to "${currentTrack.title}" by ${currentTrack.artistName} on LOWERVIBE: ${shareUrl}`;
+    const text = isNy
+      ? `Mverani "${currentTrack.title}" ya ${currentTrack.artistName} pa LOWERVIBE: ${shareUrl}`
+      : `Listen to "${currentTrack.title}" by ${currentTrack.artistName} on LOWERVIBE: ${shareUrl}`;
     const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
     window.location.href = waUrl;
   };
@@ -201,28 +207,45 @@ export const FullscreenPlayerModal: React.FC = () => {
 
     addCommentToTrack(currentTrack.id, {
       userId: currentUser?.id || 'guest',
-      userName: currentUser?.name || 'Listener',
+      userName: currentUser?.name || t('listener'),
       userAvatar: currentUser?.avatar || DEFAULT_AVATAR_SVG,
       timestampSeconds: Math.floor(currentTime),
       content: commentText.trim(),
     });
     setCommentText('');
-    showToast('Comment added');
+    showToast(isNy ? 'Ndemanga yawonjezedwa' : 'Comment added');
   };
 
   const tabs: { id: 'playing' | 'queue' | 'lyrics' | 'comments'; label: string }[] = [
-    { id: 'playing', label: 'Playing' },
-    { id: 'queue', label: `Queue (${queue.length})` },
-    ...(parsedLyrics.hasLyrics ? [{ id: 'lyrics' as const, label: 'Lyrics' }] : []),
-    { id: 'comments', label: `Comments (${currentTrack.comments?.length || 0})` },
+    { id: 'playing', label: isNy ? 'Ikulira' : 'Playing' },
+    { id: 'queue', label: isNy ? `Mndandanda (${queue.length})` : `Queue (${queue.length})` },
+    ...(parsedLyrics.hasLyrics ? [{ id: 'lyrics' as const, label: t('lyrics') }] : []),
+    {
+      id: 'comments',
+      label: isNy
+        ? `Ndemanga (${currentTrack.comments?.length || 0})`
+        : `Comments (${currentTrack.comments?.length || 0})`,
+    },
   ];
 
   const qualityOptions: { id: AudioQualityPreference; label: string; desc: string }[] = [
-    { id: 'auto', label: 'Auto', desc: `Adapts to network (${effectiveAudioQuality})` },
-    { id: 'high', label: 'High', desc: '~1.8 MB/min' },
-    { id: 'saver', label: 'Data Saver', desc: '~0.6 MB/min' },
+    {
+      id: 'auto',
+      label: isNy ? 'Yokha (Auto)' : 'Auto',
+      desc: isNy
+        ? `Imasintha malinga ndi intaneti (${effectiveAudioQuality})`
+        : `Adapts to network (${effectiveAudioQuality})`,
+    },
+    { id: 'high', label: isNy ? 'Wapamwamba' : 'High', desc: '~1.8 MB/min' },
+    { id: 'saver', label: isNy ? 'Kusunga Deta' : 'Data Saver', desc: '~0.6 MB/min' },
     ...(losslessAvailable
-      ? [{ id: 'lossless' as const, label: 'Lossless', desc: '~6.5 MB/min · Original file' }]
+      ? [
+          {
+            id: 'lossless' as const,
+            label: isNy ? 'Lossless (Woyamba)' : 'Lossless',
+            desc: isNy ? '~6.5 MB/min · Fayilo yoyambirira' : '~6.5 MB/min · Original file',
+          },
+        ]
       : []),
   ];
 
@@ -259,8 +282,8 @@ export const FullscreenPlayerModal: React.FC = () => {
             type="button"
             onClick={() => setIsFullscreenPlayerOpen(false)}
             className="rounded-2xl bg-white/10 hover:bg-white/15 text-white border border-white/10 transition active:scale-95 cursor-pointer min-h-[48px] min-w-[48px] flex items-center justify-center"
-            title="Minimize player"
-            aria-label="Close full player"
+            title={isNy ? 'Chepetsani choleretsa' : 'Minimize player'}
+            aria-label={t('close_player')}
           >
             <ChevronDown className="w-5 h-5" />
           </button>
@@ -287,8 +310,8 @@ export const FullscreenPlayerModal: React.FC = () => {
             type="button"
             onClick={() => setActiveShareTrack(currentTrack)}
             className="rounded-2xl bg-white/10 hover:bg-white/15 text-white border border-white/10 transition active:scale-95 cursor-pointer min-h-[48px] min-w-[48px] flex items-center justify-center"
-            title="Share track"
-            aria-label="Share track"
+            title={t('share')}
+            aria-label={t('share')}
           >
             <Share2 className="w-4 h-4" />
           </button>
@@ -327,7 +350,7 @@ export const FullscreenPlayerModal: React.FC = () => {
                   className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold shrink-0 cursor-pointer flex items-center gap-1"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Retry</span>
+                  <span>{t('try_again')}</span>
                 </button>
               </div>
             )}
@@ -344,7 +367,9 @@ export const FullscreenPlayerModal: React.FC = () => {
                   className="text-sm font-medium text-white/75 hover:text-white mt-1 cursor-pointer text-left truncate max-w-full block"
                 >
                   {currentTrack.artistName}
-                  {currentTrack.genre ? ` · ${currentTrack.genre}` : ''}
+                  {currentTrack.genre
+                    ? ` · ${translateGenreCategory(currentTrack.genre, language)}`
+                    : ''}
                 </button>
               </div>
 
@@ -357,7 +382,7 @@ export const FullscreenPlayerModal: React.FC = () => {
                       ? 'bg-rose-500/20 border-rose-500/40 text-rose-400'
                       : 'bg-white/10 border-white/10 text-white/80 hover:text-white'
                   }`}
-                  aria-label={isLiked ? 'Unlike song' : 'Like song'}
+                  aria-label={isLiked ? t('unlike') : t('like')}
                 >
                   <Heart
                     className={`w-5 h-5 ${isLiked ? 'fill-rose-400' : ''} ${
@@ -371,8 +396,8 @@ export const FullscreenPlayerModal: React.FC = () => {
                   type="button"
                   onClick={() => openPlaylistModal(currentTrack)}
                   className="rounded-2xl bg-white/10 border border-white/10 text-white/80 hover:text-white transition active:scale-95 cursor-pointer min-h-[48px] min-w-[48px] flex items-center justify-center"
-                  title="Add to playlist"
-                  aria-label="Add to playlist"
+                  title={t('add_to_playlist')}
+                  aria-label={t('add_to_playlist')}
                 >
                   <ListPlus className="w-5 h-5" />
                 </button>
@@ -425,8 +450,8 @@ export const FullscreenPlayerModal: React.FC = () => {
                 type="button"
                 onClick={playPrevTrack}
                 className="text-white/85 hover:text-white transition active:scale-95 cursor-pointer min-h-[48px] min-w-[48px] flex items-center justify-center"
-                title="Previous track"
-                aria-label="Previous track"
+                title={t('previous')}
+                aria-label={t('previous')}
               >
                 <SkipBack className="w-7 h-7 fill-current" />
               </button>
@@ -435,8 +460,8 @@ export const FullscreenPlayerModal: React.FC = () => {
                 type="button"
                 onClick={togglePlayPause}
                 className="w-16 h-16 rounded-full bg-[#C6FF3D] text-[#0A0B0A] flex items-center justify-center hover:brightness-95 active:scale-95 transition cursor-pointer shadow-xl"
-                title={isPlaying ? 'Pause' : 'Play'}
-                aria-label={isPlaying ? 'Pause' : 'Play'}
+                title={isPlaying ? t('pause') : t('play')}
+                aria-label={isPlaying ? t('pause') : t('play')}
               >
                 {isPlaying ? (
                   <Pause className="w-7 h-7 fill-[#0A0B0A]" />
@@ -449,8 +474,8 @@ export const FullscreenPlayerModal: React.FC = () => {
                 type="button"
                 onClick={playNextTrack}
                 className="text-white/85 hover:text-white transition active:scale-95 cursor-pointer min-h-[48px] min-w-[48px] flex items-center justify-center"
-                title="Next track"
-                aria-label="Next track"
+                title={t('next_track')}
+                aria-label={t('next_track')}
               >
                 <SkipForward className="w-7 h-7 fill-current" />
               </button>
@@ -461,8 +486,8 @@ export const FullscreenPlayerModal: React.FC = () => {
                 className={`rounded-2xl transition active:scale-95 cursor-pointer min-h-[48px] min-w-[48px] flex items-center justify-center relative ${
                   repeatMode !== 'off' ? 'text-[#C6FF3D]' : 'text-white/70 hover:text-white'
                 }`}
-                title={`Repeat: ${repeatMode}`}
-                aria-label={`Repeat: ${repeatMode}`}
+                title={`${t('repeat')}: ${repeatMode}`}
+                aria-label={`${t('repeat')}: ${repeatMode}`}
               >
                 {repeatMode === 'one' ? (
                   <Repeat1 className="w-5 h-5" />
@@ -479,7 +504,7 @@ export const FullscreenPlayerModal: React.FC = () => {
                   type="button"
                   onClick={toggleMute}
                   className="text-white/70 hover:text-white cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
-                  aria-label={isMuted ? 'Unmute' : 'Mute'}
+                  aria-label={isMuted ? (isNy ? 'Yatsani phokoso' : 'Unmute') : (isNy ? 'Zimitsani phokoso' : 'Mute')}
                 >
                   {isMuted || volume === 0 ? (
                     <VolumeX className="w-4 h-4 text-[#FF5C6C]" />
@@ -495,7 +520,7 @@ export const FullscreenPlayerModal: React.FC = () => {
                   value={isMuted ? 0 : volume}
                   onChange={(e) => setVolume(parseFloat(e.target.value))}
                   className="flex-1 h-1.5 rounded-full bg-white/15 accent-[#7C5CFF] cursor-pointer"
-                  aria-label="Volume"
+                  aria-label={isNy ? 'Phokoso' : 'Volume'}
                 />
               </div>
 
@@ -512,10 +537,10 @@ export const FullscreenPlayerModal: React.FC = () => {
                   <Moon className="w-4 h-4" />
                   <span>
                     {sleepAtEndOfTrack
-                      ? 'End of song'
+                      ? t('timer_end_of_track')
                       : sleepTimerRemainingSeconds !== null
                       ? formatTime(sleepTimerRemainingSeconds)
-                      : 'Sleep timer'}
+                      : t('sleep_timer')}
                   </span>
                 </button>
 
@@ -538,14 +563,22 @@ export const FullscreenPlayerModal: React.FC = () => {
                   className="flex items-center gap-1.5 px-3 py-2 rounded-2xl text-xs font-semibold bg-white/10 border border-white/10 text-white/80 hover:text-white transition cursor-pointer min-h-[44px]"
                 >
                   <SlidersHorizontal className="w-4 h-4" />
-                  <span className="capitalize">{audioQuality === 'saver' ? 'Data Saver' : audioQuality}</span>
+                  <span className="capitalize">
+                    {audioQuality === 'saver'
+                      ? isNy ? 'Kusunga Deta' : 'Data Saver'
+                      : audioQuality === 'auto'
+                      ? isNy ? 'Yokha' : 'Auto'
+                      : audioQuality === 'high'
+                      ? isNy ? 'Wapamwamba' : 'High'
+                      : audioQuality}
+                  </span>
                 </button>
 
                 <button
                   type="button"
                   onClick={handleWhatsAppShare}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-2xl text-xs font-semibold bg-white/10 border border-white/10 text-white/80 hover:text-white transition cursor-pointer min-h-[44px]"
-                  title="Share on WhatsApp"
+                  title={isNy ? 'Gawani pa WhatsApp' : 'Share on WhatsApp'}
                 >
                   <MessageCircle className="w-4 h-4 text-[#C6FF3D]" />
                   <span>WhatsApp</span>
@@ -555,13 +588,13 @@ export const FullscreenPlayerModal: React.FC = () => {
                   type="button"
                   onClick={() => {
                     downloadTrack(currentTrack);
-                    showToast('Saving for offline playback');
+                    showToast(isNy ? 'Ikusunga kuti muzimvera popanda intaneti' : 'Saving for offline playback');
                   }}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-2xl text-xs font-semibold bg-white/10 border border-white/10 text-white/80 hover:text-white transition cursor-pointer min-h-[44px]"
-                  title="Save offline"
+                  title={isNy ? 'Sungani popanda intaneti' : 'Save offline'}
                 >
                   <Download className="w-4 h-4" />
-                  <span>Save</span>
+                  <span>{t('save')}</span>
                 </button>
               </div>
 
@@ -569,18 +602,20 @@ export const FullscreenPlayerModal: React.FC = () => {
               {openDrawer === 'sleep' && (
                 <div className="p-3.5 rounded-2xl bg-[#131513] border border-white/15 space-y-2.5 animate-slideUp">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white">Stop audio automatically</span>
+                    <span className="text-xs font-bold text-white">
+                      {isNy ? 'Imitsani nyimbo yokha' : 'Stop audio automatically'}
+                    </span>
                     {(sleepTimerRemainingSeconds !== null || sleepAtEndOfTrack) && (
                       <button
                         type="button"
                         onClick={() => {
                           cancelSleepTimer();
                           setOpenDrawer(null);
-                          showToast('Sleep timer turned off');
+                          showToast(isNy ? 'Nthawi yoimitsa yazimitsidwa' : 'Sleep timer turned off');
                         }}
                         className="text-xs font-semibold text-[#FF5C6C] cursor-pointer"
                       >
-                        Turn off
+                        {isNy ? 'Zimitsani' : 'Turn off'}
                       </button>
                     )}
                   </div>
@@ -592,7 +627,11 @@ export const FullscreenPlayerModal: React.FC = () => {
                         onClick={() => {
                           setSleepTimer(mins);
                           setOpenDrawer(null);
-                          showToast(`Sleep timer set for ${mins} min`);
+                          showToast(
+                            isNy
+                              ? `Nyimbo iima pakatha mphindi ${mins}`
+                              : `Sleep timer set for ${mins} min`
+                          );
                         }}
                         className={`py-2 rounded-xl text-xs font-mono font-bold cursor-pointer min-h-[44px] ${
                           sleepTimerMinutes === mins
@@ -608,7 +647,9 @@ export const FullscreenPlayerModal: React.FC = () => {
                       onClick={() => {
                         setSleepAtEndOfTrack(true);
                         setOpenDrawer(null);
-                        showToast('Playback will stop after this song');
+                        showToast(
+                          isNy ? 'Nyimbo iima ikatha iyi' : 'Playback will stop after this song'
+                        );
                       }}
                       className={`col-span-2 py-2 rounded-xl text-xs font-semibold cursor-pointer min-h-[44px] ${
                         sleepAtEndOfTrack
@@ -616,7 +657,7 @@ export const FullscreenPlayerModal: React.FC = () => {
                           : 'bg-white/10 text-white hover:bg-white/15'
                       }`}
                     >
-                      End of track
+                      {t('timer_end_of_track')}
                     </button>
                   </div>
                 </div>
@@ -624,7 +665,9 @@ export const FullscreenPlayerModal: React.FC = () => {
 
               {openDrawer === 'speed' && (
                 <div className="p-3.5 rounded-2xl bg-[#131513] border border-white/15 space-y-2.5 animate-slideUp">
-                  <span className="text-xs font-bold text-white block">Playback speed</span>
+                  <span className="text-xs font-bold text-white block">
+                    {isNy ? 'Liwiro la nyimbo' : 'Playback speed'}
+                  </span>
                   <div className="grid grid-cols-4 gap-2">
                     {[0.85, 1, 1.25, 1.5].map((rate) => (
                       <button
@@ -650,7 +693,7 @@ export const FullscreenPlayerModal: React.FC = () => {
               {openDrawer === 'quality' && (
                 <div className="p-3.5 rounded-2xl bg-[#131513] border border-white/15 space-y-2 animate-slideUp">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white">Audio quality</span>
+                    <span className="text-xs font-bold text-white">{t('audio_quality')}</span>
                     <span className="text-[11px] font-mono text-white/60">
                       ~{estimatedMbPerMinute.toFixed(1)} MB/min
                     </span>
@@ -663,7 +706,7 @@ export const FullscreenPlayerModal: React.FC = () => {
                         onClick={() => {
                           setAudioQuality(opt.id);
                           setOpenDrawer(null);
-                          showToast(`Audio quality: ${opt.label}`);
+                          showToast(`${t('audio_quality')}: ${opt.label}`);
                         }}
                         className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left text-xs transition cursor-pointer min-h-[44px] ${
                           audioQuality === opt.id
@@ -694,9 +737,11 @@ export const FullscreenPlayerModal: React.FC = () => {
             {/* Real Crossfade Control (0-12s, default Off) */}
             <div className="p-3 rounded-2xl bg-white/5 border border-white/10 space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-white">Crossfade</span>
+                <span className="font-bold text-white">
+                  {isNy ? 'Kusakaniza pakati pa nyimbo' : 'Crossfade'}
+                </span>
                 <span className="font-mono font-bold text-[#C6FF3D]">
-                  {crossfadeSeconds === 0 ? 'Off' : `${crossfadeSeconds}s`}
+                  {crossfadeSeconds === 0 ? t('timer_off') : `${crossfadeSeconds}s`}
                 </span>
               </div>
               <input
@@ -707,17 +752,19 @@ export const FullscreenPlayerModal: React.FC = () => {
                 value={crossfadeSeconds}
                 onChange={(e) => setCrossfadeSeconds(Number(e.target.value))}
                 className="w-full h-1.5 rounded-full bg-white/15 accent-[#C6FF3D] cursor-pointer"
-                aria-label="Crossfade duration in seconds"
+                aria-label={isNy ? 'Masekondi okonza kusakaniza' : 'Crossfade duration in seconds'}
               />
               <p className="text-[11px] text-white/60">
-                Tracks from the same release always play gapless.
+                {isNy
+                  ? 'Nyimbo za m\'chimbale chimodzi zimalira mosaduka.'
+                  : 'Tracks from the same release always play gapless.'}
               </p>
             </div>
 
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs font-bold text-white">
                 <ListMusic className="w-4 h-4 text-[#C6FF3D]" />
-                <span>Up next</span>
+                <span>{t('up_next')}</span>
               </div>
               {queue.length > 0 && (
                 <button
@@ -725,7 +772,7 @@ export const FullscreenPlayerModal: React.FC = () => {
                   onClick={clearQueue}
                   className="text-xs font-semibold text-white/65 hover:text-white cursor-pointer"
                 >
-                  Clear queue
+                  {isNy ? 'Fufutani mndandanda' : 'Clear queue'}
                 </button>
               )}
             </div>
@@ -733,7 +780,7 @@ export const FullscreenPlayerModal: React.FC = () => {
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
               {(queue.length > 0 ? queue : tracks.filter((t) => t.id !== currentTrack.id)).length === 0 ? (
                 <div className="py-10 text-center text-xs text-white/60">
-                  Nothing waiting in your queue yet.
+                  {t('queue_empty')}
                 </div>
               ) : (
                 (queue.length > 0 ? queue : tracks.filter((t) => t.id !== currentTrack.id)).map(
@@ -835,13 +882,15 @@ export const FullscreenPlayerModal: React.FC = () => {
           <div className="rounded-[24px] bg-[#131513] border border-white/10 p-4 flex flex-col gap-3 max-h-[68vh]">
             <div className="flex items-center gap-2 text-xs font-bold text-white pb-2 border-b border-white/10">
               <MessageSquare className="w-4 h-4 text-[#7C5CFF]" />
-              <span>Listener notes</span>
+              <span>{isNy ? 'Ndemanga za omvera' : 'Listener notes'}</span>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-2.5 min-h-[180px]">
               {(currentTrack.comments || []).length === 0 ? (
                 <div className="py-10 text-center text-xs text-white/60">
-                  Be the first to leave a note on this track.
+                  {isNy
+                    ? 'Khalani woyamba kulemba ndemanga pa nyimboyi.'
+                    : 'Be the first to leave a note on this track.'}
                 </div>
               ) : (
                 currentTrack.comments.map((c) => (
@@ -876,7 +925,11 @@ export const FullscreenPlayerModal: React.FC = () => {
             <form onSubmit={handlePostComment} className="flex items-center gap-2 pt-2 border-t border-white/10">
               <input
                 type="text"
-                placeholder={`Write a comment at ${formatTime(currentTime)}...`}
+                placeholder={
+                  isNy
+                    ? `Lembani ndemanga pa ${formatTime(currentTime)}...`
+                    : `Write a comment at ${formatTime(currentTime)}...`
+                }
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
                 className="flex-1 px-3.5 py-2.5 rounded-2xl bg-white/10 border border-white/15 text-xs text-white placeholder:text-white/50 focus:outline-none focus:border-[#C6FF3D] min-h-[44px]"
@@ -884,7 +937,7 @@ export const FullscreenPlayerModal: React.FC = () => {
               <button
                 type="submit"
                 className="w-11 h-11 rounded-2xl bg-[#C6FF3D] text-[#0A0B0A] flex items-center justify-center shrink-0 cursor-pointer"
-                aria-label="Send comment"
+                aria-label={isNy ? 'Tumizani ndemanga' : 'Send comment'}
               >
                 <Send className="w-4 h-4" />
               </button>

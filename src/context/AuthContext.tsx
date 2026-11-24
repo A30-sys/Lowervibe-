@@ -60,7 +60,7 @@ import {
   UserSettings,
 } from '../types';
 import { DEFAULT_AVATAR_SVG, DEFAULT_ARTWORK_SVG, DEFAULT_BANNER_SVG } from '../utils/artworkFallback';
-import { useLanguage } from './LanguageContext';
+import { LANG_STORAGE_KEY, useLanguage } from './LanguageContext';
 import { THEME_MODE_KEY, useTheme } from './ThemeContext';
 
 interface AuthContextType {
@@ -258,6 +258,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
         merged.appearance = { ...merged.appearance, theme: savedTheme };
       }
+      const savedLang = localStorage.getItem(LANG_STORAGE_KEY);
+      if (savedLang === 'en' || savedLang === 'ny') {
+        merged.appearance = { ...merged.appearance, language: savedLang };
+      }
       return merged;
     } catch {}
     return DEFAULT_USER_SETTINGS;
@@ -427,18 +431,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const incoming = snap.data() as Partial<UserSettings>;
               const merged = mergeSettings(DEFAULT_USER_SETTINGS, incoming);
               let localTheme: string | null = null;
+              let localLang: string | null = null;
               try {
                 localTheme = localStorage.getItem(THEME_MODE_KEY);
+                localLang = localStorage.getItem(LANG_STORAGE_KEY);
               } catch {}
               if (localTheme === 'light' || localTheme === 'dark' || localTheme === 'system') {
                 merged.appearance.theme = localTheme;
               } else if (incoming?.appearance?.theme) {
                 setThemeMode(incoming.appearance.theme);
               }
-              setUserSettings(merged);
-              if (merged.appearance?.language) {
-                setLanguage(merged.appearance.language);
+              if (localLang === 'en' || localLang === 'ny') {
+                merged.appearance.language = localLang;
+                setLanguage(localLang);
+              } else if (incoming?.appearance?.language) {
+                setLanguage(incoming.appearance.language);
               }
+              setUserSettings(merged);
             }
           },
           () => {}

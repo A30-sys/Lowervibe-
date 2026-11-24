@@ -2,11 +2,14 @@ import { FileText } from 'lucide-react';
 import React from 'react';
 import { LEGAL_CONFIG } from '../config/legalConfig';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { useRouter } from '../context/RouterContext';
 import { useToast } from '../context/ToastContext';
 
 export const LegalModals: React.FC = () => {
   const { needTermsUpdateAck, acceptLatestTerms } = useAuth();
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
   const { currentRoute, navigate } = useRouter();
   const { showToast } = useToast();
 
@@ -26,25 +29,50 @@ export const LegalModals: React.FC = () => {
             <FileText className="w-5 h-5" />
           </div>
           <div className="space-y-1">
-            <h3 className="text-sm font-bold text-[var(--text)]">Terms updated</h3>
+            <h3 className="text-sm font-bold text-[var(--text)]">
+              {isNy ? 'Malamulo asinthidwa' : 'Terms updated'}
+            </h3>
             <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-              Our{' '}
-              <button
-                type="button"
-                onClick={() => navigate('/terms')}
-                className="underline text-[var(--text)] hover:text-[var(--accent-text)] cursor-pointer"
-              >
-                Terms of Service
-              </button>{' '}
-              and{' '}
-              <button
-                type="button"
-                onClick={() => navigate('/privacy')}
-                className="underline text-[var(--text)] hover:text-[var(--accent-text)] cursor-pointer"
-              >
-                Privacy Policy
-              </button>{' '}
-              were updated on {LEGAL_CONFIG.lastUpdated}.
+              {isNy ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/terms')}
+                    className="underline text-[var(--text)] hover:text-[var(--accent-text)] cursor-pointer"
+                  >
+                    {t('footer_terms')}
+                  </button>{' '}
+                  ndi{' '}
+                  <button
+                    type="button"
+                    onClick={() => navigate('/privacy')}
+                    className="underline text-[var(--text)] hover:text-[var(--accent-text)] cursor-pointer"
+                  >
+                    {t('footer_privacy')}
+                  </button>{' '}
+                  athu anasinthidwa pa {LEGAL_CONFIG.lastUpdated}.
+                </>
+              ) : (
+                <>
+                  Our{' '}
+                  <button
+                    type="button"
+                    onClick={() => navigate('/terms')}
+                    className="underline text-[var(--text)] hover:text-[var(--accent-text)] cursor-pointer"
+                  >
+                    Terms of Service
+                  </button>{' '}
+                  and{' '}
+                  <button
+                    type="button"
+                    onClick={() => navigate('/privacy')}
+                    className="underline text-[var(--text)] hover:text-[var(--accent-text)] cursor-pointer"
+                  >
+                    Privacy Policy
+                  </button>{' '}
+                  were updated on {LEGAL_CONFIG.lastUpdated}.
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -53,11 +81,11 @@ export const LegalModals: React.FC = () => {
           type="button"
           onClick={async () => {
             await acceptLatestTerms();
-            showToast('Preferences saved');
+            showToast(isNy ? 'Zokonda zasungidwa' : 'Preferences saved');
           }}
           className="px-5 py-2.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs hover:brightness-95 transition shrink-0 cursor-pointer min-h-[44px]"
         >
-          I accept
+          {isNy ? 'Ndavomera' : 'I accept'}
         </button>
       </div>
     </div>

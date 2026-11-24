@@ -46,6 +46,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../services/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { useAudio } from '../../context/AudioContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { useRouter } from '../../context/RouterContext';
 import {
@@ -67,6 +68,7 @@ import { verifyServerToken } from '../../services/payoutTokenService';
 import { PayoutProviderType, Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG, DEFAULT_BANNER_SVG, LOWERVIBE_ICON_ARTWORK } from '../../utils/artworkFallback';
 import { formatTime } from '../../utils/formatters';
+import { normalizeGenreCategory, translateGenreCategory } from '../../utils/genreCategories';
 import { openPwaInstallPrompt } from '../../utils/pwaManifest';
 import { GenreSelectOrCustom } from '../common/GenreSelectOrCustom';
 import { MoodSelectOrCustom } from '../common/MoodSelectOrCustom';
@@ -129,6 +131,8 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
     sendNotification,
   } = useNotifications();
   const { navigate, searchParams } = useRouter();
+  const { language, t: translate } = useLanguage();
+  const isNy = language === 'ny';
 
   const [activeTab, setActiveTab] = useState<StudioTab>('overview');
   const [notice, setNotice] = useState<{ text: string; type: 'ok' | 'err' } | null>(null);
@@ -172,13 +176,13 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
     const formatStatus = (s: string) => {
       switch (s) {
         case 'paid':
-          return 'Paid';
+          return isNy ? 'Zaperekedwa' : 'Paid';
         case 'processing':
-          return 'Processing';
+          return isNy ? 'Zikukonzedwa' : 'Processing';
         case 'failed':
-          return 'Failed';
+          return isNy ? 'Zalephera' : 'Failed';
         default:
-          return 'Awaiting Review';
+          return isNy ? 'Zikuyang\'aniridwa' : 'Awaiting Review';
       }
     };
 
@@ -203,13 +207,23 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
             type: 'withdrawal_status',
             title:
               req.status === 'paid'
-                ? 'Withdrawal Paid'
+                ? isNy
+                  ? 'Ndalama Zaperekedwa'
+                  : 'Withdrawal Paid'
                 : req.status === 'processing'
-                ? 'Withdrawal Processing'
+                ? isNy
+                  ? 'Malipiro Akukonzedwa'
+                  : 'Withdrawal Processing'
                 : req.status === 'failed'
-                ? 'Withdrawal Failed'
+                ? isNy
+                  ? 'Malipiro Alephera'
+                  : 'Withdrawal Failed'
+                : isNy
+                ? 'Malipiro Asinthidwa'
                 : 'Withdrawal Updated',
-            message: `${amountText} payout${tokenText} moved from ${formatStatus(prevStatus)} to ${formatStatus(req.status)}.`,
+            message: isNy
+              ? `Malipiro a ${amountText}${tokenText} asintha kuchoka pa ${formatStatus(prevStatus)} kupita pa ${formatStatus(req.status)}.`
+              : `${amountText} payout${tokenText} moved from ${formatStatus(prevStatus)} to ${formatStatus(req.status)}.`,
             actionRoute: '/artistcreator?tab=withdrawals',
             payoutRequestId: req.id,
             payoutStatus: req.status,
@@ -413,25 +427,33 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
 
   const eligibilityChecks = [
     {
-      label: `Published tracks (${publishedTracks.length}/${monetizationConfig.requiredPublishedTracks})`,
+      label: isNy
+        ? `Nyimbo zotulutsidwa (${publishedTracks.length}/${monetizationConfig.requiredPublishedTracks})`
+        : `Published tracks (${publishedTracks.length}/${monetizationConfig.requiredPublishedTracks})`,
       met: publishedTracks.length >= monetizationConfig.requiredPublishedTracks,
       current: publishedTracks.length,
       target: monetizationConfig.requiredPublishedTracks,
     },
     {
-      label: `Real plays (${totalPlays.toLocaleString()}/${monetizationConfig.requiredPlays30d.toLocaleString()})`,
+      label: isNy
+        ? `Kuwerenga kwenikweni (${totalPlays.toLocaleString()}/${monetizationConfig.requiredPlays30d.toLocaleString()})`
+        : `Real plays (${totalPlays.toLocaleString()}/${monetizationConfig.requiredPlays30d.toLocaleString()})`,
       met: totalPlays >= monetizationConfig.requiredPlays30d,
       current: totalPlays,
       target: monetizationConfig.requiredPlays30d,
     },
     {
-      label: `Followers (${followersCount}/${monetizationConfig.requiredFollowers})`,
+      label: isNy
+        ? `Otsatira (${followersCount}/${monetizationConfig.requiredFollowers})`
+        : `Followers (${followersCount}/${monetizationConfig.requiredFollowers})`,
       met: followersCount >= monetizationConfig.requiredFollowers,
       current: followersCount,
       target: monetizationConfig.requiredFollowers,
     },
     {
-      label: `Zero active copyright strikes (${activeStrikes}/${monetizationConfig.maxActiveStrikes})`,
+      label: isNy
+        ? `Palibe mlandu wa ufulu wa nyimbo (${activeStrikes}/${monetizationConfig.maxActiveStrikes})`
+        : `Zero active copyright strikes (${activeStrikes}/${monetizationConfig.maxActiveStrikes})`,
       met: activeStrikes <= monetizationConfig.maxActiveStrikes,
       current: activeStrikes <= monetizationConfig.maxActiveStrikes ? 1 : 0,
       target: 1,
@@ -525,7 +547,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
         await getDoc(doc(db, 'artists', currentArtist.id)).catch(() => {});
       }
       setEarningsRefreshKey((k) => k + 1);
-      showNotice('Total earnings refreshed.');
+      showNotice(isNy ? 'Ndalama zonse zatsitsimutsidwa.' : 'Total earnings refreshed.');
     } finally {
       window.setTimeout(() => setIsRefreshingEarnings(false), 320);
     }
@@ -556,7 +578,13 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
       }
     } catch (err) {
       setAudioFile(null);
-      setUploadError(err instanceof Error ? err.message : 'Could not verify audio file.');
+      setUploadError(
+        err instanceof Error
+          ? err.message
+          : isNy
+          ? 'Sitinathe kutsimikizira fayilo ya nyimboyi.'
+          : 'Could not verify audio file.'
+      );
     } finally {
       setIsAnalyzingAudio(false);
     }
@@ -574,11 +602,17 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
       setCoverOriginalName(file.name);
       setCoverContentType(compressed.contentType || 'image/webp');
       const kb = Math.max(1, Math.round(compressed.compressedBytes / 1024));
-      setCoverCompressionNote(`${compressed.width}×${compressed.height} · ${kb} KB compressed`);
+      setCoverCompressionNote(
+        isNy
+          ? `${compressed.width}×${compressed.height} · ${kb} KB yofupikitsidwa`
+          : `${compressed.width}×${compressed.height} · ${kb} KB compressed`
+      );
     } catch (err) {
       setCoverError(
         err instanceof Error
           ? err.message
+          : isNy
+          ? 'Ikani chithunzi chomveka cha chikuto (osachepera 200 × 200 px).'
           : 'Upload a clear cover photo (at least 200 × 200 px).'
       );
     }
@@ -617,22 +651,34 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
     setUploadError(null);
 
     if (!audioFile && !isValidHttpsUrl(audioUrlInput)) {
-      setUploadError('Select an audio file or provide a valid HTTPS audio link.');
+      setUploadError(
+        isNy
+          ? 'Sankhani fayilo ya nyimbo kapena ikani ulalo wa HTTPS.'
+          : 'Select an audio file or provide a valid HTTPS audio link.'
+      );
       setUploadStep(1);
       return;
     }
     if (!title.trim()) {
-      setUploadError('Enter a track title.');
+      setUploadError(isNy ? 'Lembani dzina la nyimbo.' : 'Enter a track title.');
       setUploadStep(2);
       return;
     }
     if (coverBlob && !artworkNoLogoConfirmed) {
-      setUploadError('Please confirm the cover artwork checkbox.');
+      setUploadError(
+        isNy
+          ? 'Chonde chongani bokosi lotsimikizira chithunzi cha nyimbo.'
+          : 'Please confirm the cover artwork checkbox.'
+      );
       setUploadStep(2);
       return;
     }
     if (!rightsConfirmed) {
-      setUploadError('Please confirm that you own or control the audio rights.');
+      setUploadError(
+        isNy
+          ? 'Chonde tsimikizirani kuti muli ndi ufulu wofalitsa nyimboyi.'
+          : 'Please confirm that you own or control the audio rights.'
+      );
       setUploadStep(2);
       return;
     }
@@ -698,7 +744,13 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
       }
 
       setUploadStatusText(
-        coverBlob ? 'Uploading audio & compressed artwork...' : 'Uploading audio...'
+        coverBlob
+          ? isNy
+            ? 'Kukweza nyimbo ndi chithunzi chofupikitsidwa...'
+            : 'Uploading audio & compressed artwork...'
+          : isNy
+          ? 'Kukweza nyimbo...'
+          : 'Uploading audio...'
       );
       let audioPct = audioFile ? 0 : 100;
       let coverPct = coverBlob ? 0 : 100;
@@ -721,9 +773,15 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
               setIsUploadPaused(snap.state === 'paused');
               setUploadStatusText(
                 snap.state === 'paused'
-                  ? 'Upload paused — tap Resume to continue'
+                  ? isNy
+                    ? 'Kukweza kwayimitsidwa — dinani Pitirizani'
+                    : 'Upload paused — tap Resume to continue'
                   : coverBlob
-                  ? 'Uploading audio & compressed artwork...'
+                  ? isNy
+                    ? 'Kukweza nyimbo ndi chithunzi chofupikitsidwa...'
+                    : 'Uploading audio & compressed artwork...'
+                  : isNy
+                  ? 'Kukweza nyimbo...'
                   : 'Uploading audio...'
               );
               syncCombinedProgress();
@@ -766,9 +824,10 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
         durationSeconds = probedRes.durationSeconds;
       }
 
-      setUploadStatusText('Saving track details...');
+      setUploadStatusText(isNy ? 'Kusunga zambiri za nyimbo...' : 'Saving track details...');
       setUploadProgress(96);
-      await upsertGenre(genre, { region }).catch((err) => {
+      const canonicalGenre = normalizeGenreCategory(genre);
+      await upsertGenre(canonicalGenre, { region }).catch((err) => {
         console.warn('Genre catalog update skipped:', err);
       });
 
@@ -805,10 +864,10 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
           checksum: extractedMeta?.audioChecksum,
           verifiedSource: audioFile ? 'firebase_storage' : 'https_stream',
         },
-        genre,
+        genre: canonicalGenre,
         mood: cleanMood || undefined,
         region,
-        vibeTags: [genre, ...(cleanMood ? [cleanMood] : [])].filter(Boolean),
+        vibeTags: [canonicalGenre, ...(cleanMood ? [cleanMood] : [])].filter(Boolean),
         bpm: cleanBpm,
         lyrics: lyrics.trim() || undefined,
         story: story.trim() || undefined,
@@ -826,12 +885,12 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
       resetUploadWizard();
       setActiveTab('tracks');
       if (saveAsDraft) {
-        showNotice('Saved as draft.');
+        showNotice(isNy ? 'Zasungidwa m\'zolembedwa.' : 'Saved as draft.');
       } else {
         setPublishedCelebrationTrack(savedTrack);
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Upload failed.';
+      const msg = err instanceof Error ? err.message : isNy ? 'Kukweza kwalephera.' : 'Upload failed.';
       setUploadError(msg);
       showNotice(msg, 'err');
     } finally {
@@ -843,7 +902,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
 
   const handleArtistAvatarUpload = async (file: File) => {
     if (!currentUser || !currentArtist || !isVerifiedStudioOwner) {
-      const msg = 'Permission denied: only the artist profile owner can upload a profile photo.';
+      const msg = isNy
+        ? 'Choletsedwa: mwini wa mbiri ya wojambula yekha ndiye angathe kukweza chithunzi cha mbiri.'
+        : 'Permission denied: only the artist profile owner can upload a profile photo.';
       setArtistProfileError(msg);
       showNotice(msg, 'err');
       return;
@@ -871,7 +932,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
       if (!res.success) {
         await deleteUploadedStoragePaths([uploaded.storagePath]).catch(() => {});
         setOptimisticArtistAvatar(null);
-        const msg = res.error || 'Could not save artist profile photo.';
+        const msg =
+          res.error ||
+          (isNy ? 'Sitinathe kusunga chithunzi cha mbiri ya wojambula.' : 'Could not save artist profile photo.');
         setArtistProfileError(msg);
         showNotice(msg, 'err');
         return;
@@ -880,10 +943,15 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
         deleteUploadedStoragePaths([oldPath]).catch(() => {});
       }
       setOptimisticArtistAvatar(null);
-      showNotice('Artist profile photo updated.');
+      showNotice(isNy ? 'Chithunzi cha mbiri ya wojambula chasinthidwa.' : 'Artist profile photo updated.');
     } catch (err) {
       setOptimisticArtistAvatar(null);
-      const msg = err instanceof Error ? err.message : 'Could not upload artist profile photo.';
+      const msg =
+        err instanceof Error
+          ? err.message
+          : isNy
+          ? 'Sitinathe kukweza chithunzi cha mbiri ya wojambula.'
+          : 'Could not upload artist profile photo.';
       setArtistProfileError(msg);
       showNotice(msg, 'err');
     } finally {
@@ -895,7 +963,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
 
   const handleArtistBannerUpload = async (file: File) => {
     if (!currentUser || !currentArtist || !isVerifiedStudioOwner) {
-      const msg = 'Permission denied: only the artist profile owner can upload a cover photo.';
+      const msg = isNy
+        ? 'Choletsedwa: mwini wa mbiri ya wojambula yekha ndiye angathe kukweza chithunzi chakumbuyo.'
+        : 'Permission denied: only the artist profile owner can upload a cover photo.';
       setArtistProfileError(msg);
       showNotice(msg, 'err');
       return;
@@ -923,7 +993,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
       if (!res.success) {
         await deleteUploadedStoragePaths([uploaded.storagePath]).catch(() => {});
         setOptimisticArtistBanner(null);
-        const msg = res.error || 'Could not save artist cover photo.';
+        const msg =
+          res.error ||
+          (isNy ? 'Sitinathe kusunga chithunzi chachikulu cha wojambula.' : 'Could not save artist cover photo.');
         setArtistProfileError(msg);
         showNotice(msg, 'err');
         return;
@@ -932,10 +1004,15 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
         deleteUploadedStoragePaths([oldPath]).catch(() => {});
       }
       setOptimisticArtistBanner(null);
-      showNotice('Artist cover photo updated.');
+      showNotice(isNy ? 'Chithunzi chachikulu cha wojambula chasinthidwa.' : 'Artist cover photo updated.');
     } catch (err) {
       setOptimisticArtistBanner(null);
-      const msg = err instanceof Error ? err.message : 'Could not upload artist cover photo.';
+      const msg =
+        err instanceof Error
+          ? err.message
+          : isNy
+          ? 'Sitinathe kukweza chithunzi chachikulu cha wojambula.'
+          : 'Could not upload artist cover photo.';
       setArtistProfileError(msg);
       showNotice(msg, 'err');
     } finally {
@@ -950,17 +1027,21 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
     const res = await deleteTrack(track.id);
     setDeletingTrackId(null);
     if (!res.success) {
-      showNotice(res.error || 'Could not delete track.', 'err');
+      showNotice(res.error || (isNy ? 'Sitinathe kufufuta nyimbo.' : 'Could not delete track.'), 'err');
       return;
     }
     deleteUploadedStoragePaths([track.storageAudioPath, track.storageCoverPath]).catch(() => {});
     setConfirmDeleteId(null);
-    showNotice(`Deleted "${track.title}".`);
+    showNotice(isNy ? `Yafufutidwa "${track.title}".` : `Deleted "${track.title}".`);
   };
 
   const handleAddPayoutMethodSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const ok = await requireReauth('Confirm it is you before adding a payout method.');
+    const ok = await requireReauth(
+      isNy
+        ? 'Tsimikizirani kuti ndi inu musanawonjezere njira yolandirira ndalama.'
+        : 'Confirm it is you before adding a payout method.'
+    );
     if (!ok) return;
 
     setIsAddingPm(true);
@@ -975,11 +1056,15 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
       setPmIdentifier('');
       showNotice(
         isMonetized || allEligible
-          ? 'Payout method accepted automatically.'
+          ? isNy
+            ? 'Njira yolandirira ndalama yavomerezedwa yokha.'
+            : 'Payout method accepted automatically.'
+          : isNy
+          ? 'Njira yolandirira ndalama yasungidwa.'
           : 'Payout method saved.'
       );
     } else {
-      showNotice(res.error || 'Could not add payout method.', 'err');
+      showNotice(res.error || (isNy ? 'Sitinathe kuwonjezera njira yolandirira ndalama.' : 'Could not add payout method.'), 'err');
     }
   };
 
@@ -988,21 +1073,30 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
     if (!currentArtist) return;
     const amount = Number(withdrawAmountMwk);
     if (!Number.isFinite(amount) || amount < monetizationConfig.minWithdrawalMwk) {
-      showNotice(`Minimum withdrawal is ${monetizationConfig.minWithdrawalMwk.toLocaleString()} MWK.`, 'err');
+      showNotice(
+        isNy
+          ? `Ndalama zochepa kwambiri zotulutsa ndi ${monetizationConfig.minWithdrawalMwk.toLocaleString()} MWK.`
+          : `Minimum withdrawal is ${monetizationConfig.minWithdrawalMwk.toLocaleString()} MWK.`,
+        'err'
+      );
       return;
     }
     if (amount > availableBalanceMwk) {
-      showNotice('Amount exceeds your available balance.', 'err');
+      showNotice(isNy ? 'Ndalama zapyola zomwe zilipo pa akaunti yanu.' : 'Amount exceeds your available balance.', 'err');
       return;
     }
     const methodId =
       selectedPmId || myPayoutMethods.find((m) => m.isDefault)?.id || myPayoutMethods[0]?.id;
     if (!methodId) {
-      showNotice('Add a payout method first.', 'err');
+      showNotice(isNy ? 'Onjezerani njira yolandirira ndalama kaye.' : 'Add a payout method first.', 'err');
       return;
     }
 
-    const ok = await requireReauth('Confirm your identity before submitting a withdrawal.');
+    const ok = await requireReauth(
+      isNy
+        ? 'Tsimikizirani umunthu wanu musanatumize pempho lotulutsa ndalama.'
+        : 'Confirm your identity before submitting a withdrawal.'
+    );
     if (!ok) return;
 
     setIsSubmittingWithdraw(true);
@@ -1015,14 +1109,14 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
     setIsSubmittingWithdraw(false);
     if (res.success) {
       setWithdrawAmountMwk('');
-      const tok = res.request?.payoutToken ? ` · Token ${res.request.payoutToken}` : '';
+      const tok = res.request?.payoutToken ? ` · ${isNy ? 'Chizindikiro' : 'Token'} ${res.request.payoutToken}` : '';
       showNotice(
         res.request?.settlementVerified
-          ? `Withdrawal dispatched${tok}`
-          : `Withdrawal verified & queued${tok}`
+          ? `${isNy ? 'Kutulutsa ndalama kwatumizidwa' : 'Withdrawal dispatched'}${tok}`
+          : `${isNy ? 'Kutulutsa ndalama kwatsimikiziridwa ndipo kuli pamzere' : 'Withdrawal verified & queued'}${tok}`
       );
     } else {
-      showNotice(res.error || 'Withdrawal failed.', 'err');
+      showNotice(res.error || (isNy ? 'Kutulutsa ndalama kwalephera.' : 'Withdrawal failed.'), 'err');
     }
   };
 
@@ -1033,16 +1127,14 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
         <div className="w-16 h-16 rounded-2xl bg-[var(--surface)] border border-[var(--border)] flex items-center justify-center mx-auto text-[var(--accent-text)]">
           <Music className="w-8 h-8" />
         </div>
-        <h1 className="text-2xl font-extrabold text-[var(--text)]">Sign in to open Studio</h1>
-        <p className="text-sm text-[var(--text-muted)]">
-          Upload tracks, track plays, and manage earnings from one place.
-        </p>
+        <h1 className="text-2xl font-extrabold text-[var(--text)]">{translate('studio_signin_title')}</h1>
+        <p className="text-sm text-[var(--text-muted)]">{translate('studio_signin_sub')}</p>
         <button
           type="button"
           onClick={() => navigate('/login')}
           className="px-6 py-3 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm cursor-pointer"
         >
-          Sign in
+          {translate('sign_in')}
         </button>
       </div>
     );
@@ -1062,13 +1154,13 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
               </div>
               <div className="space-y-1.5">
                 <span className="text-[11px] font-mono font-semibold uppercase tracking-[0.14em] text-[var(--violet)] block">
-                  Application under review
+                  {translate('studio_pending_badge')}
                 </span>
                 <h1 className="text-2xl sm:text-3xl font-extrabold font-heading text-[var(--text)]">
-                  Please wait for artist approval
+                  {translate('studio_pending_title')}
                 </h1>
                 <p className="text-xs sm:text-sm text-[var(--text-muted)] max-w-md mx-auto leading-relaxed">
-                  We received your creator submission. Our team reviews every artist profile to keep LOWERVIBE authentic — you will get a notification here as soon as your Studio unlocks.
+                  {translate('studio_pending_sub')}
                 </p>
               </div>
             </div>
@@ -1076,19 +1168,25 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
             {app && (
               <div className="p-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] space-y-2.5 text-xs">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[var(--text-muted)]">Artist / Stage name</span>
+                  <span className="text-[var(--text-muted)]">
+                    {isNy ? 'Dzina la Woimba' : 'Artist / Stage name'}
+                  </span>
                   <span className="font-bold text-[var(--text)]">{app.stageName}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[var(--text-muted)]">Primary genre</span>
-                  <span className="font-semibold text-[var(--text)]">{app.primaryGenre}</span>
+                  <span className="text-[var(--text-muted)]">
+                    {isNy ? 'Mtundu waukulu' : 'Primary genre'}
+                  </span>
+                  <span className="font-semibold text-[var(--text)]">
+                    {translateGenreCategory(app.primaryGenre, language)}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[var(--text-muted)]">Country</span>
+                  <span className="text-[var(--text-muted)]">{isNy ? 'Dziko' : 'Country'}</span>
                   <span className="font-semibold text-[var(--text)]">{app.country}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[var(--text-muted)]">Submitted</span>
+                  <span className="text-[var(--text-muted)]">{isNy ? 'Tsiku' : 'Submitted'}</span>
                   <span className="font-mono tabular-nums text-[var(--text)]">
                     {new Date(app.submittedAt).toLocaleDateString()}
                   </span>
@@ -1099,15 +1197,23 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
             <div className="space-y-2.5 text-xs">
               <div className="flex items-center gap-3 p-3 rounded-xl bg-[var(--surface-2)]/60 border border-[var(--border)]">
                 <CheckCircle2 className="w-4 h-4 text-[var(--accent-text)] shrink-0" />
-                <span className="text-[var(--text)] font-medium">1. Artist submission received</span>
+                <span className="text-[var(--text)] font-medium">
+                  {isNy ? '1. Pempho la woimba lalandiridwa' : '1. Artist submission received'}
+                </span>
               </div>
               <div className="flex items-center gap-3 p-3 rounded-xl bg-[var(--surface-2)]/60 border border-[var(--border)]">
                 <Clock className="w-4 h-4 text-[var(--violet)] shrink-0" />
-                <span className="text-[var(--text)] font-medium">2. Reviewing profile &amp; creator details</span>
+                <span className="text-[var(--text)] font-medium">
+                  {isNy ? '2. Tikuyang\'anira zambiri zanu' : '2. Reviewing profile & creator details'}
+                </span>
               </div>
               <div className="flex items-center gap-3 p-3 rounded-xl bg-[var(--surface-2)]/40 border border-[var(--border)] text-[var(--text-muted)]">
                 <Music className="w-4 h-4 shrink-0" />
-                <span>3. Upload tracks &amp; track earnings once approved</span>
+                <span>
+                  {isNy
+                    ? '3. Kwezani nyimbo ndi kuona ndalama mukavomerezedwa'
+                    : '3. Upload tracks & track earnings once approved'}
+                </span>
               </div>
             </div>
 
@@ -1117,14 +1223,14 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 onClick={() => navigate('/')}
                 className="flex-1 py-3 px-4 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm cursor-pointer min-h-[48px]"
               >
-                Back to Home
+                {translate('studio_back_home')}
               </button>
               <button
                 type="button"
                 onClick={() => navigate('/account')}
                 className="flex-1 py-3 px-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] font-semibold text-sm cursor-pointer min-h-[48px]"
               >
-                Go to Profile
+                {translate('studio_go_profile')}
               </button>
             </div>
           </div>
@@ -1140,7 +1246,12 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
             e.preventDefault();
             const cleanStage = upgradeStageName.trim();
             if (cleanStage.length < 2) {
-              showNotice('Enter your artist or stage name (at least 2 characters).', 'err');
+              showNotice(
+                isNy
+                  ? 'Lembani dzina lanu la woimba (osachepera zilembo ziwiri).'
+                  : 'Enter your artist or stage name (at least 2 characters).',
+                'err'
+              );
               return;
             }
             setIsSubmittingApplication(true);
@@ -1151,12 +1262,16 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 stageName: cleanStage,
                 legalName: currentUser.name || cleanStage,
                 country: upgradeCountry || 'Malawi',
-                primaryGenre: upgradePrimaryGenre || 'Afro-Fusion',
+                primaryGenre: normalizeGenreCategory(upgradePrimaryGenre) || 'Afro-Fusion',
                 bio: upgradeBio.trim(),
                 avatarUrl: currentUser.avatar,
                 rightsConfirmed: true,
               });
-              showNotice('Artist application submitted! Please wait for approval.');
+              showNotice(
+                isNy
+                  ? 'Pempho la woimba latumizidwa! Chonde dikirani kuvomerezedwa.'
+                  : 'Artist application submitted! Please wait for approval.'
+              );
             } finally {
               setIsSubmittingApplication(false);
             }
@@ -1168,23 +1283,27 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
           </div>
           <div className="space-y-1">
             <h1 className="text-2xl font-extrabold font-heading text-[var(--text)]">
-              {wasRejected ? 'Update & resubmit artist profile' : 'Apply for Creator Studio'}
+              {wasRejected ? translate('studio_reapply_title') : translate('studio_apply_title')}
             </h1>
             <p className="text-xs sm:text-sm text-[var(--text-muted)]">
-              Submit your artist details for quick review and unlock music uploads.
+              {translate('studio_apply_sub')}
             </p>
           </div>
 
           {wasRejected && currentUser.artistApplication?.adminFeedback && (
             <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--danger)] text-left text-xs text-[var(--danger)] space-y-1">
-              <div className="font-bold">Previous review note:</div>
+              <div className="font-bold">
+                {isNy ? 'Ndemanga yapita:' : 'Previous review note:'}
+              </div>
               <div>{currentUser.artistApplication.adminFeedback}</div>
             </div>
           )}
 
           <div className="space-y-3 text-left">
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-[var(--text)]">Artist / Stage name</label>
+              <label className="text-xs font-semibold text-[var(--text)]">
+                {isNy ? 'Dzina la Woimba' : 'Artist / Stage name'}
+              </label>
               <input
                 type="text"
                 required
@@ -1192,21 +1311,25 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 maxLength={100}
                 value={upgradeStageName}
                 onChange={(e) => setUpgradeStageName(e.target.value)}
-                placeholder="Your artist name"
+                placeholder={isNy ? 'Dzina lanu loimbira' : 'Your artist name'}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)]"
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-[var(--text)]">Primary genre</label>
+                <label className="text-xs font-semibold text-[var(--text)]">
+                  {isNy ? 'Mtundu waukulu' : 'Primary genre'}
+                </label>
                 <GenreSelectOrCustom
                   value={upgradePrimaryGenre}
                   onChange={setUpgradePrimaryGenre}
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-[var(--text)]">Country</label>
+                <label className="text-xs font-semibold text-[var(--text)]">
+                  {isNy ? 'Dziko' : 'Country'}
+                </label>
                 <RegionSelect
                   value={upgradeCountry}
                   onChange={setUpgradeCountry}
@@ -1216,13 +1339,15 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-[var(--text)]">About your sound (optional)</label>
+              <label className="text-xs font-semibold text-[var(--text)]">
+                {isNy ? 'Zambiri za nyimbo zanu (ngati mukufuna)' : 'About your sound (optional)'}
+              </label>
               <textarea
                 rows={2}
                 maxLength={500}
                 value={upgradeBio}
                 onChange={(e) => setUpgradeBio(e.target.value)}
-                placeholder="Share a short intro about your music..."
+                placeholder={isNy ? 'Fotokozani mwachidule za nyimbo zanu...' : 'Share a short intro about your music...'}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)]"
               />
             </div>
@@ -1233,7 +1358,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
             disabled={isSubmittingApplication}
             className="w-full py-3.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm cursor-pointer disabled:opacity-60 min-h-[48px]"
           >
-            {isSubmittingApplication ? 'Submitting...' : 'Submit for artist'}
+            {isSubmittingApplication ? translate('studio_submitting') : translate('studio_submit_btn')}
           </button>
         </form>
       </div>
@@ -1277,13 +1402,14 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 🎊
               </p>
               <h2 className="text-xl sm:text-2xl font-extrabold font-heading text-[var(--text)]">
-                Congratulations! Your song is live
+                {isNy ? 'Zabwino! Nyimbo yanu yafika pa intaneti' : 'Congratulations! Your song is live'}
               </h2>
               <p className="text-sm font-bold text-[var(--accent-text)] truncate">
                 “{publishedCelebrationTrack.title}”
               </p>
               <p className="text-xs text-[var(--text-muted)] font-mono tabular-nums">
-                {publishedCelebrationTrack.genre} · {formatTime(publishedCelebrationTrack.durationSeconds)} · {publishedCelebrationTrack.region}
+                {translateGenreCategory(publishedCelebrationTrack.genre, language)} ·{' '}
+                {formatTime(publishedCelebrationTrack.durationSeconds)} · {publishedCelebrationTrack.region}
               </p>
             </div>
 
@@ -1291,26 +1417,26 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
               <button
                 type="button"
                 onClick={() => {
-                  const t = publishedCelebrationTrack;
+                  const chosen = publishedCelebrationTrack;
                   setPublishedCelebrationTrack(null);
-                  playTrack(t);
+                  playTrack(chosen);
                 }}
                 className="flex-1 py-3 px-4 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center justify-center gap-2 cursor-pointer min-h-[48px]"
               >
                 <Play className="w-4 h-4 fill-current" />
-                <span>Play now</span>
+                <span>{translate('play_now')}</span>
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  const t = publishedCelebrationTrack;
+                  const chosen = publishedCelebrationTrack;
                   setPublishedCelebrationTrack(null);
-                  setActiveShareTrack(t);
+                  setActiveShareTrack(chosen);
                 }}
                 className="py-3 px-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] font-semibold text-sm flex items-center justify-center gap-2 cursor-pointer min-h-[48px]"
               >
                 <Share2 className="w-4 h-4" />
-                <span>Share</span>
+                <span>{translate('share')}</span>
               </button>
             </div>
           </div>
@@ -1362,18 +1488,19 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 </h1>
                 {currentArtist?.verified && (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--surface-2)] border border-[var(--border)] text-[var(--accent-text)]">
-                    Verified
+                    {translate('verified')}
                   </span>
                 )}
               </div>
               <p className="text-xs text-[var(--text-muted)]">
-                Studio · {myTracks.length} track{myTracks.length === 1 ? '' : 's'}
+                {isNy
+                  ? `Situdiyo · Nyimbo ${myTracks.length}`
+                  : `Studio · ${myTracks.length} track${myTracks.length === 1 ? '' : 's'}`}
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {/* Real-Time Withdrawal Status Notification Badge */}
             {(unreadWithdrawalNotifs.length > 0 ||
               withdrawalNotifications.length > 0 ||
               activeProcessingCount > 0) && (
@@ -1390,8 +1517,8 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                         : 'bg-[var(--violet)]/15 border-[var(--violet)]/45 text-[var(--violet)] shadow-sm'
                       : 'bg-[var(--surface-2)] border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)]'
                   }`}
-                  aria-label="Withdrawal status notifications"
-                  title="Real-time withdrawal status alerts"
+                  aria-label={isNy ? 'Zidziwitso za malipiro' : 'Withdrawal status notifications'}
+                  title={isNy ? 'Zidziwitso za malipiro' : 'Real-time withdrawal status alerts'}
                 >
                   {unreadWithdrawalNotifs.length > 0 ? (
                     <span className="relative flex h-2 w-2">
@@ -1406,9 +1533,13 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                   )}
                   <span>
                     {unreadWithdrawalNotifs.length > 0
-                      ? latestWithdrawalNotif?.title || 'Payout Update'
+                      ? latestWithdrawalNotif?.title || (isNy ? 'Uthenga wa Malipiro' : 'Payout Update')
                       : activeProcessingCount > 0
-                      ? `${activeProcessingCount} Pending Payout`
+                      ? isNy
+                        ? `Malipiro ${activeProcessingCount} Akukonzedwa`
+                        : `${activeProcessingCount} Pending Payout`
+                      : isNy
+                      ? 'Zidziwitso za Malipiro'
                       : 'Payout Alerts'}
                   </span>
                   {unreadWithdrawalNotifs.length > 0 && (
@@ -1421,17 +1552,21 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 {isPayoutNotifOpen && (
                   <div
                     role="dialog"
-                    aria-label="Withdrawal status alerts"
+                    aria-label={isNy ? 'Zidziwitso za malipiro' : 'Withdrawal status alerts'}
                     className="absolute right-0 top-12 z-50 w-80 sm:w-96 rounded-[22px] bg-[var(--surface)] border border-[var(--border-strong)] shadow-2xl overflow-hidden animate-slideUp"
                   >
                     <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between gap-2">
                       <div>
                         <div className="text-xs font-extrabold text-[var(--text)]">
-                          Withdrawal Status Alerts
+                          {isNy ? 'Zidziwitso za Malipiro' : 'Withdrawal Status Alerts'}
                         </div>
                         <div className="text-[10px] font-mono text-[var(--text-muted)]">
                           {unreadWithdrawalNotifs.length > 0
-                            ? `${unreadWithdrawalNotifs.length} unread update${unreadWithdrawalNotifs.length === 1 ? '' : 's'}`
+                            ? isNy
+                              ? `Zosawerengedwa ${unreadWithdrawalNotifs.length}`
+                              : `${unreadWithdrawalNotifs.length} unread update${unreadWithdrawalNotifs.length === 1 ? '' : 's'}`
+                            : isNy
+                            ? 'Malipiro akugwirizana panthawiyi'
                             : 'Live payout status synced'}
                         </div>
                       </div>
@@ -1440,7 +1575,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                         onClick={handleOpenWithdrawalsFromAlert}
                         className="px-3 py-1.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-[11px] font-bold cursor-pointer"
                       >
-                        Open Withdrawals
+                        {isNy ? 'Tsegulani Malipiro' : 'Open Withdrawals'}
                       </button>
                     </div>
 
@@ -1448,7 +1583,11 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       {withdrawalNotifications.length === 0 ? (
                         <div className="p-4 text-xs text-[var(--text-muted)] text-center">
                           {activeProcessingCount > 0
-                            ? `${activeProcessingCount} withdrawal request${activeProcessingCount === 1 ? ' is' : 's are'} currently being processed.`
+                            ? isNy
+                              ? `Mapempho ${activeProcessingCount} akutenga ndalama akukonzedwa.`
+                              : `${activeProcessingCount} withdrawal request${activeProcessingCount === 1 ? ' is' : 's are'} currently being processed.`
+                            : isNy
+                            ? 'Palibe kusintha kwa malipiro pakadali pano.'
                             : 'No withdrawal status changes yet.'}
                         </div>
                       ) : (
@@ -1483,7 +1622,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                   </span>
                                   {!read && (
                                     <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-[var(--accent)]/20 text-[var(--accent-text)] font-bold">
-                                      New
+                                      {isNy ? 'Zatsopano' : 'New'}
                                     </span>
                                   )}
                                 </div>
@@ -1505,10 +1644,10 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
               type="button"
               onClick={() => openPwaInstallPrompt('creator')}
               className="px-3.5 py-2 rounded-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--accent)] text-xs font-semibold text-[var(--accent-text)] flex items-center gap-1.5 cursor-pointer"
-              title="Install standalone LOWERVIBE Creator App (Android & iPhone)"
+              title={isNy ? 'Ikani Pulogalamu ya Woimba' : 'Install standalone LOWERVIBE Creator App (Android & iPhone)'}
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Creator App</span>
+              <span>{translate('creator_app')}</span>
             </button>
             {currentArtist && (
               <button
@@ -1517,7 +1656,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 className="px-4 py-2 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] flex items-center gap-1.5 cursor-pointer"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
-                <span>Artist page</span>
+                <span>{translate('view_artist_btn')}</span>
               </button>
             )}
             <button
@@ -1526,7 +1665,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
               className="px-4 py-2 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold flex items-center gap-1.5 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Upload</span>
+              <span>{translate('upload')}</span>
             </button>
           </div>
         </div>
@@ -1535,12 +1674,12 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
       {/* 6 Studio Tabs including dedicated Withdrawals dashboard */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
         {[
-          { id: 'overview' as const, label: 'Overview', icon: ShieldCheck },
-          { id: 'upload' as const, label: 'Upload', icon: UploadCloud },
-          { id: 'tracks' as const, label: `Tracks (${myTracks.length})`, icon: Music },
-          { id: 'analytics' as const, label: 'Analytics', icon: BarChart3 },
-          { id: 'monetization' as const, label: 'Monetization', icon: DollarSign },
-          { id: 'withdrawals' as const, label: 'Withdrawals', icon: Wallet },
+          { id: 'overview' as const, label: translate('studio_tab_overview'), icon: ShieldCheck },
+          { id: 'upload' as const, label: translate('studio_tab_upload'), icon: UploadCloud },
+          { id: 'tracks' as const, label: translate('studio_tab_tracks', undefined, { count: myTracks.length }), icon: Music },
+          { id: 'analytics' as const, label: translate('studio_tab_analytics'), icon: BarChart3 },
+          { id: 'monetization' as const, label: translate('studio_tab_monetization'), icon: DollarSign },
+          { id: 'withdrawals' as const, label: translate('studio_tab_withdrawals'), icon: Wallet },
         ].map((tab) => {
           const Icon = tab.icon;
           const active = activeTab === tab.id;
@@ -1579,25 +1718,25 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
         <div className="space-y-6">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="p-4 rounded-[20px] bg-[var(--surface)] border border-[var(--border)]">
-              <div className="text-xs text-[var(--text-muted)]">Published songs</div>
+              <div className="text-xs text-[var(--text-muted)]">{translate('studio_published_songs')}</div>
               <div className="text-2xl font-extrabold text-[var(--text)] mt-1 tabular-nums">
                 {publishedTracks.length}
               </div>
             </div>
             <div className="p-4 rounded-[20px] bg-[var(--surface)] border border-[var(--border)]">
-              <div className="text-xs text-[var(--text-muted)]">Real plays</div>
+              <div className="text-xs text-[var(--text-muted)]">{translate('studio_real_plays')}</div>
               <div className="text-2xl font-extrabold text-[var(--text)] mt-1 tabular-nums">
                 {totalPlays.toLocaleString()}
               </div>
             </div>
             <div className="p-4 rounded-[20px] bg-[var(--surface)] border border-[var(--border)]">
-              <div className="text-xs text-[var(--text-muted)]">Track likes</div>
+              <div className="text-xs text-[var(--text-muted)]">{translate('studio_track_likes')}</div>
               <div className="text-2xl font-extrabold text-[var(--text)] mt-1 tabular-nums">
                 {totalLikes.toLocaleString()}
               </div>
             </div>
             <div className="p-4 rounded-[20px] bg-[var(--surface)] border border-[var(--border)]">
-              <div className="text-xs text-[var(--text-muted)]">Followers</div>
+              <div className="text-xs text-[var(--text-muted)]">{translate('followers')}</div>
               <div className="text-2xl font-extrabold text-[var(--text)] mt-1 tabular-nums">
                 {followersCount.toLocaleString()}
               </div>
@@ -1607,18 +1746,26 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
           <div className="p-5 sm:p-6 rounded-[24px] bg-[var(--surface)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="space-y-1">
               <div className="text-xs font-semibold text-[var(--text-muted)]">
-                Total Earnings
+                {translate('studio_total_earnings')}
               </div>
               <div className="text-2xl sm:text-3xl font-extrabold font-heading text-[var(--text)] tabular-nums">
                 <CountUpValue value={computedEarningsMwk} suffix=" MWK" replayKey={earningsRefreshKey} />
               </div>
               <p className="text-xs text-[var(--text-muted)]">
                 {isMonetized
-                  ? `Available: ${availableBalanceMwk.toLocaleString()} MWK · Rate: ${monetizationConfig.ratePerPlayMwk} MWK/play`
+                  ? isNy
+                    ? `Zolipo: ${availableBalanceMwk.toLocaleString()} MWK · Mtengo: ${monetizationConfig.ratePerPlayMwk} MWK/nyimbo`
+                    : `Available: ${availableBalanceMwk.toLocaleString()} MWK · Rate: ${monetizationConfig.ratePerPlayMwk} MWK/play`
                   : allEligible
-                  ? 'You meet every requirement! Monetization activates automatically when enabled.'
+                  ? isNy
+                    ? 'Mwakwaniritsa zofunikira zonse! Malipiro atsegulidwa.'
+                    : 'You meet every requirement! Monetization activates automatically when enabled.'
                   : monetizationStatus === 'pending'
-                  ? 'Your profile will be automatically approved once eligibility milestones are reached.'
+                  ? isNy
+                    ? 'Mbiri yanu ivomerezedwa ikakwaniritsa zofunikira.'
+                    : 'Your profile will be automatically approved once eligibility milestones are reached.'
+                  : isNy
+                  ? 'Kwaniritsani zofunikira ku gawo la Malipiro kuti muyambe kupeza ndalama.'
                   : 'Meet all eligibility requirements in Monetization to unlock earnings.'}
               </p>
             </div>
@@ -1627,11 +1774,11 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 type="button"
                 onClick={handleRefreshEarnings}
                 disabled={isRefreshingEarnings}
-                aria-label="Refresh Total Earnings"
+                aria-label={isNy ? 'Tsitsimutsa Ndalama' : 'Refresh Total Earnings'}
                 className="px-3.5 py-2.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--accent)] text-xs font-semibold text-[var(--text)] inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingEarnings ? 'animate-spin' : ''}`} />
-                <span>Refresh</span>
+                <span>{isNy ? 'Tsitsimutsa' : 'Refresh'}</span>
               </button>
               <button
                 type="button"
@@ -1639,14 +1786,20 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 className="px-4 py-2.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--accent)] text-xs font-bold text-[var(--text)] inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <Wallet className="w-3.5 h-3.5 text-[var(--accent-text)]" />
-                <span>Withdrawals</span>
+                <span>{translate('studio_tab_withdrawals')}</span>
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('monetization')}
                 className="px-5 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer"
               >
-                {isMonetized ? 'Open Earnings' : 'View eligibility'}
+                {isMonetized
+                  ? isNy
+                    ? 'Tsegulani Ndalama'
+                    : 'Open Earnings'
+                  : isNy
+                  ? 'Onani Zofunikira'
+                  : 'View eligibility'}
               </button>
             </div>
           </div>
@@ -1659,7 +1812,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
             fallbackTracks={myTracks}
             maxRows={5}
             replayKey={earningsRefreshKey}
-            title="Real-time earnings per song"
+            title={isNy ? 'Ndalama za nyimbo iliyonse panthawiyi' : 'Real-time earnings per song'}
             onPlayTrack={(track) =>
               currentTrack?.id === track.id ? togglePlayPause() : playTrack(track)
             }
@@ -1673,9 +1826,13 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
             <div className="p-5 sm:p-6 rounded-[24px] bg-[var(--surface)] border border-[var(--border)] space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-base font-bold text-[var(--text)]">Artist profile &amp; photos</h2>
+                  <h2 className="text-base font-bold text-[var(--text)]">
+                    {isNy ? 'Mbiri ya wojambula ndi zithunzi' : 'Artist profile & photos'}
+                  </h2>
                   <p className="text-xs text-[var(--text-muted)]">
-                    Only you can upload your artist profile photo, cover banner, or edit these details.
+                    {isNy
+                      ? 'Ndi inu nokha amene mungathe kukweza chithunzi cha wojambula, chithunzi chachikulu, kapena kusintha izi.'
+                      : 'Only you can upload your artist profile photo, cover banner, or edit these details.'}
                   </p>
                 </div>
                 <button
@@ -1696,7 +1853,15 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                   className="px-4 py-2 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-xs font-bold text-[var(--text)] inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <Edit3 className="w-3.5 h-3.5" />
-                  <span>{isEditingArtistProfile ? 'Close editor' : 'Edit artist info'}</span>
+                  <span>
+                    {isEditingArtistProfile
+                      ? isNy
+                        ? 'Tsekani mkonzi'
+                        : 'Close editor'
+                      : isNy
+                      ? 'Sinthani za wojambula'
+                      : 'Edit artist info'}
+                  </span>
                 </button>
               </div>
 
@@ -1724,9 +1889,13 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                     )}
                   </div>
                   <div className="min-w-0 flex-1 space-y-1.5">
-                    <div className="text-xs font-bold text-[var(--text)]">Artist profile photo</div>
+                    <div className="text-xs font-bold text-[var(--text)]">
+                      {isNy ? 'Chithunzi cha mbiri ya wojambula' : 'Artist profile photo'}
+                    </div>
                     <p className="text-[11px] text-[var(--text-muted)]">
-                      Square avatar · auto-compressed for fast upload
+                      {isNy
+                        ? 'Chithunzi chofanana mbali zonse · chimafupikitsidwa chokha kuti chikwere msanga'
+                        : 'Square avatar · auto-compressed for fast upload'}
                     </p>
                     <input
                       ref={artistAvatarInputRef}
@@ -1752,7 +1921,11 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       )}
                       <span>
                         {isUploadingArtistAvatar
-                          ? `Uploading (${artistAvatarProgress}%)...`
+                          ? isNy
+                            ? `Kukweza (${artistAvatarProgress}%)...`
+                            : `Uploading (${artistAvatarProgress}%)...`
+                          : isNy
+                          ? 'Sinthani chithunzi cha mbiri'
                           : 'Change profile photo'}
                       </span>
                     </button>
@@ -1779,9 +1952,13 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                     )}
                   </div>
                   <div className="min-w-0 flex-1 space-y-1.5">
-                    <div className="text-xs font-bold text-[var(--text)]">Artist cover photo</div>
+                    <div className="text-xs font-bold text-[var(--text)]">
+                      {isNy ? 'Chithunzi chachikulu cha wojambula' : 'Artist cover photo'}
+                    </div>
                     <p className="text-[11px] text-[var(--text-muted)]">
-                      Wide banner · minimum 320 × 120 px
+                      {isNy
+                        ? 'Chithunzi chachitali · osachepera 320 × 120 px'
+                        : 'Wide banner · minimum 320 × 120 px'}
                     </p>
                     <input
                       ref={artistBannerInputRef}
@@ -1807,7 +1984,11 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       )}
                       <span>
                         {isUploadingArtistBanner
-                          ? `Uploading (${artistBannerProgress}%)...`
+                          ? isNy
+                            ? `Kukweza (${artistBannerProgress}%)...`
+                            : `Uploading (${artistBannerProgress}%)...`
+                          : isNy
+                          ? 'Sinthani chithunzi chachikulu'
                           : 'Change cover photo'}
                       </span>
                     </button>
@@ -1821,8 +2002,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                     e.preventDefault();
                     setArtistProfileError(null);
                     if (!artistEditName.trim()) {
-                      setArtistProfileError('Stage name cannot be empty.');
-                      showNotice('Stage name cannot be empty.', 'err');
+                      const msg = isNy ? 'Dzina la wojambula silingakhale lopanda kanthu.' : 'Stage name cannot be empty.';
+                      setArtistProfileError(msg);
+                      showNotice(msg, 'err');
                       return;
                     }
                     setIsSavingArtistProfile(true);
@@ -1843,19 +2025,21 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                     });
                     setIsSavingArtistProfile(false);
                     if (!res.success) {
-                      const errText = res.error || 'Could not update artist details.';
+                      const errText = res.error || (isNy ? 'Sitinathe kukonzanso zambiri za wojambula.' : 'Could not update artist details.');
                       setArtistProfileError(errText);
                       showNotice(errText, 'err');
                       return;
                     }
                     setIsEditingArtistProfile(false);
-                    showNotice('Artist details updated.');
+                    showNotice(isNy ? 'Zambiri za wojambula zasinthidwa.' : 'Artist details updated.');
                   }}
                   className="space-y-3 pt-2 border-t border-[var(--border)]"
                 >
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="space-y-1">
-                      <label className="text-xs font-semibold text-[var(--text)]">Stage name</label>
+                      <label className="text-xs font-semibold text-[var(--text)]">
+                        {isNy ? 'Dzina la wojambula' : 'Stage name'}
+                      </label>
                       <input
                         type="text"
                         required
@@ -1866,18 +2050,22 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-xs font-semibold text-[var(--text)]">City</label>
+                      <label className="text-xs font-semibold text-[var(--text)]">
+                        {isNy ? 'Mzinda' : 'City'}
+                      </label>
                       <input
                         type="text"
                         maxLength={60}
                         value={artistEditCity}
                         onChange={(e) => setArtistEditCity(e.target.value)}
-                        placeholder="Blantyre, Lagos..."
+                        placeholder="Blantyre, Lilongwe..."
                         className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-xs font-semibold text-[var(--text)]">Country</label>
+                      <label className="text-xs font-semibold text-[var(--text)]">
+                        {isNy ? 'Dziko' : 'Country'}
+                      </label>
                       <RegionSelect
                         value={artistEditCountry}
                         onChange={setArtistEditCountry}
@@ -1887,13 +2075,15 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-semibold text-[var(--text)]">Artist bio</label>
+                    <label className="text-xs font-semibold text-[var(--text)]">
+                      {isNy ? 'Mbiri ya wojambula' : 'Artist bio'}
+                    </label>
                     <textarea
                       rows={3}
                       maxLength={1000}
                       value={artistEditBio}
                       onChange={(e) => setArtistEditBio(e.target.value)}
-                      placeholder="Tell listeners about your sound..."
+                      placeholder={isNy ? 'Fotokozerani omvera za nyimbo zanu...' : 'Tell listeners about your sound...'}
                       className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
                     />
                   </div>
@@ -1903,21 +2093,21 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       type="text"
                       value={artistEditInstagram}
                       onChange={(e) => setArtistEditInstagram(e.target.value)}
-                      placeholder="Instagram handle or URL"
+                      placeholder={isNy ? 'Dzina kapena ulalo wa Instagram' : 'Instagram handle or URL'}
                       className="px-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
                     />
                     <input
                       type="text"
                       value={artistEditTiktok}
                       onChange={(e) => setArtistEditTiktok(e.target.value)}
-                      placeholder="TikTok handle or URL"
+                      placeholder={isNy ? 'Dzina kapena ulalo wa TikTok' : 'TikTok handle or URL'}
                       className="px-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
                     />
                     <input
                       type="text"
                       value={artistEditYoutube}
                       onChange={(e) => setArtistEditYoutube(e.target.value)}
-                      placeholder="YouTube channel URL"
+                      placeholder={isNy ? 'Ulalo wa tchanelo ya YouTube' : 'YouTube channel URL'}
                       className="px-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
                     />
                   </div>
@@ -1931,7 +2121,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       }}
                       className="px-4 py-2 rounded-full bg-[var(--surface-2)] text-xs font-semibold text-[var(--text-muted)] cursor-pointer"
                     >
-                      Cancel
+                      {translate('cancel')}
                     </button>
                     <button
                       type="submit"
@@ -1939,7 +2129,15 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       className="px-5 py-2 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-60"
                     >
                       <Check className="w-3.5 h-3.5" />
-                      <span>{isSavingArtistProfile ? 'Saving...' : 'Save changes'}</span>
+                      <span>
+                        {isSavingArtistProfile
+                          ? isNy
+                            ? 'Kusunga...'
+                            : 'Saving...'
+                          : isNy
+                          ? 'Sungani zosintha'
+                          : 'Save changes'}
+                      </span>
                     </button>
                   </div>
                 </form>
@@ -1953,11 +2151,14 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
       {activeTab === 'upload' && (() => {
         const hasAudioSource = Boolean(audioFile || isValidHttpsUrl(audioUrlInput));
         const missingRequirements = [
-          !hasAudioSource ? 'Audio file or HTTPS link' : null,
-          !title.trim() ? 'Track title' : null,
-          !coverBlob ? 'Square cover artwork' : null,
-          !artworkNoLogoConfirmed ? 'Clean artwork checkbox' : null,
-          !rightsConfirmed ? 'Audio rights checkbox' : null,
+          !hasAudioSource ? (isNy ? 'Fayilo ya nyimbo kapena ulalo wa HTTPS' : 'Audio file or HTTPS link') : null,
+          !title.trim() ? (isNy ? 'Dzina la nyimbo' : 'Track title') : null,
+          coverBlob && !artworkNoLogoConfirmed
+            ? isNy
+              ? 'Bokosi lotsimikizira chithunzi choyera'
+              : 'Clean artwork checkbox'
+            : null,
+          !rightsConfirmed ? (isNy ? 'Bokosi la ufulu wa nyimbo' : 'Audio rights checkbox') : null,
         ].filter((item): item is string => Boolean(item));
         const isReadyForReview = missingRequirements.length === 0;
 
@@ -1966,22 +2167,26 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
             {/* Simple 3-Step Publish Overview */}
             <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
               <div className="space-y-0.5">
-                <div className="font-bold text-[var(--text)]">Easy 3-step publish</div>
+                <div className="font-bold text-[var(--text)]">
+                  {isNy ? 'Kufalitsa kosavuta m\'masitepe atatu' : 'Easy 3-step publish'}
+                </div>
                 <p className="text-[11px] text-[var(--text-muted)]">
-                  Only audio, title, cover photo, and rights confirmation are required. Mood, BPM, story, and lyrics are completely optional.
+                  {isNy
+                    ? 'Nyimbo, dzina lake, ndi kutsimikizira ufulu zokha ndi zofunika. Chithunzi, mtima wa nyimbo, BPM, nkhani, ndi mawu ndi zosankha.'
+                    : 'Only audio, title, and rights confirmation are required. Cover artwork, mood, BPM, story, and lyrics are optional.'}
                 </p>
               </div>
               <span className="px-3 py-1 rounded-full bg-[var(--surface)] border border-[var(--border)] text-[11px] font-mono text-[var(--accent-text)] font-bold shrink-0 self-start sm:self-center">
-                Step {uploadStep} of 3
+                {isNy ? `Sitepe ${uploadStep} pa 3` : `Step ${uploadStep} of 3`}
               </span>
             </div>
 
             {/* Stepper Header */}
             <div className="flex items-center justify-between gap-2 pb-4 border-b border-[var(--border)]">
               {[
-                { step: 1 as const, label: '1. Audio' },
-                { step: 2 as const, label: '2. Details' },
-                { step: 3 as const, label: '3. Publish' },
+                { step: 1 as const, label: isNy ? '1. Nyimbo' : '1. Audio' },
+                { step: 2 as const, label: isNy ? '2. Zambiri' : '2. Details' },
+                { step: 3 as const, label: isNy ? '3. Falitsani' : '3. Publish' },
               ].map((s) => (
                 <button
                   key={s.step}
@@ -2019,8 +2224,12 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
             {uploadStep === 1 && (
               <div className="space-y-4">
                 <div>
-                  <h2 className="text-base font-bold text-[var(--text)]">Step 1: Choose your song file</h2>
-                  <p className="text-xs text-[var(--text-muted)]">MP3, WAV, FLAC, or M4A (max 120 MB)</p>
+                  <h2 className="text-base font-bold text-[var(--text)]">
+                    {isNy ? 'Sitepe 1: Sankhani fayilo ya nyimbo yanu' : 'Step 1: Choose your song file'}
+                  </h2>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {isNy ? 'MP3, WAV, FLAC, kapena M4A (osapyola 120 MB)' : 'MP3, WAV, FLAC, or M4A (max 120 MB)'}
+                  </p>
                 </div>
 
                 <div
@@ -2040,7 +2249,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                   {isAnalyzingAudio ? (
                     <div className="flex flex-col items-center gap-2">
                       <RefreshCw className="w-7 h-7 text-[var(--accent-text)] animate-spin" />
-                      <span className="text-xs font-semibold text-[var(--text)]">Checking audio file...</span>
+                      <span className="text-xs font-semibold text-[var(--text)]">
+                        {isNy ? 'Kuyang\'ana fayilo ya nyimbo...' : 'Checking audio file...'}
+                      </span>
                     </div>
                   ) : audioFile ? (
                     <div className="space-y-1">
@@ -2055,8 +2266,12 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                   ) : (
                     <div className="space-y-1">
                       <UploadCloud className="w-8 h-8 text-[var(--text-muted)] mx-auto" />
-                      <div className="text-sm font-semibold text-[var(--text)]">Tap to choose an audio file</div>
-                      <div className="text-xs text-[var(--text-muted)]">Max 120 MB · Fast resumable upload</div>
+                      <div className="text-sm font-semibold text-[var(--text)]">
+                        {isNy ? 'Dinani kuti musankhe fayilo ya nyimbo' : 'Tap to choose an audio file'}
+                      </div>
+                      <div className="text-xs text-[var(--text-muted)]">
+                        {isNy ? 'Osapyola 120 MB · Kukweza kwachangu' : 'Max 120 MB · Fast resumable upload'}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2065,15 +2280,18 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                   <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-amber-500/50 text-xs text-amber-500 flex items-start gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                     <span>
-                      Warning: this exact audio file matches an existing track ("{duplicateAudioMatch.title}").
-                      Uploading duplicates can cause copyright flags.
+                      {isNy
+                        ? `Chenjezo: fayilo yeniyeniyi ikufanana ndi nyimbo yomwe ilipo kale ("${duplicateAudioMatch.title}"). Kukweza mobwereza kungayambitse zovuta za ufulu.`
+                        : `Warning: this exact audio file matches an existing track ("${duplicateAudioMatch.title}"). Uploading duplicates can cause copyright flags.`}
                     </span>
                   </div>
                 )}
 
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-[var(--text-muted)]">
-                    Or paste a direct HTTPS audio link (optional if uploading a file)
+                    {isNy
+                      ? 'Kapena ikani ulalo wachindunji wa HTTPS wa nyimbo (zosankha ngati mukukweza fayilo)'
+                      : 'Or paste a direct HTTPS audio link (optional if uploading a file)'}
                   </label>
                   <input
                     type="url"
@@ -2094,7 +2312,13 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
 
                 <div className="flex items-center justify-between gap-3 pt-2">
                   <span className="text-[11px] text-[var(--text-muted)]">
-                    {hasAudioSource ? 'Audio ready — continue to details.' : 'Select an audio file or link to continue.'}
+                    {hasAudioSource
+                      ? isNy
+                        ? 'Nyimbo yakonzeka — pitani ku zambiri.'
+                        : 'Audio ready — continue to details.'
+                      : isNy
+                      ? 'Sankhani fayilo ya nyimbo kapena ulalo kuti mupitirize.'
+                      : 'Select an audio file or link to continue.'}
                   </span>
                   <button
                     type="button"
@@ -2102,7 +2326,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                     onClick={() => setUploadStep(2)}
                     className="px-6 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold flex items-center gap-2 cursor-pointer disabled:opacity-50"
                   >
-                    <span>Next: Details</span>
+                    <span>{isNy ? 'Tsatira: Zambiri' : 'Next: Details'}</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -2116,25 +2340,31 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 <div className="space-y-4">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--accent-text)]">
-                      Required to publish
+                      {isNy ? 'Zofunika kuti mufalitse' : 'Required to publish'}
                     </h3>
-                    <span className="text-[11px] text-[var(--text-muted)]">Fields marked * are needed</span>
+                    <span className="text-[11px] text-[var(--text-muted)]">
+                      {isNy ? 'Zolembedwa * ndi zofunika' : 'Fields marked * are needed'}
+                    </span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="text-xs font-semibold text-[var(--text)]">Track title *</label>
+                      <label className="text-xs font-semibold text-[var(--text)]">
+                        {isNy ? 'Dzina la nyimbo *' : 'Track title *'}
+                      </label>
                       <input
                         type="text"
                         required
                         value={title}
                         onChange={(e) => setTitle(e.target.value)}
-                        placeholder="Enter song title"
+                        placeholder={isNy ? 'Lembani dzina la nyimbo' : 'Enter song title'}
                         className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)]"
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-xs font-semibold text-[var(--text)]">Genre</label>
+                      <label className="text-xs font-semibold text-[var(--text)]">
+                        {isNy ? 'Mtundu wa nyimbo' : 'Genre'}
+                      </label>
                       <GenreSelectOrCustom
                         value={genre}
                         onChange={setGenre}
@@ -2148,7 +2378,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                   {/* Cover Art Upload (Optional — uses LOWERVIBE icon logo automatically if omitted) */}
                   <div className="space-y-2">
                     <label className="text-xs font-semibold text-[var(--text)]">
-                      Cover artwork (Optional · Auto-uses LOWERVIBE icon if skipped)
+                      {isNy
+                        ? 'Chithunzi cha nyimbo (Chosankha · Chigwiritsa chizindikiro cha LOWERVIBE ngati musiye)'
+                        : 'Cover artwork (Optional · Auto-uses LOWERVIBE icon if skipped)'}
                     </label>
                     <div
                       onClick={() => coverInputRef.current?.click()}
@@ -2167,7 +2399,15 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       <div className="w-16 h-16 rounded-xl bg-[var(--surface)] border border-[var(--border)] overflow-hidden shrink-0 flex items-center justify-center">
                         <img
                           src={coverPreview || LOWERVIBE_ICON_ARTWORK}
-                          alt={coverPreview ? 'Cover preview' : 'Default LOWERVIBE cover logo'}
+                          alt={
+                            coverPreview
+                              ? isNy
+                                ? 'Chithunzi chosankhidwa'
+                                : 'Cover preview'
+                              : isNy
+                              ? 'Chizindikiro cha LOWERVIBE'
+                              : 'Default LOWERVIBE cover logo'
+                          }
                           className="w-full h-full object-cover"
                         />
                       </div>
@@ -2175,11 +2415,15 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                         <div className="text-xs font-bold text-[var(--text)] truncate">
                           {coverPreview
                             ? coverOriginalName
+                            : isNy
+                            ? 'Dinani kuti mukweze chithunzi chanu (kapena siyani chizindikiro cha LOWERVIBE)'
                             : 'Tap to upload custom cover (or leave default LOWERVIBE icon)'}
                         </div>
                         <p className="text-[11px] text-[var(--text-muted)]">
                           {coverCompressionNote ||
-                            'Optional 1:1 WebP cover. If skipped, LOWERVIBE applies your official icon artwork automatically.'}
+                            (isNy
+                              ? 'Chithunzi cha 1:1 chosankha. Ngati musiya, LOWERVIBE imayika chizindikiro chake yokha.'
+                              : 'Optional 1:1 WebP cover. If skipped, LOWERVIBE applies your official icon artwork automatically.')}
                         </p>
                       </div>
                     </div>
@@ -2198,7 +2442,11 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                           onChange={(e) => setArtworkNoLogoConfirmed(e.target.checked)}
                           className="mt-0.5 accent-[var(--accent)]"
                         />
-                        <span>This artwork has no other platform&apos;s logo and I own the rights *</span>
+                        <span>
+                          {isNy
+                            ? 'Chithunzichi chilibe chizindikiro cha nsanja ina ndipo ndili ndi ufulu wake *'
+                            : "This artwork has no other platform's logo and I own the rights *"}
+                        </span>
                       </label>
                     )}
 
@@ -2209,7 +2457,11 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                         onChange={(e) => setRightsConfirmed(e.target.checked)}
                         className="mt-0.5 accent-[var(--accent)]"
                       />
-                      <span>I own or control the rights to publish this audio recording *</span>
+                      <span>
+                        {isNy
+                          ? 'Ndili ndi ufulu wofalitsa nyimboyi *'
+                          : 'I own or control the rights to publish this audio recording *'}
+                      </span>
                     </label>
                   </div>
                 </div>
@@ -2218,14 +2470,18 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 <div className="pt-4 border-t border-[var(--border)] space-y-4">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                      Optional details (you can skip)
+                      {isNy ? 'Zambiri zosankha (mukhoza kudumpha)' : 'Optional details (you can skip)'}
                     </h3>
-                    <span className="text-[11px] text-[var(--text-muted)]">Pick preset, write custom, or skip</span>
+                    <span className="text-[11px] text-[var(--text-muted)]">
+                      {isNy ? 'Sankhani, lembani, kapena dumphani' : 'Pick preset, write custom, or skip'}
+                    </span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="space-y-1">
-                      <label className="text-xs font-semibold text-[var(--text)]">Country</label>
+                      <label className="text-xs font-semibold text-[var(--text)]">
+                        {isNy ? 'Dziko' : 'Country'}
+                      </label>
                       <RegionSelect
                         value={region}
                         onChange={setRegion}
@@ -2234,7 +2490,10 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                     </div>
                     <div className="space-y-1 sm:col-span-2">
                       <label className="text-xs font-semibold text-[var(--text)]">
-                        Mood <span className="text-[var(--text-muted)] font-normal">(optional · preset, custom, or skip)</span>
+                        {isNy ? 'Mtima wa nyimbo' : 'Mood'}{' '}
+                        <span className="text-[var(--text-muted)] font-normal">
+                          {isNy ? '(zosankha · pezani kapena dumphani)' : '(optional · preset, custom, or skip)'}
+                        </span>
                       </label>
                       <MoodSelectOrCustom
                         value={mood}
@@ -2245,7 +2504,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="space-y-1">
-                      <label className="text-xs font-semibold text-[var(--text)]">BPM (optional)</label>
+                      <label className="text-xs font-semibold text-[var(--text)]">
+                        {isNy ? 'Liwiro la BPM (zosankha)' : 'BPM (optional)'}
+                      </label>
                       <input
                         type="number"
                         min={40}
@@ -2256,24 +2517,28 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       />
                     </div>
                     <div className="space-y-1 sm:col-span-2">
-                      <label className="text-xs font-semibold text-[var(--text)]">About this song (optional)</label>
+                      <label className="text-xs font-semibold text-[var(--text)]">
+                        {isNy ? 'Za nyimboyi (zosankha)' : 'About this song (optional)'}
+                      </label>
                       <input
                         type="text"
                         value={story}
                         onChange={(e) => setStory(e.target.value)}
-                        placeholder="Share credits or story behind the track..."
+                        placeholder={isNy ? 'Fotokozani mbiri kapena opanga nyimboyi...' : 'Share credits or story behind the track...'}
                         className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
                       />
                     </div>
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-semibold text-[var(--text)]">Lyrics (optional)</label>
+                    <label className="text-xs font-semibold text-[var(--text)]">
+                      {isNy ? 'Mawu a nyimbo (zosankha)' : 'Lyrics (optional)'}
+                    </label>
                     <textarea
                       rows={3}
                       value={lyrics}
                       onChange={(e) => setLyrics(e.target.value)}
-                      placeholder="Paste song lyrics..."
+                      placeholder={isNy ? 'Ikani mawu a nyimbo...' : 'Paste song lyrics...'}
                       className="w-full px-3.5 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
                     />
                   </div>
@@ -2284,11 +2549,17 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                   {isReadyForReview ? (
                     <span className="inline-flex items-center gap-2 font-semibold text-[var(--accent-text)]">
                       <CheckCircle2 className="w-4 h-4 shrink-0" />
-                      <span>All required fields ready — tap Next: Review to publish.</span>
+                      <span>
+                        {isNy
+                          ? 'Zofunika zonse zakonzeka — dinani Tsatira: Yang\'anani kuti mufalitse.'
+                          : 'All required fields ready — tap Next: Review to publish.'}
+                      </span>
                     </span>
                   ) : (
                     <span className="text-[var(--text-muted)]">
-                      <strong className="text-[var(--text)]">Still needed:</strong>{' '}
+                      <strong className="text-[var(--text)]">
+                        {isNy ? 'Chotsala:' : 'Still needed:'}
+                      </strong>{' '}
                       {missingRequirements.join(' · ')}
                     </span>
                   )}
@@ -2301,7 +2572,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                     className="px-4 py-2 rounded-full bg-[var(--surface-2)] text-xs font-semibold text-[var(--text)] flex items-center gap-1.5 cursor-pointer"
                   >
                     <ArrowLeft className="w-4 h-4" />
-                    <span>Back</span>
+                    <span>{translate('back')}</span>
                   </button>
                   <button
                     type="button"
@@ -2309,7 +2580,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                     onClick={() => setUploadStep(3)}
                     className="px-6 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                   >
-                    <span>Next: Review &amp; Publish</span>
+                    <span>{isNy ? 'Tsatira: Yang\'anani & Falitsani' : 'Next: Review & Publish'}</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -2321,15 +2592,15 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
               <div className="space-y-5">
                 <div className="flex items-center gap-4 p-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)]">
                   <img
-                    src={coverPreview || DEFAULT_ARTWORK_SVG}
+                    src={coverPreview || LOWERVIBE_ICON_ARTWORK}
                     alt={title}
                     className="w-20 h-20 rounded-xl object-cover shrink-0 border border-[var(--border)]"
                   />
                   <div className="min-w-0 space-y-1">
                     <div className="text-base font-extrabold text-[var(--text)] truncate">{title}</div>
                     <div className="text-xs text-[var(--text-muted)]">
-                      {currentArtist?.name || currentUser.name} · {genre} · {region}
-                      {mood.trim() ? ` · ${mood.trim()} mood` : ''}
+                      {currentArtist?.name || currentUser.name} · {translateGenreCategory(genre, language)} · {region}
+                      {mood.trim() ? ` · ${mood.trim()}` : ''}
                     </div>
                     <div className="text-xs font-mono text-[var(--text-muted)]">
                       {extractedMeta
@@ -2343,15 +2614,23 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] space-y-0.5">
-                    <div className="font-bold text-[var(--text)]">Publish track (Live now)</div>
+                    <div className="font-bold text-[var(--text)]">
+                      {isNy ? 'Falitsani nyimbo (Pa mpweya)' : 'Publish track (Live now)'}
+                    </div>
                     <p className="text-[11px] text-[var(--text-muted)]">
-                      Appears immediately on Home, Discover, and your Artist page for streaming and sharing.
+                      {isNy
+                        ? 'Imaonekera nthawi yomweyo pa Nyumba, Pezani, ndi tsamba lanu la wojambula.'
+                        : 'Appears immediately on Home, Discover, and your Artist page for streaming and sharing.'}
                     </p>
                   </div>
                   <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] space-y-0.5">
-                    <div className="font-bold text-[var(--text)]">Save draft (Private)</div>
+                    <div className="font-bold text-[var(--text)]">
+                      {isNy ? 'Sungani m\'zolembedwa (Zobisika)' : 'Save draft (Private)'}
+                    </div>
                     <p className="text-[11px] text-[var(--text-muted)]">
-                      Uploads and saves securely inside Studio Tracks only — tap Publish anytime later.
+                      {isNy
+                        ? 'Imasungidwa m\'Situdiyo yanu mokha — mutha kufalitsa nthawi ina iliyonse.'
+                        : 'Uploads and saves securely inside Studio Tracks only — tap Publish anytime later.'}
                     </p>
                   </div>
                 </div>
@@ -2359,7 +2638,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 {isUploading && (
                   <div className="space-y-2.5">
                     <div className="flex items-center justify-between text-xs font-semibold text-[var(--accent-text)]">
-                      <span>{uploadStatusText || 'Uploading...'}</span>
+                      <span>{uploadStatusText || (isNy ? 'Kukweza...' : 'Uploading...')}</span>
                       <span className="font-mono tabular-nums">{uploadProgress}%</span>
                     </div>
                     <div className="w-full h-2 rounded-full bg-[var(--surface-2)] overflow-hidden">
@@ -2383,7 +2662,13 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                           }}
                           className="px-3 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-semibold text-[var(--text)] cursor-pointer"
                         >
-                          {isUploadPaused ? 'Resume upload' : 'Pause upload'}
+                          {isUploadPaused
+                            ? isNy
+                              ? 'Pitirizani kukweza'
+                              : 'Resume upload'
+                            : isNy
+                            ? 'Imitsani kukweza'
+                            : 'Pause upload'}
                         </button>
                         <button
                           type="button"
@@ -2392,7 +2677,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                           }}
                           className="px-3 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-semibold text-[var(--danger)] cursor-pointer"
                         >
-                          Cancel
+                          {translate('cancel')}
                         </button>
                       </div>
                     )}
@@ -2407,7 +2692,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                     className="px-4 py-2.5 rounded-full bg-[var(--surface-2)] text-xs font-semibold text-[var(--text)] flex items-center gap-1.5 cursor-pointer"
                   >
                     <ArrowLeft className="w-4 h-4" />
-                    <span>Back to details</span>
+                    <span>{isNy ? 'Bwererani ku zambiri' : 'Back to details'}</span>
                   </button>
 
                   <div className="flex items-center gap-2.5">
@@ -2417,7 +2702,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       onClick={() => handlePublishOrDraft(true)}
                       className="px-5 py-2.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-xs font-bold text-[var(--text)] cursor-pointer disabled:opacity-50"
                     >
-                      Save draft
+                      {isNy ? 'Sungani zolembedwa' : 'Save draft'}
                     </button>
                     <button
                       type="button"
@@ -2425,7 +2710,13 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       onClick={() => handlePublishOrDraft(false)}
                       className="px-6 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer disabled:opacity-50"
                     >
-                      {isUploading ? 'Publishing...' : 'Publish track'}
+                      {isUploading
+                        ? isNy
+                          ? 'Kufalitsa...'
+                          : 'Publishing...'
+                        : isNy
+                        ? 'Falitsani nyimbo'
+                        : 'Publish track'}
                     </button>
                   </div>
                 </div>
@@ -2443,16 +2734,20 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-base font-bold text-[var(--text)]">Your tracks &amp; live metrics</h2>
+                  <h2 className="text-base font-bold text-[var(--text)]">
+                    {isNy ? 'Nyimbo zanu ndi ziwerengero zamoyo' : 'Your tracks & live metrics'}
+                  </h2>
                   {liveTrackMetrics.isSynced && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[10px] font-mono text-[var(--accent-text)]">
                       <Radio className="w-3 h-3" />
-                      <span>Live</span>
+                      <span>{isNy ? 'Pamoyo' : 'Live'}</span>
                     </span>
                   )}
                 </div>
                 <p className="text-xs text-[var(--text-muted)]">
-                  Real-time plays, verified 30s+ streams, likes, and MWK earnings synced from Firestore
+                  {isNy
+                    ? 'Kuseweredwa kwenikweni, zowona za masekondi 30+, zokonda, ndi ndalama za MWK'
+                    : 'Real-time plays, verified 30s+ streams, likes, and MWK earnings synced from Firestore'}
                 </p>
               </div>
 
@@ -2462,7 +2757,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 className="px-4 py-2 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Upload track</span>
+                <span>{isNy ? 'Kwezani nyimbo' : 'Upload track'}</span>
               </button>
             </div>
 
@@ -2475,25 +2770,33 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
-                <div className="text-[11px] text-[var(--text-muted)]">Total live plays</div>
+                <div className="text-[11px] text-[var(--text-muted)]">
+                  {isNy ? 'Kuseweredwa konse' : 'Total live plays'}
+                </div>
                 <div className="text-base font-mono font-extrabold text-[var(--text)] tabular-nums mt-0.5">
                   {totalPlays.toLocaleString()}
                 </div>
               </div>
               <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
-                <div className="text-[11px] text-[var(--text-muted)]">Verified 30s+</div>
+                <div className="text-[11px] text-[var(--text-muted)]">
+                  {isNy ? 'Zotsimikizika 30s+' : 'Verified 30s+'}
+                </div>
                 <div className="text-base font-mono font-extrabold text-[var(--text)] tabular-nums mt-0.5">
                   {liveTrackMetrics.totalVerifiedLedgerPlays.toLocaleString()}
                 </div>
               </div>
               <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
-                <div className="text-[11px] text-[var(--text-muted)]">Likes · Saves</div>
+                <div className="text-[11px] text-[var(--text-muted)]">
+                  {isNy ? 'Zokonda · Zosunga' : 'Likes · Saves'}
+                </div>
                 <div className="text-base font-mono font-extrabold text-[var(--text)] tabular-nums mt-0.5">
                   {totalLikes.toLocaleString()} · {liveTrackMetrics.totalDownloads.toLocaleString()}
                 </div>
               </div>
               <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
-                <div className="text-[11px] text-[var(--text-muted)]">Catalog earned</div>
+                <div className="text-[11px] text-[var(--text-muted)]">
+                  {isNy ? 'Zopeza m\'nyimbo' : 'Catalog earned'}
+                </div>
                 <div className="text-base font-mono font-extrabold text-[var(--accent-text)] tabular-nums mt-0.5">
                   {liveTrackMetrics.totalEarningsMwk.toLocaleString()} MWK
                 </div>
@@ -2508,7 +2811,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                     type="search"
                     value={tracksSearchQuery}
                     onChange={(e) => setTracksSearchQuery(e.target.value)}
-                    placeholder="Filter your songs by title or genre..."
+                    placeholder={isNy ? 'Sefani nyimbo zanu ndi dzina kapena mtundu...' : 'Filter your songs by title or genre...'}
                     className="w-full pl-8 pr-3 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
                   />
                 </div>
@@ -2523,7 +2826,18 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 >
                   <ArrowUpDown className="w-3.5 h-3.5 text-[var(--accent-text)]" />
                   <span>
-                    Sort: {tracksSortBy === 'newest' ? 'Newest' : tracksSortBy === 'plays' ? 'Most Played' : 'Top Earning'}
+                    {isNy ? 'Sankhani:' : 'Sort:'}{' '}
+                    {tracksSortBy === 'newest'
+                      ? isNy
+                        ? 'Zatsopano'
+                        : 'Newest'
+                      : tracksSortBy === 'plays'
+                      ? isNy
+                        ? 'Zoseweredwa kwambiri'
+                        : 'Most Played'
+                      : isNy
+                      ? 'Zobweretsa ndalama zambiri'
+                      : 'Top Earning'}
                   </span>
                 </button>
               </div>
@@ -2534,13 +2848,15 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
             {liveTrackMetrics.songs.length === 0 ? (
               <div className="p-10 text-center space-y-3">
                 <Music className="w-8 h-8 text-[var(--text-muted)] mx-auto" />
-                <div className="text-sm font-bold text-[var(--text)]">No songs uploaded yet</div>
+                <div className="text-sm font-bold text-[var(--text)]">
+                  {isNy ? 'Palibe nyimbo zokwezedwa pano' : 'No songs uploaded yet'}
+                </div>
                 <button
                   type="button"
                   onClick={() => setActiveTab('upload')}
                   className="px-5 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer"
                 >
-                  Upload your first track
+                  {isNy ? 'Kwezani nyimbo yanu yoyamba' : 'Upload your first track'}
                 </button>
               </div>
             ) : (
@@ -2551,7 +2867,8 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                     if (!q) return true;
                     return (
                       track.title.toLowerCase().includes(q) ||
-                      (track.genre || '').toLowerCase().includes(q)
+                      (track.genre || '').toLowerCase().includes(q) ||
+                      translateGenreCategory(track.genre, language).toLowerCase().includes(q)
                     );
                   });
 
@@ -2569,7 +2886,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                   if (sorted.length === 0) {
                     return (
                       <div className="p-8 text-center text-xs text-[var(--text-muted)]">
-                        No songs match “{tracksSearchQuery}”.
+                        {isNy ? `Palibe nyimbo zofanana ndi “${tracksSearchQuery}”.` : `No songs match “${tracksSearchQuery}”.`}
                       </div>
                     );
                   }
@@ -2589,7 +2906,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                           <div className="flex items-center gap-3.5 min-w-0 flex-1">
                             <div className="relative w-14 h-14 rounded-xl overflow-hidden shrink-0 border border-[var(--border)] bg-[var(--surface-2)]">
                               <img
-                                src={track.coverArt || DEFAULT_ARTWORK_SVG}
+                                src={track.coverArt || LOWERVIBE_ICON_ARTWORK}
                                 alt={track.title}
                                 referrerPolicy="no-referrer"
                                 className="w-full h-full object-cover"
@@ -2620,7 +2937,8 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                   {track.title}
                                 </span>
                                 <span className="text-[11px] font-medium text-[var(--text-muted)]">
-                                  · {track.isDraft ? 'Draft' : 'Published'} · {track.genre}
+                                  · {track.isDraft ? (isNy ? 'Zolembedwa' : 'Draft') : isNy ? 'Yafalitsidwa' : 'Published'} ·{' '}
+                                  {translateGenreCategory(track.genre, language)}
                                 </span>
                               </div>
 
@@ -2628,10 +2946,12 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                               <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-xs font-mono tabular-nums text-[var(--text-muted)]">
                                 <span className="inline-flex items-center gap-1 text-[var(--text)] font-semibold">
                                   <Play className="w-3 h-3 text-[var(--accent-text)]" />
-                                  {effectivePlays.toLocaleString()} plays
+                                  {effectivePlays.toLocaleString()} {isNy ? 'kuseweredwa' : 'plays'}
                                 </span>
                                 {verifiedLedgerPlays > 0 && (
-                                  <span>{verifiedLedgerPlays.toLocaleString()} verified 30s+</span>
+                                  <span>
+                                    {verifiedLedgerPlays.toLocaleString()} {isNy ? 'zotsimikizika 30s+' : 'verified 30s+'}
+                                  </span>
                                 )}
                                 <span className="inline-flex items-center gap-1">
                                   <Heart className="w-3 h-3" />
@@ -2641,7 +2961,11 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                   <Download className="w-3 h-3" />
                                   {rowDownloads.toLocaleString()}
                                 </span>
-                                {sharePct > 0 && <span>{sharePct}% catalog share</span>}
+                                {sharePct > 0 && (
+                                  <span>
+                                    {sharePct}% {isNy ? 'gawo la nyimbo' : 'catalog share'}
+                                  </span>
+                                )}
                               </div>
 
                               {totalPlays > 0 && (
@@ -2664,7 +2988,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                     {earnedMwk.toLocaleString()} MWK
                                   </div>
                                   <div className="text-[10px] font-mono text-[var(--text-muted)]">
-                                    @{monetizationConfig.ratePerPlayMwk} MWK/play · Live
+                                    @{monetizationConfig.ratePerPlayMwk} MWK/{isNy ? 'kusewera · Pamoyo' : 'play · Live'}
                                   </div>
                                 </>
                               ) : (
@@ -2674,7 +2998,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                     <span>0 MWK</span>
                                   </div>
                                   <div className="text-[10px] text-[var(--text-muted)]">
-                                    Unlocks on eligibility
+                                    {isNy ? 'Imatseguka mukavomerezedwa' : 'Unlocks on eligibility'}
                                   </div>
                                 </>
                               )}
@@ -2697,7 +3021,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                   className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer flex items-center gap-1 hover:border-[var(--accent)] transition-colors"
                                 >
                                   <Edit3 className="w-3.5 h-3.5" />
-                                  <span>Edit</span>
+                                  <span>{isNy ? 'Sinthani' : 'Edit'}</span>
                                 </button>
 
                                 <button
@@ -2708,14 +3032,35 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                     const res = await toggleDraftTrack(track.id);
                                     setTogglingTrackId(null);
                                     if (!res.success) {
-                                      showNotice(res.error || 'Could not update track status.', 'err');
+                                      showNotice(
+                                        res.error || (isNy ? 'Sitinathe kusintha mkhalidwe wa nyimbo.' : 'Could not update track status.'),
+                                        'err'
+                                      );
                                       return;
                                     }
-                                    showNotice(track.isDraft ? 'Track published.' : 'Moved to drafts.');
+                                    showNotice(
+                                      track.isDraft
+                                        ? isNy
+                                          ? 'Nyimbo yafalitsidwa.'
+                                          : 'Track published.'
+                                        : isNy
+                                        ? 'Yasunthidwa ku zolembedwa.'
+                                        : 'Moved to drafts.'
+                                    );
                                   }}
                                   className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer hover:border-[var(--accent)] transition-colors disabled:opacity-50"
                                 >
-                                  {isTogglingRow ? 'Updating...' : track.isDraft ? 'Publish' : 'Unpublish'}
+                                  {isTogglingRow
+                                    ? isNy
+                                      ? 'Kusintha...'
+                                      : 'Updating...'
+                                    : track.isDraft
+                                    ? isNy
+                                      ? 'Falitsani'
+                                      : 'Publish'
+                                    : isNy
+                                    ? 'Chotsani poyera'
+                                    : 'Unpublish'}
                                 </button>
 
                                 {!isConfirmingDel ? (
@@ -2723,28 +3068,30 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                     type="button"
                                     onClick={() => setConfirmDeleteId(track.id)}
                                     className="p-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--danger)] cursor-pointer transition-colors"
-                                    title="Delete track"
+                                    title={isNy ? 'Fufutani nyimbo' : 'Delete track'}
                                     aria-label={`Delete ${track.title}`}
                                   >
                                     <Trash2 className="w-4 h-4" />
                                   </button>
                                 ) : (
                                   <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-[var(--surface-2)] border border-[var(--danger)]/40">
-                                    <span className="text-[11px] text-[var(--text)]">Are you sure?</span>
+                                    <span className="text-[11px] text-[var(--text)]">
+                                      {isNy ? 'Mutsimikiza?' : 'Are you sure?'}
+                                    </span>
                                     <button
                                       type="button"
                                       disabled={isDeletingRow}
                                       onClick={() => handleDeleteTrackConfirm(track)}
                                       className="px-2 py-0.5 rounded-lg bg-[var(--danger)] text-white text-[11px] font-bold cursor-pointer disabled:opacity-50"
                                     >
-                                      {isDeletingRow ? '...' : 'Delete'}
+                                      {isDeletingRow ? '...' : isNy ? 'Fufutani' : 'Delete'}
                                     </button>
                                     <button
                                       type="button"
                                       onClick={() => setConfirmDeleteId(null)}
                                       className="text-[11px] text-[var(--text-muted)] cursor-pointer"
                                     >
-                                      Cancel
+                                      {translate('cancel')}
                                     </button>
                                   </div>
                                 )}
@@ -2759,14 +3106,14 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                   type="text"
                                   value={editTitle}
                                   onChange={(e) => setEditTitle(e.target.value)}
-                                  placeholder="Title"
+                                  placeholder={isNy ? 'Dzina la nyimbo' : 'Title'}
                                   className="px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text)]"
                                 />
                                 <GenreSelectOrCustom value={editGenre} onChange={setEditGenre} />
                               </div>
                               <div className="space-y-1">
                                 <label className="text-[11px] font-semibold text-[var(--text-muted)]">
-                                  Mood (optional)
+                                  {isNy ? 'Mtima wa nyimbo (zosankha)' : 'Mood (optional)'}
                                 </label>
                                 <MoodSelectOrCustom
                                   value={editMood}
@@ -2778,7 +3125,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                 rows={2}
                                 value={editStory}
                                 onChange={(e) => setEditStory(e.target.value)}
-                                placeholder="About this track"
+                                placeholder={isNy ? 'Za nyimboyi' : 'About this track'}
                                 className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text)]"
                               />
                               <div className="flex justify-end gap-2">
@@ -2787,7 +3134,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                   onClick={() => setEditingTrackId(null)}
                                   className="px-3 py-1.5 text-xs text-[var(--text-muted)] cursor-pointer"
                                 >
-                                  Cancel
+                                  {translate('cancel')}
                                 </button>
                                 <button
                                   type="button"
@@ -2795,7 +3142,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                   onClick={async () => {
                                     setSavingTrackId(track.id);
                                     try {
-                                      const nextGenre = editGenre || track.genre;
+                                      const nextGenre = normalizeGenreCategory(editGenre || track.genre);
                                       const nextMood = editMood.trim();
                                       await updateTrack(track.id, {
                                         title: editTitle.trim() || track.title,
@@ -2805,10 +3152,14 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                         story: editStory.trim(),
                                       });
                                       setEditingTrackId(null);
-                                      showNotice('Track updated.');
+                                      showNotice(isNy ? 'Nyimbo yasinthidwa.' : 'Track updated.');
                                     } catch (err) {
                                       showNotice(
-                                        err instanceof Error ? err.message : 'Could not update track.',
+                                        err instanceof Error
+                                          ? err.message
+                                          : isNy
+                                          ? 'Sitinathe kusintha nyimbo.'
+                                          : 'Could not update track.',
                                         'err'
                                       );
                                     } finally {
@@ -2817,14 +3168,14 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                   }}
                                   className="px-4 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer disabled:opacity-50"
                                 >
-                                  {isSavingRow ? 'Saving...' : 'Save'}
+                                  {isSavingRow ? (isNy ? 'Kusunga...' : 'Saving...') : translate('save')}
                                 </button>
                               </div>
                             </div>
                           )}
-                      </div>
-                    );
-                  });
+                        </div>
+                      );
+                    });
                 })()}
               </div>
             )}
@@ -2869,21 +3220,36 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                   <div className="flex items-center gap-2 flex-wrap">
                     <h2 className="text-lg font-extrabold text-[var(--text)]">
                       {monetizationStatus === 'pending'
-                        ? 'Monetization under review'
+                        ? isNy
+                          ? 'Kulipira kuli m\'ndondomeko yowunikira'
+                          : 'Monetization under review'
                         : monetizationStatus === 'rejected'
-                        ? 'Monetization not approved'
+                        ? isNy
+                          ? 'Kulipira sikunavomerezedwe'
+                          : 'Monetization not approved'
                         : monetizationStatus === 'suspended'
-                        ? 'Monetization paused'
+                        ? isNy
+                          ? 'Kulipira kwayimitsidwa'
+                          : 'Monetization paused'
+                        : isNy
+                        ? 'Kulipira kwatsekedwa'
                         : 'Monetization locked'}
                     </h2>
                   </div>
                   <p className="text-xs text-[var(--text-muted)] leading-relaxed">
                     {monetizationStatus === 'pending'
-                      ? 'We received your application. You will get a notification when an admin completes the review.'
+                      ? isNy
+                        ? 'Talandira pempho lanu. Mudzalandira chidziwitso woyang\'anira akamaliza kuwunika.'
+                        : 'We received your application. You will get a notification when an admin completes the review.'
                       : monetizationStatus === 'rejected'
-                      ? `${currentArtist?.monetizationRejectionReason || 'Your profile did not pass review yet.'} You can re-apply after ${monetizationConfig.reapplyCooldownDays} days.`
+                      ? isNy
+                        ? `${currentArtist?.monetizationRejectionReason || 'Mbiri yanu sinapambane kuunikidwa pano.'} Mukhoza kuyesanso pakadutsa masiku ${monetizationConfig.reapplyCooldownDays}.`
+                        : `${currentArtist?.monetizationRejectionReason || 'Your profile did not pass review yet.'} You can re-apply after ${monetizationConfig.reapplyCooldownDays} days.`
                       : monetizationStatus === 'suspended'
-                      ? currentArtist?.monetizationRevokedReason || 'Monetization is currently paused.'
+                      ? currentArtist?.monetizationRevokedReason ||
+                        (isNy ? 'Kulipira kwayimitsidwa pakali pano.' : 'Monetization is currently paused.')
+                      : isNy
+                      ? 'Kwaniritsani zolinga zonse pansipa ndipo pemphani kuunikidwa kuti ndalama ndi kutulutsa ndalama zitseguke.'
                       : 'Meet every goal below and request review before earnings and withdrawals unlock.'}
                   </p>
                 </div>
@@ -2891,7 +3257,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
 
               {/* Live Progress Bars */}
               <div className="space-y-3">
-                <div className="text-xs font-bold text-[var(--text)]">Eligibility checklist</div>
+                <div className="text-xs font-bold text-[var(--text)]">
+                  {isNy ? 'Mndandanda wa zoyenereza' : 'Eligibility checklist'}
+                </div>
                 {eligibilityChecks.map((check) => {
                   const pct = Math.min(100, Math.round((check.current / Math.max(1, check.target)) * 100));
                   return (
@@ -2902,7 +3270,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-semibold text-[var(--text)]">{check.label}</span>
                         <span className={check.met ? 'text-[var(--accent-text)] font-bold' : 'text-[var(--text-muted)]'}>
-                          {check.met ? 'Done' : `${pct}%`}
+                          {check.met ? (isNy ? 'Zatheka' : 'Done') : `${pct}%`}
                         </span>
                       </div>
                       <div className="w-full h-1.5 rounded-full bg-[var(--surface)] overflow-hidden">
@@ -2927,7 +3295,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       className="mt-0.5 accent-[var(--accent)]"
                     />
                     <span>
-                      I have read and accept the LOWERVIBE Creator Monetization Terms. Self-plays and automated plays do not qualify.
+                      {isNy
+                        ? 'Ndawerenga ndi kuvomereza Malamulo a Kulipira kwa Opanga a LOWERVIBE. Kusewera wekha kapena ndi makina sikulipidwa.'
+                        : 'I have read and accept the LOWERVIBE Creator Monetization Terms. Self-plays and automated plays do not qualify.'}
                     </span>
                   </label>
 
@@ -2940,21 +3310,31 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       const res = await requestArtistMonetization(currentArtist.id, true);
                       setIsRequestingMonetization(false);
                       if (!res.success) {
-                        showNotice(res.error || 'Could not request monetization.', 'err');
+                        showNotice(res.error || (isNy ? 'Sitinathe kupempha kulipira.' : 'Could not request monetization.'), 'err');
                         return;
                       }
                       showNotice(
                         res.autoApproved
-                          ? 'Monetization approved automatically!'
+                          ? isNy
+                            ? 'Kulipira kwavomerezedwa kokha!'
+                            : 'Monetization approved automatically!'
+                          : isNy
+                          ? 'Pempho la kuwunika kulipira latumizidwa.'
                           : 'Monetization review submitted.'
                       );
                     }}
                     className="px-6 py-3 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer disabled:opacity-45"
                   >
                     {isRequestingMonetization
-                      ? 'Checking eligibility...'
+                      ? isNy
+                        ? 'Kuyang\'ana kuyenerera...'
+                        : 'Checking eligibility...'
                       : allEligible
-                      ? 'Activate monetization automatically'
+                      ? isNy
+                        ? 'Tsegulani kulipira kokha'
+                        : 'Activate monetization automatically'
+                      : isNy
+                      ? 'Pemphani kuwunika kulipira'
                       : 'Request monetization review'}
                   </button>
                 </div>
@@ -2966,9 +3346,13 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
               {/* Balance, Total Earnings Count-Up & Payout Status */}
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-base font-bold text-[var(--text)]">Earnings overview</h2>
+                  <h2 className="text-base font-bold text-[var(--text)]">
+                    {isNy ? 'Chidule cha ndalama' : 'Earnings overview'}
+                  </h2>
                   <p className="text-xs text-[var(--text-muted)]">
-                    Real-time royalties calculated per qualifying play
+                    {isNy
+                      ? 'Ndalama zenizeni zowerengedwa pa kusewera kulikonse koyenera'
+                      : 'Real-time royalties calculated per qualifying play'}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -2978,7 +3362,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                     className="px-3.5 py-2 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     <Wallet className="w-3.5 h-3.5" />
-                    <span>Open Withdrawals</span>
+                    <span>{isNy ? 'Tsegulani Kutulutsa' : 'Open Withdrawals'}</span>
                   </button>
                   <button
                     type="button"
@@ -2987,40 +3371,55 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                     className="px-3.5 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--accent)] text-xs font-semibold text-[var(--text)] inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingEarnings ? 'animate-spin' : ''}`} />
-                    <span>Refresh earnings</span>
+                    <span>{isNy ? 'Tsitsimutsa ndalama' : 'Refresh earnings'}</span>
                   </button>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="p-5 rounded-[20px] bg-[var(--surface)] border border-[var(--border)] space-y-1">
-                  <div className="text-xs text-[var(--text-muted)]">Available balance</div>
+                  <div className="text-xs text-[var(--text-muted)]">
+                    {isNy ? 'Ndalama zomwe zilipo' : 'Available balance'}
+                  </div>
                   <div className="text-2xl font-extrabold text-[var(--text)] tabular-nums">
                     <CountUpValue value={availableBalanceMwk} suffix=" MWK" replayKey={earningsRefreshKey} />
                   </div>
                   <div className="text-[11px] text-[var(--text-muted)]">
-                    Minimum withdrawal: {monetizationConfig.minWithdrawalMwk.toLocaleString()} MWK
+                    {isNy ? 'Zochepa zotulutsa:' : 'Minimum withdrawal:'}{' '}
+                    {monetizationConfig.minWithdrawalMwk.toLocaleString()} MWK
                   </div>
                 </div>
 
                 <div className="p-5 rounded-[20px] bg-[var(--surface)] border border-[var(--border)] space-y-1">
-                  <div className="text-xs text-[var(--text-muted)]">Total Earnings</div>
+                  <div className="text-xs text-[var(--text-muted)]">
+                    {isNy ? 'Ndalama Zonse' : 'Total Earnings'}
+                  </div>
                   <div className="text-2xl font-extrabold text-[var(--accent-text)] tabular-nums">
                     <CountUpValue value={computedEarningsMwk} suffix=" MWK" replayKey={earningsRefreshKey} />
                   </div>
                   <div className="text-[11px] text-[var(--text-muted)]">
-                    Calculated at {monetizationConfig.ratePerPlayMwk} MWK / qualifying play
+                    {isNy
+                      ? `Zowerengedwa pa ${monetizationConfig.ratePerPlayMwk} MWK / kusewera koyenera`
+                      : `Calculated at ${monetizationConfig.ratePerPlayMwk} MWK / qualifying play`}
                   </div>
                 </div>
 
                 <div className="p-5 rounded-[20px] bg-[var(--surface)] border border-[var(--border)] space-y-1.5">
-                  <div className="text-xs text-[var(--text-muted)]">Payout status &amp; Approval token</div>
+                  <div className="text-xs text-[var(--text-muted)]">
+                    {isNy ? 'Mkhalidwe wa malipiro & Chizindikiro chovomerezeka' : 'Payout status & Approval token'}
+                  </div>
                   <div className="text-base font-bold text-[var(--text)]">
                     {myPayoutMethods.length === 0
-                      ? 'Approved — Add method'
+                      ? isNy
+                        ? 'Zavomerezedwa — Onjezerani njira'
+                        : 'Approved — Add method'
                       : myPayoutMethods.some((m) => m.status === 'accepted') ||
                         monetizationConfig.payoutProviderConfigured
-                      ? 'Accepted (Auto-verified)'
+                      ? isNy
+                        ? 'Zavomerezedwa (Zatsimikizika zokha)'
+                        : 'Accepted (Auto-verified)'
+                      : isNy
+                      ? 'Zalumikizidwa'
                       : 'Connected'}
                   </div>
                   {currentArtist?.monetizationApprovalToken ? (
@@ -3034,21 +3433,29 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                           onClick={async () => {
                             const v = await verifyServerToken(currentArtist.monetizationTokenSignature!);
                             if (v.valid) {
-                              showNotice('Approval token signature verified cleanly on server.');
+                              showNotice(
+                                isNy
+                                  ? 'Chizindikiro chovomerezeka chatsimikizika bwino pa seva.'
+                                  : 'Approval token signature verified cleanly on server.'
+                              );
                             } else {
-                              showNotice(v.error || 'Token verification failed.', 'err');
+                              showNotice(v.error || (isNy ? 'Kutsimikizira chizindikiro kwalephera.' : 'Token verification failed.'), 'err');
                             }
                           }}
                           className="text-[10px] font-semibold text-[var(--violet)] underline cursor-pointer"
                         >
-                          Verify token
+                          {isNy ? 'Tsimikizirani chizindikiro' : 'Verify token'}
                         </button>
                       )}
                     </div>
                   ) : (
                     <div className="text-[11px] text-[var(--text-muted)]">
                       {myPayoutMethods.length === 0
-                        ? 'Add Airtel Money, Mpamba, or USDT below'
+                        ? isNy
+                          ? 'Onjezerani Airtel Money, Mpamba, kapena USDT pansipa'
+                          : 'Add Airtel Money, Mpamba, or USDT below'
+                        : isNy
+                        ? `Njira ${myPayoutMethods.length} zolandirira ndalama zavomerezedwa`
                         : `${myPayoutMethods.length} payout method(s) accepted`}
                     </div>
                   )}
@@ -3063,7 +3470,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 ratePerPlayMwk={monetizationConfig.ratePerPlayMwk}
                 fallbackTracks={myTracks}
                 replayKey={earningsRefreshKey}
-                title="Song-by-song earnings"
+                title={isNy ? 'Zopeza nyimbo iliyonse' : 'Song-by-song earnings'}
                 onPlayTrack={(track) =>
                   currentTrack?.id === track.id ? togglePlayPause() : playTrack(track)
                 }
@@ -3075,7 +3482,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
 
               {/* Monthly Earnings Bar Chart */}
               <div className="p-5 rounded-[24px] bg-[var(--surface)] border border-[var(--border)] space-y-3">
-                <h3 className="text-sm font-bold text-[var(--text)]">Monthly earnings (MWK)</h3>
+                <h3 className="text-sm font-bold text-[var(--text)]">
+                  {isNy ? 'Zopeza pamwezi (MWK)' : 'Monthly earnings (MWK)'}
+                </h3>
                 <div className="h-[200px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={monthlyEarningsChart}>
@@ -3083,7 +3492,13 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       <XAxis dataKey="month" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
                       <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
                       <Tooltip />
-                      <Bar dataKey="mwk" name="Estimated MWK" fill="#C6FF3D" radius={[6, 6, 0, 0]} maxBarSize={48} />
+                      <Bar
+                        dataKey="mwk"
+                        name={isNy ? 'Zoyerekeza za MWK' : 'Estimated MWK'}
+                        fill="#C6FF3D"
+                        radius={[6, 6, 0, 0]}
+                        maxBarSize={48}
+                      />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -3094,7 +3509,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 <div className="p-5 rounded-[24px] bg-[var(--surface)] border border-[var(--border)] space-y-4">
                   <h3 className="text-sm font-bold text-[var(--text)] flex items-center gap-2">
                     <Wallet className="w-4 h-4 text-[var(--accent-text)]" />
-                    <span>Payout methods</span>
+                    <span>{isNy ? 'Njira zolandirira ndalama' : 'Payout methods'}</span>
                   </h3>
 
                   {myPayoutMethods.length > 0 && (
@@ -3113,7 +3528,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                 <span>{pm.label}</span>
                                 {pm.isDefault && (
                                   <span className="px-2 py-0.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-[10px]">
-                                    Default
+                                    {isNy ? 'Yoyamba' : 'Default'}
                                   </span>
                                 )}
                                 <span
@@ -3123,7 +3538,13 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                       : 'bg-[var(--surface)] border-[var(--border)] text-amber-500'
                                   }`}
                                 >
-                                  {isAccepted ? 'Accepted' : 'Pending hold'}
+                                  {isAccepted
+                                    ? isNy
+                                      ? 'Yavomerezedwa'
+                                      : 'Accepted'
+                                    : isNy
+                                    ? 'Ikudikirira'
+                                    : 'Pending hold'}
                                 </span>
                               </div>
                               <div className="text-[11px] font-mono text-[var(--text-muted)]">
@@ -3137,14 +3558,18 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                   onClick={async () => {
                                     const res = await setDefaultPayoutMethod(pm.id);
                                     if (!res.success) {
-                                      showNotice(res.error || 'Could not update default payout method.', 'err');
+                                      showNotice(
+                                        res.error ||
+                                          (isNy ? 'Sitinathe kusintha njira yoyamba.' : 'Could not update default payout method.'),
+                                        'err'
+                                      );
                                     } else {
-                                      showNotice('Default payout method updated.');
+                                      showNotice(isNy ? 'Njira yoyamba yasinthidwa.' : 'Default payout method updated.');
                                     }
                                   }}
                                   className="px-2.5 py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[11px] text-[var(--text)] cursor-pointer"
                                 >
-                                  Set default
+                                  {isNy ? 'Ikani ngati yoyamba' : 'Set default'}
                                 </button>
                               )}
                               <button
@@ -3152,9 +3577,12 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                 onClick={async () => {
                                   const res = await removePayoutMethod(pm.id);
                                   if (!res.success) {
-                                    showNotice(res.error || 'Could not remove payout method.', 'err');
+                                    showNotice(
+                                      res.error || (isNy ? 'Sitinathe kuchotsa njira yolandirira ndalama.' : 'Could not remove payout method.'),
+                                      'err'
+                                    );
                                   } else {
-                                    showNotice('Payout method removed.');
+                                    showNotice(isNy ? 'Njira yolandirira ndalama yachotsedwa.' : 'Payout method removed.');
                                   }
                                 }}
                                 className="p-1.5 text-[var(--text-muted)] hover:text-[var(--danger)] cursor-pointer"
@@ -3169,7 +3597,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                   )}
 
                   <form onSubmit={handleAddPayoutMethodSubmit} className="space-y-3 pt-2 border-t border-[var(--border)]">
-                    <div className="text-xs font-semibold text-[var(--text)]">Add payout method</div>
+                    <div className="text-xs font-semibold text-[var(--text)]">
+                      {isNy ? 'Onjezerani njira yolandirira ndalama' : 'Add payout method'}
+                    </div>
                     <select
                       value={pmType}
                       onChange={(e) => setPmType(e.target.value as PayoutProviderType)}
@@ -3183,7 +3613,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
 
                     {(pmType === 'usdt_trc20' || pmType === 'usdt_bep20') && (
                       <div className="p-2.5 rounded-xl bg-[var(--surface-2)] border border-amber-500/40 text-[11px] text-amber-500">
-                        Check your wallet network carefully ({pmType === 'usdt_trc20' ? 'TRC-20 starts with T' : 'BEP-20 starts with 0x'}). Wrong-network crypto transfers cannot be recovered.
+                        {isNy
+                          ? `Onani mosamala netiweki yanu (${pmType === 'usdt_trc20' ? 'TRC-20 imayamba ndi T' : 'BEP-20 imayamba ndi 0x'}). Ndalama zatumizidwa ku netiweki yolakwika sizingabwerere.`
+                          : `Check your wallet network carefully (${pmType === 'usdt_trc20' ? 'TRC-20 starts with T' : 'BEP-20 starts with 0x'}). Wrong-network crypto transfers cannot be recovered.`}
                       </div>
                     )}
 
@@ -3208,7 +3640,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       required
                       value={pmHolderName}
                       onChange={(e) => setPmHolderName(e.target.value)}
-                      placeholder="Full account holder name"
+                      placeholder={isNy ? 'Dzina lonse la mwini akaunti' : 'Full account holder name'}
                       className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
                     />
                     <button
@@ -3216,14 +3648,22 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       disabled={isAddingPm}
                       className="w-full py-2.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer"
                     >
-                      {isAddingPm ? 'Saving...' : 'Save payout method'}
+                      {isAddingPm
+                        ? isNy
+                          ? 'Kusunga...'
+                          : 'Saving...'
+                        : isNy
+                        ? 'Sungani njira yolandirira ndalama'
+                        : 'Save payout method'}
                     </button>
                   </form>
                 </div>
 
                 {/* Request Withdrawal Form */}
                 <div className="p-5 rounded-[24px] bg-[var(--surface)] border border-[var(--border)] space-y-4">
-                  <h3 className="text-sm font-bold text-[var(--text)]">Request withdrawal</h3>
+                  <h3 className="text-sm font-bold text-[var(--text)]">
+                    {isNy ? 'Pemphani kutulutsa ndalama' : 'Request withdrawal'}
+                  </h3>
                   <form onSubmit={handleWithdrawSubmit} className="space-y-3">
                     {myPayoutMethods.length > 0 && (
                       <select
@@ -3245,14 +3685,20 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       step={500}
                       value={withdrawAmountMwk}
                       onChange={(e) => setWithdrawAmountMwk(e.target.value)}
-                      placeholder={`Amount in MWK (min ${monetizationConfig.minWithdrawalMwk.toLocaleString()})`}
+                      placeholder={
+                        isNy
+                          ? `Ndalama mu MWK (osachepera ${monetizationConfig.minWithdrawalMwk.toLocaleString()})`
+                          : `Amount in MWK (min ${monetizationConfig.minWithdrawalMwk.toLocaleString()})`
+                      }
                       className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-mono text-[var(--text)]"
                     />
 
                     {Number(withdrawAmountMwk) > 0 && (
                       <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs space-y-1">
                         <div className="flex justify-between text-[var(--text-muted)]">
-                          <span>Fee ({monetizationConfig.payoutFeePercent}%)</span>
+                          <span>
+                            {isNy ? 'Chindapusa' : 'Fee'} ({monetizationConfig.payoutFeePercent}%)
+                          </span>
                           <span className="font-mono">
                             {Math.round(
                               (Number(withdrawAmountMwk) * monetizationConfig.payoutFeePercent) / 100
@@ -3261,7 +3707,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                           </span>
                         </div>
                         <div className="flex justify-between font-bold text-[var(--text)]">
-                          <span>Net payout</span>
+                          <span>{isNy ? 'Ndalama zonse zolandira' : 'Net payout'}</span>
                           <span className="font-mono">
                             {Math.max(
                               0,
@@ -3281,14 +3727,22 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                       disabled={isSubmittingWithdraw || myPayoutMethods.length === 0}
                       className="w-full py-2.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer disabled:opacity-50"
                     >
-                      {isSubmittingWithdraw ? 'Submitting...' : 'Request withdrawal'}
+                      {isSubmittingWithdraw
+                        ? isNy
+                          ? 'Kutumiza...'
+                          : 'Submitting...'
+                        : isNy
+                        ? 'Pemphani kutulutsa ndalama'
+                        : 'Request withdrawal'}
                     </button>
                   </form>
 
                   {/* Payout Request History */}
                   {myPayoutRequests.length > 0 && (
                     <div className="pt-3 border-t border-[var(--border)] space-y-2">
-                      <div className="text-xs font-bold text-[var(--text)]">Recent withdrawals</div>
+                      <div className="text-xs font-bold text-[var(--text)]">
+                        {isNy ? 'Zotulutsa zaposachedwa' : 'Recent withdrawals'}
+                      </div>
                       {myPayoutRequests.slice(0, 5).map((req) => (
                         <div
                           key={req.id}
@@ -3315,18 +3769,29 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                 onClick={async () => {
                                   const v = await verifyServerToken(req.payoutTokenSignature!);
                                   if (v.valid) {
-                                    showNotice(`Settlement token ${req.payoutToken} is cryptographically valid.`);
+                                    showNotice(
+                                      isNy
+                                        ? `Chizindikiro cholipira ${req.payoutToken} ndi chovomerezeka.`
+                                        : `Settlement token ${req.payoutToken} is cryptographically valid.`
+                                    );
                                   } else {
-                                    showNotice(v.error || 'Invalid settlement token.', 'err');
+                                    showNotice(
+                                      v.error || (isNy ? 'Chizindikiro chosavomerezeka.' : 'Invalid settlement token.'),
+                                      'err'
+                                    );
                                   }
                                 }}
                                 className="px-2 py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[10px] font-semibold text-[var(--violet)] cursor-pointer"
                               >
-                                Verify
+                                {isNy ? 'Tsimikizirani' : 'Verify'}
                               </button>
                             )}
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] capitalize">
-                              {req.status === 'awaiting_review' ? 'Awaiting manual review' : req.status}
+                              {req.status === 'awaiting_review'
+                                ? isNy
+                                  ? 'Kudikirira kuwunika'
+                                  : 'Awaiting manual review'
+                                : req.status}
                             </span>
                           </div>
                         </div>

@@ -1,9 +1,12 @@
 import { AlertTriangle, Home, RefreshCw } from 'lucide-react';
 import React from 'react';
+import { useLanguage } from '../../context/LanguageContext';
 import { useRouter } from '../../context/RouterContext';
 
 export const ServerErrorView: React.FC = () => {
   const { navigate } = useRouter();
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
 
   const handleReload = () => {
     window.location.reload();
@@ -19,10 +22,12 @@ export const ServerErrorView: React.FC = () => {
       </div>
 
       <h1 className="text-3xl font-extrabold tracking-tight text-[var(--text)] mb-2 font-heading">
-        Something went wrong
+        {isNy ? 'Chinachake chalakwika' : 'Something went wrong'}
       </h1>
       <p className="text-sm text-[var(--text-muted)] max-w-md mb-8 leading-relaxed">
-        We hit an unexpected problem loading this page. Try reloading the app or returning home.
+        {isNy
+          ? 'Papezeka vuto polowetsa tsambali. Yesani kutsitsimutsanso kapena kubwerera kunyumba.'
+          : 'We hit an unexpected problem loading this page. Try reloading the app or returning home.'}
       </p>
 
       <div className="flex flex-wrap items-center justify-center gap-3">
@@ -32,7 +37,7 @@ export const ServerErrorView: React.FC = () => {
           className="px-5 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs sm:text-sm transition flex items-center gap-2 cursor-pointer min-h-[44px]"
         >
           <RefreshCw className="w-4 h-4" />
-          <span>Reload App</span>
+          <span>{isNy ? 'Tsitsimutsani' : 'Reload App'}</span>
         </button>
 
         <button
@@ -41,7 +46,7 @@ export const ServerErrorView: React.FC = () => {
           className="px-5 py-2.5 rounded-full bg-[var(--surface)] text-[var(--text)] font-medium text-xs sm:text-sm hover:bg-[var(--surface-2)] border border-[var(--border)] transition flex items-center gap-2 cursor-pointer min-h-[44px]"
         >
           <Home className="w-4 h-4" />
-          <span>Go to Home</span>
+          <span>{t('studio_back_home')}</span>
         </button>
       </div>
     </div>

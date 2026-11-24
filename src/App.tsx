@@ -42,7 +42,7 @@ import { ThankYouView } from './components/views/ThankYouView';
 import { TrackPublicPageView } from './components/views/TrackPublicPageView';
 import { AudioProvider, useAudio } from './context/AudioContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { LanguageProvider } from './context/LanguageContext';
+import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { OfflineQueueProvider } from './context/OfflineQueueContext';
 import { RouterProvider, useRouter } from './context/RouterContext';
@@ -61,6 +61,8 @@ import { applyArtistSeoMeta, applyRouteSeoMeta, applyTrackSeoMeta } from './util
 
 function AppContent() {
   const { currentRoute, navigate, searchParams } = useRouter();
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isPageTransitioning, setIsPageTransitioning] = useState(false);
   const [tourDismissedInSession, setTourDismissedInSession] = useState(false);
@@ -519,10 +521,12 @@ function AppContent() {
           </div>
           <div className="space-y-1.5">
             <h1 className="text-xl font-extrabold font-heading text-[var(--text)]">
-              Approved Artists Only
+              {isNy ? 'Oimba Ovomerezeka Okha' : 'Approved Artists Only'}
             </h1>
             <p className="text-xs sm:text-sm text-[var(--text-muted)] leading-relaxed">
-              The standalone LOWERVIBE Artist WebApp unlocks automatically after your artist registration is approved. Submit or check your artist application first.
+              {isNy
+                ? 'Pulogalamu ya LOWERVIBE Artist imatseguka yokha pempho lanu la woimba likavomerezedwa. Tumizani kapena yang\'anani pempho lanu kaye.'
+                : 'The standalone LOWERVIBE Artist WebApp unlocks automatically after your artist registration is approved. Submit or check your artist application first.'}
             </p>
           </div>
           <div className="flex flex-col sm:flex-row gap-2.5">
@@ -534,7 +538,13 @@ function AppContent() {
               }}
               className="flex-1 py-3 px-4 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs cursor-pointer"
             >
-              {currentUser.applicationStatus === 'pending' ? 'View Approval Status' : 'Register as Artist'}
+              {currentUser.applicationStatus === 'pending'
+                ? isNy
+                  ? 'Onani Pempho Lanu'
+                  : 'View Approval Status'
+                : isNy
+                ? 'Lembani Ngati Woimba'
+                : 'Register as Artist'}
             </button>
             <button
               type="button"
@@ -544,7 +554,7 @@ function AppContent() {
               }}
               className="flex-1 py-3 px-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] font-semibold text-xs cursor-pointer"
             >
-              Continue Listening
+              {isNy ? 'Pitirizani Kumvera' : 'Continue Listening'}
             </button>
           </div>
         </div>
@@ -651,7 +661,7 @@ function AppContent() {
                         : 'bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)]'
                     }`}
                   >
-                    Artist Creator
+                    {t('artist_creator', 'Artist Creator')}
                   </button>
                   <button
                     type="button"
@@ -666,7 +676,7 @@ function AppContent() {
                         : 'bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)]'
                     }`}
                   >
-                    My Artist Page
+                    {isNy ? 'Tsamba Langa la Woimba' : 'My Artist Page'}
                   </button>
                   <button
                     type="button"
@@ -677,7 +687,7 @@ function AppContent() {
                         : 'bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)]'
                     }`}
                   >
-                    Withdrawals
+                    {t('studio_tab_withdrawals', 'Withdrawals')}
                   </button>
                 </div>
               </div>
@@ -691,21 +701,21 @@ function AppContent() {
                 <div className="flex items-center gap-2 text-[var(--text)]">
                   <FileText className="w-4 h-4 text-[var(--accent-text)] shrink-0" />
                   <span>
-                    We updated our{' '}
+                    {isNy ? 'Takonza ' : 'We updated our '}
                     <button
                       type="button"
                       onClick={() => navigate('/terms')}
                       className="underline font-semibold hover:text-[var(--accent-text)] cursor-pointer"
                     >
-                      Terms of Service
+                      {t('footer_terms', 'Terms of Service')}
                     </button>{' '}
-                    and{' '}
+                    {isNy ? 'ndi ' : 'and '}
                     <button
                       type="button"
                       onClick={() => navigate('/privacy')}
                       className="underline font-semibold hover:text-[var(--accent-text)] cursor-pointer"
                     >
-                      Privacy Policy
+                      {t('footer_privacy', 'Privacy Policy')}
                     </button>
                     .
                   </span>
@@ -715,7 +725,7 @@ function AppContent() {
                   onClick={() => acceptLatestTerms()}
                   className="px-3.5 py-1.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs cursor-pointer"
                 >
-                  Accept
+                  {isNy ? 'Vomerezani' : 'Accept'}
                 </button>
               </div>
             </div>
@@ -825,11 +835,17 @@ function AppContent() {
                 {activeDownload.trackTitle}
               </span>
               <span className="text-[11px] font-mono font-bold text-[var(--accent-text)]">
-                {activeDownload.isComplete ? 'Saved' : `${activeDownload.progress}%`}
+                {activeDownload.isComplete ? t('saved', 'Saved') : `${activeDownload.progress}%`}
               </span>
             </div>
             <div className="text-[11px] text-[var(--text-muted)] truncate max-w-[180px]">
-              {activeDownload.isComplete ? 'Ready for offline listening' : 'Saving track for offline play...'}
+              {activeDownload.isComplete
+                ? isNy
+                  ? 'Yakonzeka kumvera popanda intaneti'
+                  : 'Ready for offline listening'
+                : isNy
+                ? 'Ikusunga nyimbo popanda intaneti...'
+                : 'Saving track for offline play...'}
             </div>
             <div className="w-full bg-[var(--surface-2)] rounded-full h-1 mt-1.5 overflow-hidden">
               <div

@@ -19,6 +19,7 @@ import {
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
 import { MACRO_REGIONS, matchesLocationFilter, WORLD_REGIONS } from '../../data/regions';
@@ -26,6 +27,7 @@ import { getTrendingGenres, subscribeToFirestoreGenres } from '../../services/ge
 import { FirestoreGenre, GenreSortMode, Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG } from '../../utils/artworkFallback';
 import { formatTime, getTrackLikeCount, isTrackLikedByUser } from '../../utils/formatters';
+import { normalizeGenreCategory, translateGenreCategory } from '../../utils/genreCategories';
 import { TrackRowSkeleton } from '../common/LoadingSkeleton';
 
 interface DiscoverViewProps {
@@ -50,6 +52,8 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
   } = useAudio();
 
   const { currentUser, toggleLikeTrack } = useAuth();
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
   const { showToast } = useToast();
   const { searchParams } = useRouter();
 
@@ -115,8 +119,8 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
   );
 
   const allAvailableGenres = useMemo(() => {
-    const fromFirestore = rankedGenres.map((g) => g.name);
-    const fromTracks = publicTracks.map((t) => t.genre).filter(Boolean);
+    const fromFirestore = rankedGenres.map((g) => normalizeGenreCategory(g.name));
+    const fromTracks = publicTracks.map((t) => normalizeGenreCategory(t.genre)).filter(Boolean);
     const merged = Array.from(new Set([...fromFirestore, ...fromTracks]));
     return ['all', ...merged];
   }, [rankedGenres, publicTracks]);
@@ -128,19 +132,46 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
 
   const currentGenreMeta = useMemo(() => {
     if (selectedGenre === 'all') return null;
-    return (
-      firestoreGenres.find((g) => g.name.toLowerCase() === selectedGenre.toLowerCase()) || {
-        id: selectedGenre.toLowerCase().replace(/[^a-z0-9]/g, '-'),
-        name: selectedGenre,
-        description: `Songs tagged under ${selectedGenre}.`,
-        trackCount: publicTracks.filter((t) => t.genre.toLowerCase() === selectedGenre.toLowerCase()).length,
-        isFeatured: false,
-        icon: '🎵',
-      }
+    const normalizedSel = normalizeGenreCategory(selectedGenre).toLowerCase();
+    const matchedFirestore = firestoreGenres.find(
+      (g) =>
+        normalizeGenreCategory(g.name).toLowerCase() === normalizedSel ||
+        g.name.toLowerCase() === selectedGenre.toLowerCase()
     );
-  }, [selectedGenre, firestoreGenres, publicTracks]);
+    const canonicalName = normalizeGenreCategory(selectedGenre);
+    if (matchedFirestore) {
+      return {
+        ...matchedFirestore,
+        name: canonicalName,
+      };
+    }
+    return {
+      id: canonicalName.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+      name: canonicalName,
+      description: isNy
+        ? `Nyimbo za mtundu wa ${translateGenreCategory(canonicalName, language)}.`
+        : `Songs tagged under ${canonicalName}.`,
+      trackCount: publicTracks.filter(
+        (t) => normalizeGenreCategory(t.genre).toLowerCase() === normalizedSel
+      ).length,
+      isFeatured: false,
+      icon: '🎵',
+    };
+  }, [selectedGenre, firestoreGenres, publicTracks, isNy, language]);
 
   const sortedAndFilteredTracks = useMemo(() => {
+    const normalizedSel = normalizeGenreCategory(selectedGenre).toLowerCase();
+    const rawSel = selectedGenre.toLowerCase();
+
+    const matchesTrackGenre = (track: Track) =>
+      normalizeGenreCategory(track.genre).toLowerCase() === normalizedSel ||
+      track.genre.toLowerCase() === rawSel ||
+      track.vibeTags.some(
+        (tag) =>
+          normalizeGenreCategory(tag).toLowerCase() === normalizedSel ||
+          tag.toLowerCase() === rawSel
+      );
+
     const list = publicTracks.filter((t) => {
       if (
         activeTab === 'chill' &&
@@ -154,9 +185,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
       if (activeTab === 'verified' && !t.isCertified) return false;
 
       if (selectedGenre !== 'all' && genreFilterBehavior === 'strict_filter') {
-        const matchesExactGenre = t.genre.toLowerCase() === selectedGenre.toLowerCase();
-        const matchesTag = t.vibeTags.some((tag) => tag.toLowerCase() === selectedGenre.toLowerCase());
-        if (!matchesExactGenre && !matchesTag) return false;
+        if (!matchesTrackGenre(t)) return false;
       }
 
       if (selectedMood !== 'all' && t.mood !== selectedMood) return false;
@@ -168,10 +197,12 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
 
       if (searchFilter.trim()) {
         const q = searchFilter.toLowerCase();
+        const localizedGenre = translateGenreCategory(t.genre, language).toLowerCase();
         return (
           t.title.toLowerCase().includes(q) ||
           t.artistName.toLowerCase().includes(q) ||
           t.genre.toLowerCase().includes(q) ||
+          localizedGenre.includes(q) ||
           (t.region && t.region.toLowerCase().includes(q))
         );
       }
@@ -180,14 +211,8 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
     });
 
     return [...list].sort((a, b) => {
-      const aMatchesGenre =
-        selectedGenre !== 'all' &&
-        (a.genre.toLowerCase() === selectedGenre.toLowerCase() ||
-          a.vibeTags.some((v) => v.toLowerCase() === selectedGenre.toLowerCase()));
-      const bMatchesGenre =
-        selectedGenre !== 'all' &&
-        (b.genre.toLowerCase() === selectedGenre.toLowerCase() ||
-          b.vibeTags.some((v) => v.toLowerCase() === selectedGenre.toLowerCase()));
+      const aMatchesGenre = selectedGenre !== 'all' && matchesTrackGenre(a);
+      const bMatchesGenre = selectedGenre !== 'all' && matchesTrackGenre(b);
 
       if (selectedGenre !== 'all' && (genreFilterBehavior === 'prioritize_sort' || genreSortMode === 'genre_priority')) {
         if (aMatchesGenre && !bMatchesGenre) return -1;
@@ -204,7 +229,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
       if (aMatchesGenre && bMatchesGenre) return (b.plays || 0) - (a.plays || 0);
       return 0;
     });
-  }, [publicTracks, activeTab, selectedGenre, genreFilterBehavior, genreSortMode, selectedMood, selectedRegion, bpmRange, searchFilter]);
+  }, [publicTracks, activeTab, selectedGenre, genreFilterBehavior, genreSortMode, selectedMood, selectedRegion, bpmRange, searchFilter, language]);
 
   const topPlayedTracks = useMemo(
     () => [...publicTracks].sort((a, b) => (b.plays || 0) - (a.plays || 0)).slice(0, 5),
@@ -246,9 +271,13 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
       setTimeout(() => {
         setAnimatingHeartTrackId((prev) => (prev === track.id ? null : prev));
       }, 700);
-      showToast(`Added "${track.title}" to your library`);
+      showToast(
+        isNy ? `"${track.title}" yaikidwa mu laibulale yanu` : `Added "${track.title}" to your library`
+      );
     } else {
-      showToast(`Removed "${track.title}" from your library`);
+      showToast(
+        isNy ? `"${track.title}" yachotsedwa mu laibulale yanu` : `Removed "${track.title}" from your library`
+      );
     }
   };
 
@@ -261,7 +290,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
     setBpmRange('all');
     setSearchFilter('');
     setActiveTab('all');
-    showToast('Filters reset');
+    showToast(isNy ? 'Zosankha zabwezeretsedwa' : 'Filters reset');
   };
 
   return (
@@ -270,13 +299,17 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--accent-text)] font-bold">
-            Discover · {publicTracks.length} songs
+            {isNy
+              ? `Fufuzani · Nyimbo ${publicTracks.length}`
+              : `Discover · ${publicTracks.length} songs`}
           </span>
           <h1 className="text-2xl sm:text-3xl font-black font-heading tracking-tight text-[var(--text)] mt-1">
-            Discover Music
+            {t('discover_title')}
           </h1>
           <p className="text-xs sm:text-sm text-[var(--text-muted)]">
-            Browse independent songs by genre, mood, city, and tempo.
+            {isNy
+              ? 'Pezani nyimbo zodziyimira okha malinga ndi mtundu, maganizo, mzinda ndi liwiro.'
+              : 'Browse independent songs by genre, mood, city, and tempo.'}
           </p>
         </div>
 
@@ -288,7 +321,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
               type="text"
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
-              placeholder="Filter title, artist, country..."
+              placeholder={isNy ? 'Sakani dzina, woimba, dziko...' : 'Filter title, artist, country...'}
               className="w-full pl-10 pr-4 py-2.5 rounded-full bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text)] placeholder-[var(--text-muted)] focus:border-[var(--accent)] focus:outline-none transition"
             />
           </div>
@@ -302,8 +335,8 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                   ? 'bg-[var(--accent)] text-[var(--accent-contrast)] font-bold'
                   : 'text-[var(--text-muted)] hover:text-[var(--text)]'
               }`}
-              title="List view"
-              aria-label="List view"
+              title={isNy ? 'Mndandanda' : 'List view'}
+              aria-label={isNy ? 'Mndandanda' : 'List view'}
             >
               <LayoutList className="w-4 h-4" />
             </button>
@@ -315,8 +348,8 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                   ? 'bg-[var(--accent)] text-[var(--accent-contrast)] font-bold'
                   : 'text-[var(--text-muted)] hover:text-[var(--text)]'
               }`}
-              title="Grid view"
-              aria-label="Grid view"
+              title={isNy ? 'Mabokosi' : 'Grid view'}
+              aria-label={isNy ? 'Mabokosi' : 'Grid view'}
             >
               <LayoutGrid className="w-4 h-4" />
             </button>
@@ -353,11 +386,11 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
             <div className="space-y-3 flex-1 text-center md:text-left">
               <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 text-xs">
                 <span className="font-bold uppercase tracking-wider text-[11px] text-[var(--accent-text)]">
-                  Featured Release
+                  {isNy ? 'Nyimbo Yosankhidwa' : 'Featured Release'}
                 </span>
                 <span className="text-[var(--text-muted)]">·</span>
                 <span className="font-mono text-[11px] text-[var(--text-muted)]">
-                  {featuredRecord.region || 'Global'}
+                  {featuredRecord.region || (isNy ? 'Padziko Lonse' : 'Global')}
                 </span>
               </div>
 
@@ -377,7 +410,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
               {featuredVibe?.curatorNote && (
                 <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)] leading-relaxed">
                   <div className="text-[10px] font-mono uppercase text-[var(--text-muted)] mb-1">
-                    Curator Note · {featuredVibe.curatorName}
+                    {isNy ? 'Uthenga wa Wosankha' : 'Curator Note'} · {featuredVibe.curatorName}
                   </div>
                   <p>"{featuredVibe.curatorNote}"</p>
                 </div>
@@ -392,7 +425,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                   className="px-6 py-3 rounded-full font-bold text-xs text-[var(--accent-contrast)] bg-[var(--accent)] hover:brightness-105 transition shadow-sm flex items-center gap-2 cursor-pointer min-h-[44px]"
                 >
                   <Play className="w-4 h-4 fill-current ml-0.5" />
-                  <span>{currentTrack?.id === featuredRecord.id && isPlaying ? 'Pause' : 'Play'}</span>
+                  <span>{currentTrack?.id === featuredRecord.id && isPlaying ? t('pause') : t('play')}</span>
                 </button>
 
                 <button
@@ -401,7 +434,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                   className="px-4 py-3 rounded-full bg-[var(--surface-2)] hover:border-[var(--border-strong)] text-[var(--text)] text-xs font-bold border border-[var(--border)] transition flex items-center gap-2 cursor-pointer min-h-[44px]"
                 >
                   <Bookmark className="w-4 h-4 text-[var(--accent-text)]" />
-                  <span>Save</span>
+                  <span>{t('save')}</span>
                 </button>
 
                 <button
@@ -409,7 +442,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                   onClick={() => onOpenTrackDetails(featuredRecord)}
                   className="px-4 py-3 rounded-full bg-[var(--surface-2)] hover:border-[var(--border-strong)] text-[var(--text-muted)] hover:text-[var(--text)] text-xs font-bold border border-[var(--border)] transition cursor-pointer min-h-[44px]"
                 >
-                  Track info
+                  {isNy ? 'Zambiri za nyimbo' : 'Track info'}
                 </button>
               </div>
             </div>
@@ -421,11 +454,11 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
       <div className="space-y-5">
         <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
           {[
-            { id: 'all', label: 'All Genres' },
-            { id: 'charts', label: 'Charts' },
-            { id: 'chill', label: 'Chill & Ambient' },
-            { id: 'rising', label: 'Rising Artists' },
-            { id: 'verified', label: 'Verified Uploads' },
+            { id: 'all', label: t('all_genres') },
+            { id: 'charts', label: t('tab_charts') },
+            { id: 'chill', label: isNy ? 'Zopumulira' : 'Chill & Ambient' },
+            { id: 'rising', label: isNy ? 'Oimba Okwera' : 'Rising Artists' },
+            { id: 'verified', label: isNy ? 'Zotsimikizika' : 'Verified Uploads' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -448,14 +481,19 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--accent-text)] font-bold">
-                  Trending genres {selectedCountry && selectedCountry !== 'Global' ? `(${selectedCountry})` : '(Global)'}
+                  {isNy ? 'Mitundu yotchuka' : 'Trending genres'}{' '}
+                  {selectedCountry && selectedCountry !== 'Global'
+                    ? `(${selectedCountry})`
+                    : isNy
+                    ? '(Padziko Lonse)'
+                    : '(Global)'}
                 </span>
                 <span className="text-[11px] font-mono text-[var(--text-muted)]">
-                  · {rankedGenres.length} genres
+                  · {isNy ? `mitundu ${rankedGenres.length}` : `${rankedGenres.length} genres`}
                 </span>
               </div>
               <h2 className="text-base sm:text-lg font-black font-heading text-[var(--text)] tracking-tight mt-1">
-                Explore sounds &amp; moods
+                {isNy ? 'Fufuzani mitundu ndi mamvekedwe' : 'Explore sounds & moods'}
               </h2>
             </div>
 
@@ -470,7 +508,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                       : 'text-[var(--text-muted)] hover:text-[var(--text)]'
                   }`}
                 >
-                  Sort to Top
+                  {isNy ? 'Ikani Pamwamba' : 'Sort to Top'}
                 </button>
                 <button
                   type="button"
@@ -481,7 +519,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                       : 'text-[var(--text-muted)] hover:text-[var(--text)]'
                   }`}
                 >
-                  Filter Only
+                  {isNy ? 'Zokhazi Zokha' : 'Filter Only'}
                 </button>
               </div>
 
@@ -491,15 +529,15 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                   value={genreSortMode}
                   onChange={(e) => setGenreSortMode(e.target.value as GenreSortMode)}
                   className="bg-transparent text-[var(--text)] text-xs font-semibold focus:outline-none cursor-pointer pr-1"
-                  title="Sort songs"
+                  title={t('sort_by')}
                 >
-                  <option value="genre_priority">Sort: Genre Match First</option>
-                  <option value="most_played">Sort: Most Played</option>
-                  <option value="newest">Sort: Newest Releases</option>
-                  <option value="bpm_asc">Sort: BPM (Low to High)</option>
-                  <option value="bpm_desc">Sort: BPM (High to Low)</option>
-                  <option value="title_asc">Sort: Title (A-Z)</option>
-                  <option value="duration_desc">Sort: Duration (Longest)</option>
+                  <option value="genre_priority">{isNy ? 'Mtundu Poyamba' : 'Sort: Genre Match First'}</option>
+                  <option value="most_played">{isNy ? 'Zomveredwa Kwambiri' : 'Sort: Most Played'}</option>
+                  <option value="newest">{isNy ? 'Zatsopano' : 'Sort: Newest Releases'}</option>
+                  <option value="bpm_asc">{isNy ? 'Liwiro (Pansi ku Mwamba)' : 'Sort: BPM (Low to High)'}</option>
+                  <option value="bpm_desc">{isNy ? 'Liwiro (Mwamba ku Pansi)' : 'Sort: BPM (High to Low)'}</option>
+                  <option value="title_asc">{isNy ? 'Dzina (A-Z)' : 'Sort: Title (A-Z)'}</option>
+                  <option value="duration_desc">{isNy ? 'Utali (Zotalika)' : 'Sort: Duration (Longest)'}</option>
                 </select>
               </div>
             </div>
@@ -517,25 +555,27 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
               }`}
             >
               <Compass className="w-3.5 h-3.5" />
-              <span>All Genres</span>
+              <span>{t('all_genres')}</span>
               <span className="px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-black/15">
                 {publicTracks.length}
               </span>
             </button>
 
             {rankedGenres.map((g) => {
-              const isSelected = selectedGenre.toLowerCase() === g.name.toLowerCase();
+              const canonicalChip = normalizeGenreCategory(g.name);
+              const isSelected =
+                normalizeGenreCategory(selectedGenre).toLowerCase() === canonicalChip.toLowerCase();
               const matchingCount = publicTracks.filter(
                 (t) =>
-                  t.genre.toLowerCase() === g.name.toLowerCase() ||
-                  t.vibeTags.some((tag) => tag.toLowerCase() === g.name.toLowerCase())
+                  normalizeGenreCategory(t.genre).toLowerCase() === canonicalChip.toLowerCase() ||
+                  t.vibeTags.some((tag) => normalizeGenreCategory(tag).toLowerCase() === canonicalChip.toLowerCase())
               ).length;
 
               return (
                 <button
                   key={g.id}
                   type="button"
-                  onClick={() => setSelectedGenre(isSelected ? 'all' : g.name)}
+                  onClick={() => setSelectedGenre(isSelected ? 'all' : canonicalChip)}
                   className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 shrink-0 cursor-pointer border ${
                     isSelected
                       ? 'bg-[var(--accent)] text-[var(--accent-contrast)] border-[var(--accent)]'
@@ -543,7 +583,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                   }`}
                 >
                   <Tag className={`w-3.5 h-3.5 ${isSelected ? 'text-[var(--accent-contrast)]' : 'text-[var(--accent-text)]'}`} />
-                  <span>{g.name}</span>
+                  <span>{translateGenreCategory(canonicalChip, language)}</span>
                   <span className="px-1.5 py-0.5 rounded-full text-[10px] font-mono tabular-nums opacity-75">
                     {matchingCount || g.trackCount}
                   </span>
@@ -561,10 +601,12 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-black text-[var(--text)] font-heading">
-                      {currentGenreMeta.name}
+                      {translateGenreCategory(currentGenreMeta.name, language)}
                     </span>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[var(--accent)]/15 text-[var(--accent-text)]">
-                      {genreFilterBehavior === 'strict_filter' ? 'Filtered' : 'Top matches'}
+                      {genreFilterBehavior === 'strict_filter'
+                        ? isNy ? 'Zosefedwa' : 'Filtered'
+                        : isNy ? 'Zogwirizana pamwamba' : 'Top matches'}
                     </span>
                   </div>
                   <p className="text-[var(--text-muted)] text-xs line-clamp-1 mt-0.5">
@@ -579,7 +621,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                 className="px-3 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] font-bold flex items-center gap-1.5 cursor-pointer text-xs self-start sm:self-auto"
               >
                 <X className="w-3.5 h-3.5" />
-                <span>Clear Genre</span>
+                <span>{isNy ? 'Chotsani Mtundu' : 'Clear Genre'}</span>
               </button>
             </div>
           )}
@@ -587,41 +629,47 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
           {/* Secondary Filters Bar */}
           <div className="p-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
             <div>
-              <label className="text-[10px] font-mono uppercase text-[var(--text-muted)] block mb-1">Genre</label>
+              <label className="text-[10px] font-mono uppercase text-[var(--text-muted)] block mb-1">
+                {isNy ? 'Mtundu' : 'Genre'}
+              </label>
               <select
-                value={selectedGenre}
+                value={selectedGenre === 'all' ? 'all' : normalizeGenreCategory(selectedGenre)}
                 onChange={(e) => setSelectedGenre(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
               >
                 {allAvailableGenres.map((g) => (
-                  <option key={g} value={g}>{g === 'all' ? 'All Genres' : g}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="text-[10px] font-mono uppercase text-[var(--text-muted)] block mb-1">Mood</label>
-              <select
-                value={selectedMood}
-                onChange={(e) => setSelectedMood(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-              >
-                {moods.map((m) => (
-                  <option key={m} value={m}>{m === 'all' ? 'All Moods' : m}</option>
+                  <option key={g} value={g}>
+                    {g === 'all' ? t('all_genres') : translateGenreCategory(g, language)}
+                  </option>
                 ))}
               </select>
             </div>
 
             <div>
               <label className="text-[10px] font-mono uppercase text-[var(--text-muted)] block mb-1">
-                Country ({WORLD_REGIONS.length})
+                {isNy ? 'Maganizo' : 'Mood'}
+              </label>
+              <select
+                value={selectedMood}
+                onChange={(e) => setSelectedMood(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+              >
+                {moods.map((m) => (
+                  <option key={m} value={m}>{m === 'all' ? t('all_moods') : m}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-mono uppercase text-[var(--text-muted)] block mb-1">
+                {isNy ? 'Dziko' : 'Country'} ({WORLD_REGIONS.length})
               </label>
               <select
                 value={selectedRegion}
                 onChange={(e) => setSelectedRegion(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
               >
-                <option value="all">All Countries</option>
+                <option value="all">{t('all_countries')}</option>
                 {MACRO_REGIONS.map((macro) => (
                   <optgroup key={macro} label={macro}>
                     {WORLD_REGIONS.filter((r) => r.macroRegion === macro).map((r) => (
@@ -635,16 +683,18 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
             </div>
 
             <div>
-              <label className="text-[10px] font-mono uppercase text-[var(--text-muted)] block mb-1">BPM Tempo</label>
+              <label className="text-[10px] font-mono uppercase text-[var(--text-muted)] block mb-1">
+                {isNy ? 'Liwiro (BPM)' : 'BPM Tempo'}
+              </label>
               <select
                 value={bpmRange}
                 onChange={(e) => setBpmRange(e.target.value as any)}
                 className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
               >
-                <option value="all">All Tempos</option>
-                <option value="chill">&lt; 80 BPM (Slow)</option>
-                <option value="mid">80–105 BPM (Mid)</option>
-                <option value="groove">105+ BPM (Fast)</option>
+                <option value="all">{isNy ? 'Liwiro lonse' : 'All Tempos'}</option>
+                <option value="chill">{isNy ? '< 80 BPM (Pang\'ono)' : '< 80 BPM (Slow)'}</option>
+                <option value="mid">{isNy ? '80–105 BPM (Pakatikati)' : '80–105 BPM (Mid)'}</option>
+                <option value="groove">{isNy ? '105+ BPM (Mwamsanga)' : '105+ BPM (Fast)'}</option>
               </select>
             </div>
           </div>
@@ -655,9 +705,24 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
       {activeTab === 'charts' ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {[
-            { title: 'Most Played', icon: Flame, list: topPlayedTracks, metric: (t: Track) => `${t.plays || 0} plays` },
-            { title: 'Most Liked', icon: Heart, list: mostLikedTracks, metric: (t: Track) => `${getTrackLikeCount(t)} likes` },
-            { title: 'New Releases', icon: Disc3, list: newestTracks, metric: (t: Track) => formatTime(t.durationSeconds) },
+            {
+              title: t('tab_most_played'),
+              icon: Flame,
+              list: topPlayedTracks,
+              metric: (tr: Track) => t('plays_count', undefined, { count: tr.plays || 0 }),
+            },
+            {
+              title: t('sort_most_liked'),
+              icon: Heart,
+              list: mostLikedTracks,
+              metric: (tr: Track) => isNy ? `okonda ${getTrackLikeCount(tr)}` : `${getTrackLikeCount(tr)} likes`,
+            },
+            {
+              title: t('new_releases_title'),
+              icon: Disc3,
+              list: newestTracks,
+              metric: (tr: Track) => formatTime(tr.durationSeconds),
+            },
           ].map((col) => {
             const Icon = col.icon;
             return (
@@ -735,17 +800,21 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
           ) : publicTracks.length === 0 ? (
             <div className="p-12 text-center rounded-3xl bg-[var(--surface)] border border-[var(--border)] space-y-3">
               <Music className="w-10 h-10 text-[var(--accent-text)] mx-auto opacity-70" />
-              <h3 className="text-base font-bold text-[var(--text)] font-heading">No songs uploaded yet</h3>
+              <h3 className="text-base font-bold text-[var(--text)] font-heading">{t('no_songs_yet')}</h3>
               <p className="text-xs text-[var(--text-muted)] max-w-sm mx-auto">
-                Publish a song in Upload to start streaming.
+                {isNy
+                  ? 'Kwezani nyimbo mu Situdiyo kuti muyambe kumvera.'
+                  : 'Publish a song in Upload to start streaming.'}
               </p>
             </div>
           ) : visibleTracks.length === 0 ? (
             <div className="p-12 text-center rounded-3xl bg-[var(--surface)] border border-[var(--border)] space-y-3">
               <Music className="w-10 h-10 text-[var(--text-muted)] mx-auto opacity-50" />
-              <h3 className="text-base font-bold text-[var(--text)] font-heading">No matching songs</h3>
+              <h3 className="text-base font-bold text-[var(--text)] font-heading">
+                {t('nothing_matches_filter')}
+              </h3>
               <p className="text-xs text-[var(--text-muted)] max-w-sm mx-auto">
-                Try clearing or changing your genre, mood, or tempo filters.
+                {t('try_another_filter')}
               </p>
               <button
                 type="button"
@@ -753,7 +822,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset Filters</span>
+                <span>{isNy ? 'Bwezeretsani Zosankha' : 'Reset Filters'}</span>
               </button>
             </div>
           ) : viewMode === 'rows' ? (
@@ -765,8 +834,13 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                 const isAnimatingHeart = animatingHeartTrackId === track.id;
                 const matchesSelectedGenre =
                   selectedGenre !== 'all' &&
-                  (track.genre.toLowerCase() === selectedGenre.toLowerCase() ||
-                    track.vibeTags.some((v) => v.toLowerCase() === selectedGenre.toLowerCase()));
+                  (normalizeGenreCategory(track.genre).toLowerCase() ===
+                    normalizeGenreCategory(selectedGenre).toLowerCase() ||
+                    track.vibeTags.some(
+                      (v) =>
+                        normalizeGenreCategory(v).toLowerCase() ===
+                        normalizeGenreCategory(selectedGenre).toLowerCase()
+                    ));
 
                 return (
                   <div
@@ -812,7 +886,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                           </h4>
                           {matchesSelectedGenre && (
                             <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-[var(--accent)]/15 text-[var(--accent-text)] border border-[var(--accent)]/30 shrink-0">
-                              Match
+                              {isNy ? 'Zogwirizana' : 'Match'}
                             </span>
                           )}
                         </div>
@@ -829,7 +903,9 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                             {track.artistName}
                           </button>
                           <span className="opacity-40 hidden sm:inline">•</span>
-                          <span className="text-[11px] hidden sm:inline">{track.genre}</span>
+                          <span className="text-[11px] hidden sm:inline">
+                            {translateGenreCategory(track.genre, language)}
+                          </span>
                           {track.region && (
                             <>
                               <span className="opacity-40 hidden md:inline">•</span>
@@ -854,8 +930,8 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                             ? 'text-rose-500'
                             : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)]'
                         }`}
-                        title={isLiked ? 'Unlike' : 'Like'}
-                        aria-label="Like track"
+                        title={isLiked ? t('unlike') : t('like')}
+                        aria-label={t('like')}
                       >
                         <Heart className={`w-4 h-4 ${isLiked ? 'fill-current' : ''} ${isAnimatingHeart ? 'animate-heart-pop' : ''}`} />
                         <span className="text-[11px] font-mono font-bold tabular-nums">
@@ -867,7 +943,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                         type="button"
                         onClick={() => onOpenTrackDetails(track)}
                         className="p-2 rounded-xl text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition hidden sm:flex items-center justify-center min-h-[40px] min-w-[40px] cursor-pointer"
-                        title="Track details"
+                        title={t('track_details')}
                       >
                         <Sliders className="w-4 h-4" />
                       </button>
@@ -880,7 +956,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                             ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
                             : 'bg-[var(--surface-2)] hover:bg-[var(--accent)] text-[var(--text)] hover:text-[var(--accent-contrast)] border border-[var(--border)]'
                         }`}
-                        title={isCurrentPlaying ? 'Pause' : 'Play'}
+                        title={isCurrentPlaying ? t('pause') : t('play')}
                       >
                         {isCurrentPlaying ? <Volume2 className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
                       </button>
@@ -966,7 +1042,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                     </div>
 
                     <div className="pt-3 mt-3 border-t border-[var(--border)] flex items-center justify-between text-[11px] font-mono text-[var(--text-muted)]">
-                      <span>{track.genre}</span>
+                      <span>{translateGenreCategory(track.genre, language)}</span>
                       <span>{track.bpm} BPM</span>
                     </div>
                   </div>
@@ -984,8 +1060,8 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                 className="px-8 py-3 rounded-full bg-[var(--surface)] hover:bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] text-xs font-bold transition cursor-pointer min-h-[44px]"
               >
                 {isLoadingMore
-                  ? 'Loading more songs...'
-                  : `Load more songs (${sortedAndFilteredTracks.length - displayCount} remaining)`}
+                  ? t('loading_more_songs')
+                  : t('load_more_songs', undefined, { count: sortedAndFilteredTracks.length - displayCount })}
               </button>
             </div>
           )}

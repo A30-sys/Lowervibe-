@@ -2,15 +2,19 @@ import { CheckCircle2, Heart, Search, Share2, Users } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
 import { CANONICAL_GENRES } from '../../services/genresService';
 import { Artist } from '../../types';
+import { normalizeGenreCategory, translateGenreCategory } from '../../utils/genreCategories';
 import { SafeImage } from '../SafeImage';
 
 export const ArtistsRosterView: React.FC = () => {
   const { artists, tracks, setActiveShareArtist } = useAudio();
   const { currentUser, toggleFollowArtist, toggleLikeArtist } = useAuth();
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
   const { navigate } = useRouter();
   const { showToast } = useToast();
 
@@ -18,11 +22,11 @@ export const ArtistsRosterView: React.FC = () => {
   const [selectedGenre, setSelectedGenre] = useState('all');
 
   const genres = useMemo(() => {
-    const artistGenres = artists.flatMap((a) => a.genres || []);
-    const trackGenres = tracks.map((t) => t.genre).filter(Boolean);
+    const artistGenres = artists.flatMap((a) => a.genres || []).map((g) => normalizeGenreCategory(g));
+    const trackGenres = tracks.map((tr) => tr.genre).filter(Boolean).map((g) => normalizeGenreCategory(g));
     const merged = Array.from(
       new Set([
-        ...CANONICAL_GENRES.slice(0, 5).map((g) => g.name),
+        ...CANONICAL_GENRES.slice(0, 5).map((g) => normalizeGenreCategory(g.name)),
         ...artistGenres,
         ...trackGenres,
       ])
@@ -37,7 +41,9 @@ export const ArtistsRosterView: React.FC = () => {
       (artist.bio || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesGenre =
       selectedGenre === 'all' ||
-      (artist.genres || []).some((g) => g.toLowerCase().includes(selectedGenre.toLowerCase()));
+      (artist.genres || []).some(
+        (g) => normalizeGenreCategory(g).toLowerCase() === selectedGenre.toLowerCase()
+      );
     return matchesSearch && matchesGenre;
   });
 
@@ -50,7 +56,15 @@ export const ArtistsRosterView: React.FC = () => {
     e.stopPropagation();
     toggleFollowArtist(artistId);
     const isNowFollowing = !currentUser?.followingArtistIds.includes(artistId);
-    showToast(isNowFollowing ? `Following ${artistName}` : `Unfollowed ${artistName}`);
+    showToast(
+      isNowFollowing
+        ? isNy
+          ? `Mukutsatira ${artistName}`
+          : `Following ${artistName}`
+        : isNy
+        ? `Mwasiya kutsatira ${artistName}`
+        : `Unfollowed ${artistName}`
+    );
   };
 
   return (
@@ -59,13 +73,17 @@ export const ArtistsRosterView: React.FC = () => {
       <div className="p-6 sm:p-8 rounded-[28px] bg-[var(--surface)] border border-[var(--border)]">
         <div className="space-y-1.5">
           <div className="text-xs font-mono text-[var(--text-muted)]">
-            {artists.length} independent {artists.length === 1 ? 'artist' : 'artists'}
+            {isNy
+              ? `Oimba ${artists.length}`
+              : `${artists.length} independent ${artists.length === 1 ? 'artist' : 'artists'}`}
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold font-heading text-[var(--text)]">
-            Artists on LOWERVIBE
+            {isNy ? 'Oimba pa LOWERVIBE' : 'Artists on LOWERVIBE'}
           </h1>
           <p className="text-xs sm:text-sm text-[var(--text-muted)] max-w-xl">
-            Discover independent musicians from Malawi, Nigeria, and across Africa.
+            {isNy
+              ? 'Pezani oimba a ku Malawi, Nigeria, ndi Africa yonse.'
+              : 'Discover independent musicians from Malawi, Nigeria, and across Africa.'}
           </p>
         </div>
       </div>
@@ -76,7 +94,7 @@ export const ArtistsRosterView: React.FC = () => {
           <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3.5 top-3.5" />
           <input
             type="text"
-            placeholder="Search artists or countries..."
+            placeholder={isNy ? 'Fufuzani oimba kapena mayiko...' : 'Search artists or countries...'}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-3 rounded-2xl bg-[var(--surface)] border border-[var(--border-strong)] text-xs text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-text)] transition"
@@ -89,13 +107,13 @@ export const ArtistsRosterView: React.FC = () => {
               key={g}
               type="button"
               onClick={() => setSelectedGenre(g)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer min-h-[40px] capitalize ${
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer min-h-[40px] ${
                 selectedGenre === g
                   ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
                   : 'bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)] border border-[var(--border)]'
               }`}
             >
-              {g}
+              {g === 'all' ? t('all', 'All') : translateGenreCategory(g, language)}
             </button>
           ))}
         </div>
@@ -115,11 +133,11 @@ export const ArtistsRosterView: React.FC = () => {
               ? new Set(artist.likedByUserIds.filter(Boolean)).size
               : artist.likesCount || 0;
             const artistTrackCount = tracks.filter(
-              (t) =>
-                !t.isDraft &&
-                !t.isDeranked &&
-                (t.artistId === artist.id ||
-                  (t.artistName || '').toLowerCase() === (artist.name || '').toLowerCase())
+              (tr) =>
+                !tr.isDraft &&
+                !tr.isDeranked &&
+                (tr.artistId === artist.id ||
+                  (tr.artistName || '').toLowerCase() === (artist.name || '').toLowerCase())
             ).length;
 
             return (
@@ -167,9 +185,9 @@ export const ArtistsRosterView: React.FC = () => {
                 <div className="pt-3 border-t border-[var(--border)] flex items-center justify-between gap-2">
                   <div className="text-[11px] font-mono text-[var(--text-muted)] tabular-nums">
                     <span className="text-[var(--text)] font-bold">{artistTrackCount}</span>{' '}
-                    {artistTrackCount === 1 ? 'song' : 'songs'} ·{' '}
+                    {isNy ? 'nyimbo' : artistTrackCount === 1 ? 'song' : 'songs'} ·{' '}
                     <span className="text-[var(--text)] font-bold">{artist.followersCount || 0}</span>{' '}
-                    followers
+                    {t('followers', 'followers')}
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -193,7 +211,7 @@ export const ArtistsRosterView: React.FC = () => {
                       type="button"
                       onClick={(e) => handleShare(artist, e)}
                       className="p-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] transition cursor-pointer min-h-[38px] min-w-[38px] flex items-center justify-center"
-                      title="Share artist"
+                      title={isNy ? 'Gawani woimba' : 'Share artist'}
                     >
                       <Share2 className="w-3.5 h-3.5" />
                     </button>
@@ -207,7 +225,7 @@ export const ArtistsRosterView: React.FC = () => {
                           : 'bg-[var(--accent)] text-[var(--accent-contrast)]'
                       }`}
                     >
-                      {isFollowing ? 'Following' : 'Follow'}
+                      {isFollowing ? t('following', 'Following') : t('follow', 'Follow')}
                     </button>
                   </div>
                 </div>
@@ -218,9 +236,13 @@ export const ArtistsRosterView: React.FC = () => {
       ) : (
         <div className="py-16 text-center space-y-4 bg-[var(--surface)] rounded-[28px] border border-[var(--border)] p-6">
           <Users className="w-10 h-10 mx-auto text-[var(--text-muted)] opacity-60" />
-          <h3 className="text-base font-bold font-heading text-[var(--text)]">No artists found</h3>
+          <h3 className="text-base font-bold font-heading text-[var(--text)]">
+            {isNy ? 'Palibe oimba omwe apezeka' : 'No artists found'}
+          </h3>
           <p className="text-xs text-[var(--text-muted)] max-w-sm mx-auto">
-            Try searching by country or clearing the genre filter.
+            {isNy
+              ? 'Yesani kufufuza ndi dziko kapena chotsani zosefera.'
+              : 'Try searching by country or clearing the genre filter.'}
           </p>
           <button
             type="button"
@@ -230,7 +252,7 @@ export const ArtistsRosterView: React.FC = () => {
             }}
             className="px-5 py-2.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs cursor-pointer"
           >
-            Clear filters
+            {isNy ? 'Chotsani zosefera' : 'Clear filters'}
           </button>
         </div>
       )}

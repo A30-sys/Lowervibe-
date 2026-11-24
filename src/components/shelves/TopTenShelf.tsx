@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp, Pause, Play } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { matchesLocationFilter } from '../../data/regions';
 import { Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG } from '../../utils/artworkFallback';
@@ -16,6 +17,7 @@ type ChartMode = 'local' | 'africa' | 'rising';
 export const TopTenShelf: React.FC<TopTenShelfProps> = ({ onSelectArtist }) => {
   const { tracks, currentTrack, isPlaying, playTrack, togglePlayPause, selectedCountry } =
     useAudio();
+  const { language, t } = useLanguage();
   const [chartMode, setChartMode] = useState<ChartMode>('local');
 
   const hasCountryScope = Boolean(
@@ -63,16 +65,25 @@ export const TopTenShelf: React.FC<TopTenShelfProps> = ({ onSelectArtist }) => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-lg sm:text-xl font-extrabold font-heading text-[var(--lv-text)]">
-            Top Charts
+            {t('top_ten_title', 'Top Charts')}
           </h2>
-          <p className="text-xs text-[var(--lv-muted)]">Ranked by real listener plays</p>
+          <p className="text-xs text-[var(--lv-muted)]">
+            {t('top_ten_sub', 'Most streamed songs right now')}
+          </p>
         </div>
 
         <div className="flex items-center gap-1.5 bg-[var(--lv-surface)] p-1 rounded-2xl border border-[var(--lv-border)] self-start">
           {[
-            { id: 'local' as const, label: hasCountryScope ? `Top in ${selectedCountry}` : 'Top 10' },
-            { id: 'africa' as const, label: 'All Africa' },
-            { id: 'rising' as const, label: 'New & Rising' },
+            {
+              id: 'local' as const,
+              label: hasCountryScope
+                ? language === 'ny'
+                  ? `Zotchuka ku ${selectedCountry}`
+                  : `Top in ${selectedCountry}`
+                : 'Top 10',
+            },
+            { id: 'africa' as const, label: language === 'ny' ? 'Africa Yonse' : 'All Africa' },
+            { id: 'rising' as const, label: language === 'ny' ? 'Zokwera' : 'New & Rising' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -164,7 +175,9 @@ export const TopTenShelf: React.FC<TopTenShelfProps> = ({ onSelectArtist }) => {
                   {track.artistName}
                 </button>
                 <span className="text-[11px] font-mono text-[var(--lv-muted)] mt-0.5 block">
-                  {(track.plays || 0).toLocaleString()} plays
+                  {t('plays_count', '{count} plays', {
+                    count: (track.plays || 0).toLocaleString(),
+                  })}
                 </span>
               </div>
             </div>

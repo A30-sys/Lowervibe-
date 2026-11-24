@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { useRouter } from '../context/RouterContext';
 import {
   CREATOR_PWA_INSTALLED_KEY,
@@ -33,7 +34,9 @@ const BRAND_LOGO_SRC =
 
 export const PwaInstallPrompt: React.FC = () => {
   const { currentUser, isArtist, isAdmin, updateUserSettings } = useAuth();
+  const { language, t } = useLanguage();
   const { navigate, searchParams } = useRouter();
+  const isNy = language === 'ny';
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showPrompt, setShowPrompt] = useState(false);
   const [targetApp, setTargetApp] = useState<PwaAppTarget>('main');
@@ -204,7 +207,11 @@ export const PwaInstallPrompt: React.FC = () => {
     const appLabel = targetApp === 'creator' ? 'LOWERVIBE Creator' : 'LOWERVIBE';
     setInstallNotice(
       platformTab === 'ios'
-        ? `In Safari, tap Share below and choose "Add to Home Screen" to install ${appLabel}.`
+        ? isNy
+          ? `Mu Safari, dinani batani la Share pansipa ndipo sankhani "Add to Home Screen" kuti muike ${appLabel}.`
+          : `In Safari, tap Share below and choose "Add to Home Screen" to install ${appLabel}.`
+        : isNy
+        ? `Mu Chrome, tsegulani menyu ya ⋮ ndipo dinani "Install app" kapena "Add to Home screen" ya ${appLabel}.`
         : `In Chrome, open the ⋮ menu and tap "Install app" or "Add to Home screen" for ${appLabel}.`
     );
   };
@@ -244,17 +251,25 @@ export const PwaInstallPrompt: React.FC = () => {
                 {targetApp === 'creator' ? (
                   <>
                     <ShieldCheck className="w-3 h-3" />
-                    <span>{isApprovedArtist ? 'Approved Creator App' : 'Requires Studio Approval'}</span>
+                    <span>
+                      {isApprovedArtist
+                        ? isNy
+                          ? 'Pulogalamu Yovomerezeka ya Woimba'
+                          : 'Approved Creator App'
+                        : isNy
+                        ? 'Ikufuna Kuvomerezedwa ndi Situdiyo'
+                        : 'Requires Studio Approval'}
+                    </span>
                   </>
                 ) : (
                   <>
                     <Headphones className="w-3 h-3" />
-                    <span>Listener Main App</span>
+                    <span>{isNy ? 'Pulogalamu Yaikulu ya Omvera' : 'Listener Main App'}</span>
                   </>
                 )}
               </span>
               <h3 className="text-base font-bold text-[var(--text)] font-heading leading-tight">
-                {targetApp === 'creator' ? 'LOWERVIBE Creator' : 'Install LOWERVIBE'}
+                {targetApp === 'creator' ? 'LOWERVIBE Creator' : t('install_app')}
               </h3>
             </div>
           </div>
@@ -263,7 +278,7 @@ export const PwaInstallPrompt: React.FC = () => {
             type="button"
             onClick={handleDismiss}
             className="p-2 text-[var(--text-muted)] hover:text-[var(--text)] rounded-xl hover:bg-[var(--surface-2)] transition cursor-pointer shrink-0"
-            aria-label="Close install dialog"
+            aria-label={t('close')}
           >
             <X className="w-5 h-5" />
           </button>
@@ -293,7 +308,7 @@ export const PwaInstallPrompt: React.FC = () => {
             }`}
           >
             {isApprovedArtist ? <Music className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
-            <span>Creator App</span>
+            <span>{t('creator_app')}</span>
           </button>
         </div>
 
@@ -304,13 +319,19 @@ export const PwaInstallPrompt: React.FC = () => {
                 <Lock className="w-4 h-4 shrink-0" />
                 <span>
                   {currentUser?.applicationStatus === 'pending'
-                    ? 'Artist application under review'
+                    ? t('studio_pending_badge')
+                    : isNy
+                    ? 'Lembani mu Situdiyo kuti mutsegule LOWERVIBE Creator'
                     : 'Apply in Studio to unlock LOWERVIBE Creator'}
                 </span>
               </div>
               <p className="text-xs text-[var(--text-muted)] leading-relaxed">
                 {currentUser?.applicationStatus === 'pending'
-                  ? 'Your artist application is waiting for Administrator approval. Once approved, you can install and use the separate LOWERVIBE Creator app on top of the main LOWERVIBE app.'
+                  ? isNy
+                    ? 'Pempho lanu la woimba likudikira kuvomerezedwa ndi Oyang\'anira. Mukavomerezedwa, mutha kuika pulogalamu yapadera ya LOWERVIBE Creator.'
+                    : 'Your artist application is waiting for Administrator approval. Once approved, you can install and use the separate LOWERVIBE Creator app on top of the main LOWERVIBE app.'
+                  : isNy
+                  ? 'Omvera atha kuika pulogalamu yaikulu ya LOWERVIBE tsopano. Kuti muike LOWERVIBE Creator, lembani ku Situdiyo ndi kudikira chilolezo.'
                   : 'Listeners can install the main LOWERVIBE app right now to explore all music. To install LOWERVIBE Creator, apply in Artist Creator Studio and wait for Admin approval.'}
               </p>
             </div>
@@ -321,7 +342,7 @@ export const PwaInstallPrompt: React.FC = () => {
                 onClick={() => handleSelectTarget('main')}
                 className="flex-1 py-3 px-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] text-xs font-semibold cursor-pointer min-h-[44px]"
               >
-                Install Main App
+                {isNy ? 'Ikani Pulogalamu Yaikulu' : 'Install Main App'}
               </button>
               <button
                 type="button"
@@ -332,10 +353,12 @@ export const PwaInstallPrompt: React.FC = () => {
                 className="flex-1 py-3 px-3 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer min-h-[44px]"
               >
                 {currentUser?.applicationStatus === 'pending'
-                  ? 'Check Approval'
+                  ? isNy
+                    ? 'Onani Momwe Zayendera'
+                    : 'Check Approval'
                   : currentUser
-                  ? 'Apply in Studio'
-                  : 'Sign Up'}
+                  ? t('apply_in_studio')
+                  : t('create_account')}
               </button>
             </div>
           </div>
@@ -343,7 +366,11 @@ export const PwaInstallPrompt: React.FC = () => {
           <>
             <p className="text-xs text-[var(--text-muted)] leading-relaxed">
               {targetApp === 'creator'
-                ? 'Launch directly into your dedicated LOWERVIBE Creator app for uploads, analytics, and withdrawals — plus keep the main LOWERVIBE app installed.'
+                ? isNy
+                  ? 'Tsegulani LOWERVIBE Creator mwachindunji kuti mukweze nyimbo, muone chiwerengero ndi kutenga ndalama — komanso sungani pulogalamu yaikulu ya LOWERVIBE.'
+                  : 'Launch directly into your dedicated LOWERVIBE Creator app for uploads, analytics, and withdrawals — plus keep the main LOWERVIBE app installed.'
+                : isNy
+                ? 'Ikani LOWERVIBE pa foni yanu kuti mupeze nyimbo mwachangu, mumvere popanda intaneti ndikupeza phokoso la zidziwitso pa nyimbo zatsopano.'
                 : 'Install LOWERVIBE on your home screen to explore music faster, stream offline saves, and receive real-time sound alerts for artist releases and updates.'}
             </p>
 
@@ -351,13 +378,25 @@ export const PwaInstallPrompt: React.FC = () => {
               <div className="p-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex items-center gap-2">
                 <Smartphone className="w-4 h-4 text-[var(--accent-text)] shrink-0" />
                 <span>
-                  {targetApp === 'creator' ? 'Dedicated Creator App' : 'Full Discovery & Offline'}
+                  {targetApp === 'creator'
+                    ? isNy
+                      ? 'Pulogalamu ya Woimba'
+                      : 'Dedicated Creator App'
+                    : isNy
+                    ? 'Nyimbo & Popanda Intaneti'
+                    : 'Full Discovery & Offline'}
                 </span>
               </div>
               <div className="p-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex items-center gap-2">
                 <Bell className="w-4 h-4 text-[var(--violet)] shrink-0" />
                 <span>
-                  {targetApp === 'creator' ? 'Studio & Payout Alerts' : 'Sound Update Alerts'}
+                  {targetApp === 'creator'
+                    ? isNy
+                      ? 'Zidziwitso za Situdiyo'
+                      : 'Studio & Payout Alerts'
+                    : isNy
+                    ? 'Zidziwitso Zaphokoso'
+                    : 'Sound Update Alerts'}
                 </span>
               </div>
             </div>
@@ -375,7 +414,7 @@ export const PwaInstallPrompt: React.FC = () => {
                     : 'text-[var(--text-muted)] hover:text-[var(--text)]'
                 }`}
               >
-                Android / Desktop
+                {isNy ? 'Android / Kompyuta' : 'Android / Desktop'}
               </button>
               <button
                 type="button"
@@ -397,18 +436,27 @@ export const PwaInstallPrompt: React.FC = () => {
               <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)] space-y-2">
                 <div className="font-bold text-[var(--accent-text)] flex items-center gap-1.5">
                   <MoreVertical className="w-3.5 h-3.5" />
-                  Install {targetApp === 'creator' ? 'LOWERVIBE Creator' : 'LOWERVIBE'}:
+                  {isNy ? 'Ikani' : 'Install'}{' '}
+                  {targetApp === 'creator' ? 'LOWERVIBE Creator' : 'LOWERVIBE'}:
                 </div>
                 <ol className="list-decimal pl-4 space-y-1 text-[var(--text-muted)] text-[11px]">
                   <li>
-                    Open in <strong className="text-[var(--text)]">Chrome</strong> or Edge.
+                    {isNy ? 'Tsegulani mu' : 'Open in'}{' '}
+                    <strong className="text-[var(--text)]">Chrome</strong>{' '}
+                    {isNy ? 'kapena Edge.' : 'or Edge.'}
                   </li>
                   <li>
-                    Tap <strong className="text-[var(--text)]">Install</strong> below (or tap{' '}
+                    {isNy ? 'Dinani' : 'Tap'}{' '}
+                    <strong className="text-[var(--text)]">
+                      {isNy ? 'Ikani' : 'Install'}
+                    </strong>{' '}
+                    {isNy ? 'pansipa (kapena dinani' : 'below (or tap'}{' '}
                     <strong className="text-[var(--text)]">⋮ → Install app</strong>).
                   </li>
                   <li>
-                    Allow notifications to hear real chimes for artist releases &amp; admin updates.
+                    {isNy
+                      ? 'Lolani zidziwitso kuti muzimva phokoso la nyimbo zatsopano ndi zosintha.'
+                      : 'Allow notifications to hear real chimes for artist releases & admin updates.'}
                   </li>
                 </ol>
               </div>
@@ -416,17 +464,20 @@ export const PwaInstallPrompt: React.FC = () => {
               <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)] space-y-2">
                 <div className="font-bold text-[var(--accent-text)] flex items-center gap-1.5">
                   <Share className="w-3.5 h-3.5" />
-                  Install on iPhone &amp; iPad:
+                  {isNy ? 'Ikani pa iPhone & iPad:' : 'Install on iPhone & iPad:'}
                 </div>
                 <ol className="list-decimal pl-4 space-y-1 text-[var(--text-muted)] text-[11px]">
                   <li>
-                    Open this page in <strong className="text-[var(--text)]">Safari</strong>.
+                    {isNy ? 'Tsegulani tsambali mu' : 'Open this page in'}{' '}
+                    <strong className="text-[var(--text)]">Safari</strong>.
                   </li>
                   <li>
-                    Tap the <strong className="text-[var(--text)]">Share icon</strong>.
+                    {isNy ? 'Dinani chizindikiro cha' : 'Tap the'}{' '}
+                    <strong className="text-[var(--text)]">Share icon</strong>.
                   </li>
                   <li>
-                    Choose <strong className="text-[var(--accent-text)]">"Add to Home Screen"</strong>.
+                    {isNy ? 'Sankhani' : 'Choose'}{' '}
+                    <strong className="text-[var(--accent-text)]">"Add to Home Screen"</strong>.
                   </li>
                 </ol>
               </div>
@@ -436,7 +487,8 @@ export const PwaInstallPrompt: React.FC = () => {
               <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-[11px] text-emerald-500 flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
                 <span>
-                  {targetApp === 'creator' ? 'LOWERVIBE Creator' : 'LOWERVIBE'} is marked as installed on this device.
+                  {targetApp === 'creator' ? 'LOWERVIBE Creator' : 'LOWERVIBE'}{' '}
+                  {isNy ? 'waikidwa kale pa chipangizochi.' : 'is marked as installed on this device.'}
                 </span>
               </div>
             )}
@@ -454,7 +506,7 @@ export const PwaInstallPrompt: React.FC = () => {
                 onClick={handleDismiss}
                 className="flex-1 py-3 rounded-xl bg-[var(--surface-2)] hover:border-[var(--border-strong)] border border-[var(--border)] text-[var(--text)] text-xs font-semibold transition cursor-pointer min-h-[44px]"
               >
-                Later
+                {t('maybe_later')}
               </button>
 
               {platformTab === 'android' ? (
@@ -464,7 +516,7 @@ export const PwaInstallPrompt: React.FC = () => {
                   className="flex-1 py-3 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer min-h-[44px]"
                 >
                   <Download className="w-4 h-4" />
-                  <span>{targetApp === 'creator' ? 'Install Creator' : 'Install App'}</span>
+                  <span>{targetApp === 'creator' ? t('creator_app') : t('install_app')}</span>
                 </button>
               ) : (
                 <button
@@ -476,7 +528,7 @@ export const PwaInstallPrompt: React.FC = () => {
                   className="flex-1 py-3 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer min-h-[44px]"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Done</span>
+                  <span>{isNy ? 'Zatheka' : 'Done'}</span>
                 </button>
               )}
             </div>

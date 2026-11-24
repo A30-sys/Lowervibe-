@@ -18,6 +18,7 @@ import {
 import React, { memo, useEffect, useRef, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { useToast } from '../../context/ToastContext';
 import { audioEngine } from '../../services/audioEngine';
 import { LOWERVIBE_ICON_ARTWORK } from '../../utils/artworkFallback';
@@ -274,7 +275,9 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
 
   const pinnedSession = usePinnedPlayerSession();
   const { currentUser, toggleLikeTrack } = useAuth();
+  const { language, t } = useLanguage();
   const { showToast } = useToast();
+  const isNy = language === 'ny';
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const [touchStartY, setTouchStartY] = useState<number | null>(null);
   const [likePopping, setLikePopping] = useState(false);
@@ -474,13 +477,13 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
     setLikePopping(true);
     setTimeout(() => setLikePopping(false), 240);
     toggleLikeTrack(displayTrack.id);
-    showToast(isLiked ? 'Removed from Liked songs' : 'Added to Liked songs');
+    showToast(isLiked ? t('removed_from_liked') : t('added_to_liked'));
   };
 
   return (
     <div
       className="fixed bottom-[64px] md:bottom-3 left-0 right-0 z-30 px-2 sm:px-4 pb-[env(safe-area-inset-bottom,0px)] pointer-events-none"
-      aria-label="Main audio player"
+      aria-label={isNy ? 'Choleretsa nyimbo' : 'Main audio player'}
     >
       <div className="relative max-w-5xl mx-auto">
         {/* Live floating scrub timestamp preview */}
@@ -565,13 +568,13 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                   className="px-2.5 py-1 rounded-lg bg-[var(--lv-elevated)] text-[var(--lv-text)] font-semibold hover:opacity-90 cursor-pointer flex items-center gap-1"
                 >
                   <RefreshCw className="w-3 h-3" />
-                  <span>Retry</span>
+                  <span>{t('try_again')}</span>
                 </button>
                 <button
                   type="button"
                   onClick={clearPlaybackError}
                   className="p-1 text-[var(--lv-muted)] hover:text-[var(--lv-text)] cursor-pointer"
-                  aria-label="Dismiss error"
+                  aria-label={isNy ? 'Chotsani uthenga' : 'Dismiss error'}
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -642,8 +645,8 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                     ? 'text-[var(--lv-accent-text)]'
                     : 'text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
                 }`}
-                title={effectiveShuffling ? 'Shuffle on' : 'Shuffle off'}
-                aria-label="Toggle shuffle"
+                title={effectiveShuffling ? (isNy ? 'Kusakaniza kwayatsidwa' : 'Shuffle on') : (isNy ? 'Kusakaniza kwazimitsidwa' : 'Shuffle off')}
+                aria-label={t('shuffle')}
               >
                 <Shuffle className="w-4 h-4" />
               </button>
@@ -655,8 +658,8 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                   playPrevTrack();
                 }}
                 className="flex items-center justify-center rounded-xl text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition active:scale-95 min-h-[44px] min-w-[36px] sm:min-w-[44px] cursor-pointer"
-                title="Previous track"
-                aria-label="Previous track"
+                title={t('previous')}
+                aria-label={t('previous')}
               >
                 <SkipBack className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
               </button>
@@ -668,8 +671,8 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                   togglePlayPause();
                 }}
                 className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] flex items-center justify-center active:scale-95 transition-transform cursor-pointer shadow-md shrink-0"
-                title={isPlaying ? 'Pause' : 'Play'}
-                aria-label={isPlaying ? 'Pause' : 'Play'}
+                title={isPlaying ? t('pause') : t('play')}
+                aria-label={isPlaying ? t('pause') : t('play')}
               >
                 {isPlaying ? (
                   <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
@@ -685,8 +688,8 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                   playNextTrack();
                 }}
                 className="flex items-center justify-center rounded-xl text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition active:scale-95 min-h-[44px] min-w-[36px] sm:min-w-[44px] cursor-pointer"
-                title="Next track"
-                aria-label="Next track"
+                title={t('next_track')}
+                aria-label={t('next_track')}
               >
                 <SkipForward className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
               </button>
@@ -702,8 +705,8 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                     ? 'text-[var(--lv-accent-text)]'
                     : 'text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
                 }`}
-                title={`Repeat: ${effectiveRepeatMode}`}
-                aria-label={`Repeat: ${effectiveRepeatMode}`}
+                title={`${t('repeat')}: ${effectiveRepeatMode}`}
+                aria-label={`${t('repeat')}: ${effectiveRepeatMode}`}
               >
                 {effectiveRepeatMode === 'one' ? (
                   <Repeat1 className="w-4 h-4" />
@@ -718,8 +721,8 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                 className={`hidden sm:flex items-center justify-center rounded-xl transition active:scale-90 min-h-[44px] min-w-[40px] cursor-pointer ${
                   isLiked ? 'text-rose-500' : 'text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
                 }`}
-                title={isLiked ? 'Unlike song' : 'Like song'}
-                aria-label={isLiked ? 'Unlike song' : 'Like song'}
+                title={isLiked ? t('unlike') : t('like')}
+                aria-label={isLiked ? t('unlike') : t('like')}
               >
                 <Heart
                   className={`w-4 h-4 sm:w-5 sm:h-5 ${isLiked ? 'fill-rose-500' : ''} ${
@@ -737,8 +740,8 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                     toggleMute();
                   }}
                   className="flex p-2 text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition cursor-pointer min-h-[44px] min-w-[38px] items-center justify-center"
-                  title={effectiveMuted ? 'Unmute' : 'Mute'}
-                  aria-label={effectiveMuted ? 'Unmute' : 'Mute'}
+                  title={effectiveMuted ? (isNy ? 'Yatsani phokoso' : 'Unmute') : (isNy ? 'Zimitsani phokoso' : 'Mute')}
+                  aria-label={effectiveMuted ? (isNy ? 'Yatsani phokoso' : 'Unmute') : (isNy ? 'Zimitsani phokoso' : 'Mute')}
                 >
                   {effectiveMuted || effectiveVolume === 0 ? (
                     <VolumeX className="w-4 h-4 text-[var(--lv-danger)]" />
@@ -760,7 +763,7 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                   value={effectiveMuted ? 0 : effectiveVolume}
                   onChange={(e) => setVolume(parseFloat(e.target.value))}
                   className="hidden lg:block w-16 h-1 bg-[var(--lv-elevated)] rounded-full appearance-none cursor-pointer accent-[var(--lv-violet)]"
-                  aria-label="Volume"
+                  aria-label={isNy ? 'Phokoso' : 'Volume'}
                 />
               </div>
 
@@ -771,8 +774,8 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                   onOpenFullscreen();
                 }}
                 className="flex items-center justify-center rounded-xl text-[var(--text-muted)] hover:text-[var(--text)] transition active:scale-95 min-h-[44px] min-w-[36px] sm:min-w-[42px] cursor-pointer"
-                title="Expand player & queue"
-                aria-label="Expand player & queue"
+                title={t('expand_player')}
+                aria-label={t('expand_player')}
               >
                 <Maximize2 className="w-4 h-4" />
               </button>
@@ -781,8 +784,8 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                 type="button"
                 onClick={handleClose}
                 className="hidden sm:flex items-center justify-center rounded-xl text-[var(--text-muted)] hover:text-[var(--text)] transition active:scale-95 min-h-[44px] min-w-[40px] cursor-pointer"
-                title="Close player"
-                aria-label="Close player"
+                title={t('close_player')}
+                aria-label={t('close_player')}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -800,8 +803,8 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
               className={`min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center transition cursor-pointer ${
                 effectiveShuffling ? 'text-[var(--lv-accent-text)]' : 'text-[var(--lv-muted)]'
               }`}
-              title={effectiveShuffling ? 'Shuffle on' : 'Shuffle off'}
-              aria-label="Toggle shuffle"
+              title={t('shuffle')}
+              aria-label={t('shuffle')}
             >
               <Shuffle className="w-4 h-4" />
             </button>
@@ -815,8 +818,8 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
               className={`min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center transition cursor-pointer ${
                 effectiveRepeatMode !== 'off' ? 'text-[var(--lv-accent-text)]' : 'text-[var(--lv-muted)]'
               }`}
-              title={`Repeat: ${effectiveRepeatMode}`}
-              aria-label={`Repeat: ${effectiveRepeatMode}`}
+              title={`${t('repeat')}: ${effectiveRepeatMode}`}
+              aria-label={`${t('repeat')}: ${effectiveRepeatMode}`}
             >
               {effectiveRepeatMode === 'one' ? (
                 <Repeat1 className="w-4 h-4" />
@@ -831,8 +834,8 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
               className={`min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center transition cursor-pointer ${
                 isLiked ? 'text-rose-500' : 'text-[var(--lv-muted)]'
               }`}
-              title={isLiked ? 'Unlike song' : 'Like song'}
-              aria-label={isLiked ? 'Unlike song' : 'Like song'}
+              title={isLiked ? t('unlike') : t('like')}
+              aria-label={isLiked ? t('unlike') : t('like')}
             >
               <Heart
                 className={`w-4 h-4 ${isLiked ? 'fill-rose-500' : ''} ${
@@ -848,8 +851,8 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                 toggleMute();
               }}
               className="min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] transition cursor-pointer"
-              title={effectiveMuted ? 'Unmute' : 'Mute'}
-              aria-label={effectiveMuted ? 'Unmute' : 'Mute'}
+              title={effectiveMuted ? (isNy ? 'Yatsani phokoso' : 'Unmute') : (isNy ? 'Zimitsani phokoso' : 'Mute')}
+              aria-label={effectiveMuted ? (isNy ? 'Yatsani phokoso' : 'Unmute') : (isNy ? 'Zimitsani phokoso' : 'Mute')}
             >
               {effectiveMuted || effectiveVolume === 0 ? (
                 <VolumeX className="w-4 h-4 text-[var(--lv-danger)]" />
@@ -865,8 +868,8 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                 onOpenFullscreen();
               }}
               className="min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] transition cursor-pointer"
-              title="Up next & lyrics"
-              aria-label="Up next and lyrics"
+              title={`${t('up_next')} & ${t('lyrics')}`}
+              aria-label={`${t('up_next')} & ${t('lyrics')}`}
             >
               <ListMusic className="w-4 h-4" />
             </button>
@@ -875,8 +878,8 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
               type="button"
               onClick={handleClose}
               className="min-h-[38px] min-w-[40px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] transition cursor-pointer"
-              title="Close player"
-              aria-label="Close player"
+              title={t('close_player')}
+              aria-label={t('close_player')}
             >
               <X className="w-4 h-4" />
             </button>

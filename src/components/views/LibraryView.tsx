@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useAudio } from '../../context/AudioContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { useRouter } from '../../context/RouterContext';
 import {
   clearOfflineCache,
@@ -37,6 +38,7 @@ import {
 import { Playlist, Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../../utils/artworkFallback';
 import { formatTime } from '../../utils/formatters';
+import { translateGenreCategory } from '../../utils/genreCategories';
 
 type LibraryTab = 'saved' | 'liked' | 'playlists' | 'downloads' | 'following' | 'history';
 
@@ -44,6 +46,8 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
   onOpenTrackDetails,
 }) => {
   const { currentUser, userSettings, createPlaylist, toggleFollowArtist } = useAuth();
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
   const {
     tracks,
     artists,
@@ -219,7 +223,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
           <div className="min-w-0">
             <div className="text-sm font-semibold text-[var(--text)] truncate">{track.title}</div>
             <div className="text-xs text-[var(--text-muted)] truncate">
-              {track.artistName} · {track.genre}
+              {track.artistName} · {translateGenreCategory(track.genre, language)}
             </div>
           </div>
         </div>
@@ -237,7 +241,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
             }}
             className="px-2.5 py-1 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-semibold text-[var(--text)] cursor-pointer"
           >
-            Info
+            {isNy ? 'Zambiri' : 'Info'}
           </button>
         </div>
       </div>
@@ -248,9 +252,11 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
     <div className="max-w-5xl mx-auto px-4 py-4 pb-4 space-y-6 animate-fadeIn">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-extrabold text-[var(--text)]">Library</h1>
+          <h1 className="text-2xl font-extrabold text-[var(--text)]">{t('library')}</h1>
           <p className="text-xs text-[var(--text-muted)]">
-            Your saved songs, likes, playlists, and offline downloads
+            {isNy
+              ? 'Nyimbo zosungidwa, zokondedwa, mindandanda ndi zopanda intaneti'
+              : 'Your saved songs, likes, playlists, and offline downloads'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
@@ -267,7 +273,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
             }`}
           >
             <HardDrive className="w-3.5 h-3.5 text-[var(--accent-text)]" />
-            <span>Downloads · {formatStorageBytes(offlineStats.totalBytes)}</span>
+            <span>{isNy ? 'Zotsitsidwa' : 'Downloads'} · {formatStorageBytes(offlineStats.totalBytes)}</span>
           </button>
 
           {currentUser && (
@@ -280,7 +286,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
               className="px-4 py-2 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold flex items-center gap-1.5 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>New playlist</span>
+              <span>{isNy ? 'Mndandanda watsopano' : 'New playlist'}</span>
             </button>
           )}
         </div>
@@ -289,12 +295,12 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
       {/* Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
         {[
-          { id: 'saved' as const, label: `Saved (${savedTracks.length})` },
-          { id: 'liked' as const, label: `Liked (${likedTracks.length})` },
-          { id: 'playlists' as const, label: `Playlists (${myPlaylists.length})` },
-          { id: 'downloads' as const, label: `Downloads (${downloadedTracks.length})` },
-          { id: 'following' as const, label: `Artists I Follow (${followingArtists.length})` },
-          { id: 'history' as const, label: `History (${playHistory.length})` },
+          { id: 'saved' as const, label: `${t('saved')} (${savedTracks.length})` },
+          { id: 'liked' as const, label: `${t('library_liked')} (${likedTracks.length})` },
+          { id: 'playlists' as const, label: `${t('library_playlists')} (${myPlaylists.length})` },
+          { id: 'downloads' as const, label: `${isNy ? 'Zotsitsidwa' : 'Downloads'} (${downloadedTracks.length})` },
+          { id: 'following' as const, label: `${isNy ? 'Oimba Omwe Ndimatsatira' : 'Artists I Follow'} (${followingArtists.length})` },
+          { id: 'history' as const, label: `${t('library_history')} (${playHistory.length})` },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -318,13 +324,15 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
       {activeTab === 'saved' && followingArtists.length > 0 && (
         <section className="rounded-[22px] bg-[var(--surface)] border border-[var(--border)] p-4 sm:p-5 space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-bold text-[var(--text)]">Artists I Follow</h2>
+            <h2 className="text-sm font-bold text-[var(--text)]">
+              {isNy ? 'Oimba Omwe Ndimatsatira' : 'Artists I Follow'}
+            </h2>
             <button
               type="button"
               onClick={() => setActiveTab('following')}
               className="text-xs font-semibold text-[var(--accent-text)] hover:underline cursor-pointer"
             >
-              View all ({followingArtists.length})
+              {isNy ? `Onani onse (${followingArtists.length})` : `View all (${followingArtists.length})`}
             </button>
           </div>
           <div className="flex items-center gap-3 overflow-x-auto pb-1 scrollbar-none">
@@ -346,7 +354,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                     {a.name}
                   </div>
                   <div className="text-[10px] text-[var(--text-muted)] tabular-nums">
-                    {(a.followersCount || 0).toLocaleString()} followers
+                    {(a.followersCount || 0).toLocaleString()} {isNy ? 'otsatira' : 'followers'}
                   </div>
                 </div>
               </button>
@@ -361,25 +369,29 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
           {savedTracks.length === 0 ? (
             <EmptyBox
               icon={Music}
-              title="No saved songs yet"
-              subtitle="Save songs from the player or discover feed to find them quickly here."
-              cta="Browse music"
+              title={isNy ? 'Palibe nyimbo zosungidwa' : 'No saved songs yet'}
+              subtitle={
+                isNy
+                  ? 'Sungani nyimbo kuchokera pacholeretsa kapena tsamba lofufuza kuti muzipeze mwachangu pano.'
+                  : 'Save songs from the player or discover feed to find them quickly here.'
+              }
+              cta={isNy ? 'Fufuzani nyimbo' : 'Browse music'}
               onCta={() => navigate('/discover')}
             />
           ) : (
-            savedTracks.map((t) =>
+            savedTracks.map((track) =>
               renderTrackRow(
-                t,
-                downloadedIdSet.has(t.id) ? (
+                track,
+                downloadedIdSet.has(track.id) ? (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--accent)]/15 text-[var(--accent-text)] text-[10px] font-bold">
                     <CheckCircle2 className="w-3 h-3" />
-                    <span className="hidden sm:inline">Offline</span>
+                    <span className="hidden sm:inline">{t('library_offline')}</span>
                   </span>
                 ) : (
                   <button
                     type="button"
-                    onClick={() => downloadTrack(t)}
-                    title="Download for offline listening"
+                    onClick={() => downloadTrack(track)}
+                    title={isNy ? 'Tsitsani kuti mumvere popanda intaneti' : 'Download for offline listening'}
                     className="p-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--accent-text)] cursor-pointer transition"
                   >
                     <Download className="w-3.5 h-3.5" />
@@ -397,33 +409,41 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
           {!currentUser ? (
             <EmptyBox
               icon={Heart}
-              title="Sign in to see liked songs"
-              subtitle="Your liked tracks follow your account across devices."
-              cta="Sign in"
+              title={isNy ? 'Lowani kuti muwone nyimbo zokondedwa' : 'Sign in to see liked songs'}
+              subtitle={
+                isNy
+                  ? 'Nyimbo zomwe mumakonda zimatsatira akaunti yanu pa chipangizo chilichonse.'
+                  : 'Your liked tracks follow your account across devices.'
+              }
+              cta={t('sign_in')}
               onCta={() => navigate('/login')}
             />
           ) : likedTracks.length === 0 ? (
             <EmptyBox
               icon={Heart}
-              title="No liked songs yet"
-              subtitle="Tap the heart button on any song to add it here."
-              cta="Find songs"
+              title={isNy ? 'Palibe nyimbo zokondedwa pakadali pano' : 'No liked songs yet'}
+              subtitle={
+                isNy
+                  ? 'Dinani chizindikiro cha mtima pa nyimbo iliyonse kuti muwonjezere pano.'
+                  : 'Tap the heart button on any song to add it here.'
+              }
+              cta={isNy ? 'Pezani nyimbo' : 'Find songs'}
               onCta={() => navigate('/discover')}
             />
           ) : (
-            likedTracks.map((t) =>
+            likedTracks.map((tr) =>
               renderTrackRow(
-                t,
-                downloadedIdSet.has(t.id) ? (
+                tr,
+                downloadedIdSet.has(tr.id) ? (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--accent)]/15 text-[var(--accent-text)] text-[10px] font-bold">
                     <CheckCircle2 className="w-3 h-3" />
-                    <span className="hidden sm:inline">Offline</span>
+                    <span className="hidden sm:inline">{t('library_offline')}</span>
                   </span>
                 ) : (
                   <button
                     type="button"
-                    onClick={() => downloadTrack(t)}
-                    title="Download for offline listening"
+                    onClick={() => downloadTrack(tr)}
+                    title={isNy ? 'Tsitsani kuti mumvere popanda intaneti' : 'Download for offline listening'}
                     className="p-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--accent-text)] cursor-pointer transition"
                   >
                     <Download className="w-3.5 h-3.5" />
@@ -442,9 +462,13 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
             <div className="rounded-[22px] bg-[var(--surface)] border border-[var(--border)]">
               <EmptyBox
                 icon={ListMusic}
-                title="Sign in to make playlists"
-                subtitle="Group your favorite songs and share them with friends."
-                cta="Sign in"
+                title={isNy ? 'Lowani kuti mupange mindandanda' : 'Sign in to make playlists'}
+                subtitle={
+                  isNy
+                    ? 'Sonkhanitsani nyimbo zomwe mumakonda ndi kuzigawana ndi anzanu.'
+                    : 'Group your favorite songs and share them with friends.'
+                }
+                cta={t('sign_in')}
                 onCta={() => navigate('/login')}
               />
             </div>
@@ -459,7 +483,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                     <input
                       type="text"
                       required
-                      placeholder="Playlist name"
+                      placeholder={t('playlist_name_placeholder')}
                       value={newPlName}
                       onChange={(e) => setNewPlName(e.target.value)}
                       className="flex-1 px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)]"
@@ -471,13 +495,13 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                         onChange={(e) => setNewPlPublic(e.target.checked)}
                         className="accent-[var(--accent)]"
                       />
-                      <span>Public</span>
+                      <span>{isNy ? 'Wa aliyense' : 'Public'}</span>
                     </label>
                     <button
                       type="submit"
                       className="px-5 py-2.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer"
                     >
-                      Create
+                      {isNy ? 'Pangani' : 'Create'}
                     </button>
                   </div>
                 </form>
@@ -492,7 +516,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                         onClick={() => setSelectedPlaylistId(null)}
                         className="text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
                       >
-                        ← All playlists
+                        ← {isNy ? 'Mindandanda yonse' : 'All playlists'}
                       </button>
 
                       {renamingPlaylistId === activePlaylist.id ? (
@@ -513,14 +537,15 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                             }}
                             className="px-3 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer"
                           >
-                            Save
+                            {t('save')}
                           </button>
                         </div>
                       ) : (
                         <h2 className="text-lg font-extrabold text-[var(--text)]">{activePlaylist.name}</h2>
                       )}
                       <div className="text-xs text-[var(--text-muted)]">
-                        {activePlaylist.trackIds.length} songs · {activePlaylist.isPublic ? 'Public' : 'Private'}
+                        {t('songs_count_label', undefined, { count: activePlaylist.trackIds.length })} ·{' '}
+                        {activePlaylist.isPublic ? (isNy ? 'Wa aliyense' : 'Public') : (isNy ? 'Wachinsinsi' : 'Private')}
                       </div>
                     </div>
 
@@ -534,7 +559,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                         className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer flex items-center gap-1"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
-                        <span>Rename</span>
+                        <span>{isNy ? 'Sinthani dzina' : 'Rename'}</span>
                       </button>
 
                       <button
@@ -545,7 +570,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                         className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer flex items-center gap-1"
                       >
                         {activePlaylist.isPublic ? <Globe className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
-                        <span>{activePlaylist.isPublic ? 'Public' : 'Private'}</span>
+                        <span>{activePlaylist.isPublic ? (isNy ? 'Wa aliyense' : 'Public') : (isNy ? 'Wachinsinsi' : 'Private')}</span>
                       </button>
 
                       <button
@@ -558,19 +583,21 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                         className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer flex items-center gap-1"
                       >
                         {copiedId === activePlaylist.id ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
-                        <span>{copiedId === activePlaylist.id ? 'Copied' : 'Share'}</span>
+                        <span>{copiedId === activePlaylist.id ? (isNy ? 'Zakopedwa' : 'Copied') : t('share')}</span>
                       </button>
                     </div>
                   </div>
 
                   {activePlaylist.trackIds.length === 0 ? (
                     <p className="py-6 text-center text-xs text-[var(--text-muted)]">
-                      No songs in this playlist yet. Tap "+ Playlist" on any track to add songs.
+                      {isNy
+                        ? 'Palibe nyimbo m\'mndandandawu pakadali pano. Dinani "+ Mndandanda" pa nyimbo iliyonse.'
+                        : 'No songs in this playlist yet. Tap "+ Playlist" on any track to add songs.'}
                     </p>
                   ) : (
                     <div className="divide-y divide-[var(--border)]">
                       {activePlaylist.trackIds.map((tid, idx) => {
-                        const track = tracks.find((t) => t.id === tid);
+                        const track = tracks.find((tr) => tr.id === tid);
                         if (!track) return null;
                         return renderTrackRow(
                           track,
@@ -580,7 +607,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                               disabled={idx === 0}
                               onClick={() => reorderPlaylistTracks(activePlaylist.id, idx, idx - 1)}
                               className="p-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] disabled:opacity-35 cursor-pointer"
-                              title="Move up"
+                              title={isNy ? 'Kwezani pamwamba' : 'Move up'}
                             >
                               <ArrowUp className="w-3.5 h-3.5" />
                             </button>
@@ -589,7 +616,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                               disabled={idx === activePlaylist.trackIds.length - 1}
                               onClick={() => reorderPlaylistTracks(activePlaylist.id, idx, idx + 1)}
                               className="p-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] disabled:opacity-35 cursor-pointer"
-                              title="Move down"
+                              title={isNy ? 'Tsitsani pansi' : 'Move down'}
                             >
                               <ArrowDown className="w-3.5 h-3.5" />
                             </button>
@@ -597,7 +624,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                               type="button"
                               onClick={() => removeTrackFromPlaylist(activePlaylist.id, tid)}
                               className="p-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--danger)] cursor-pointer"
-                              title="Remove from playlist"
+                              title={isNy ? 'Chotsani m\'mndandanda' : 'Remove from playlist'}
                             >
                               <X className="w-3.5 h-3.5" />
                             </button>
@@ -611,9 +638,13 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                 <div className="rounded-[22px] bg-[var(--surface)] border border-[var(--border)]">
                   <EmptyBox
                     icon={ListMusic}
-                    title="No playlists yet"
-                    subtitle="Create a playlist to organize your favorite tracks."
-                    cta="Create playlist"
+                    title={isNy ? 'Palibe mindandanda pakadali pano' : 'No playlists yet'}
+                    subtitle={
+                      isNy
+                        ? 'Pangani mndandanda kuti musonkhanitse nyimbo zomwe mumakonda.'
+                        : 'Create a playlist to organize your favorite tracks.'
+                    }
+                    cta={t('create_playlist')}
                     onCta={() => setIsCreatingPl(true)}
                   />
                 </div>
@@ -635,7 +666,8 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                         <div className="min-w-0">
                           <div className="text-sm font-bold text-[var(--text)] truncate">{pl.name}</div>
                           <div className="text-xs text-[var(--text-muted)]">
-                            {pl.trackIds.length} songs · {pl.isPublic ? 'Public' : 'Private'}
+                            {t('songs_count_label', undefined, { count: pl.trackIds.length })} ·{' '}
+                            {pl.isPublic ? (isNy ? 'Wa aliyense' : 'Public') : (isNy ? 'Wachinsinsi' : 'Private')}
                           </div>
                         </div>
                       </div>
@@ -651,14 +683,14 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                               }}
                               className="px-2 py-1 rounded-lg bg-[var(--danger)] text-white text-[10px] font-bold cursor-pointer"
                             >
-                              Delete
+                              {isNy ? 'Fufutani' : 'Delete'}
                             </button>
                             <button
                               type="button"
                               onClick={() => setConfirmDeletePlId(null)}
                               className="text-[10px] text-[var(--text-muted)] px-1 cursor-pointer"
                             >
-                              Cancel
+                              {t('cancel')}
                             </button>
                           </div>
                         ) : (
@@ -682,7 +714,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
 
       {/* DOWNLOADS: Dedicated Offline Manager & Device Storage Usage */}
       {activeTab === 'downloads' && (
-        <section className="space-y-4" aria-label="Offline downloads and storage usage">
+        <section className="space-y-4" aria-label={isNy ? 'Zotsitsidwa ndi malo osungira' : 'Offline downloads and storage usage'}>
           {/* Storage Usage Overview Card */}
           <div className="rounded-[22px] bg-[var(--surface)] border border-[var(--border)] p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -692,18 +724,24 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                 </div>
                 <div className="space-y-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h2 className="text-base font-extrabold text-[var(--text)]">Offline Downloads</h2>
+                    <h2 className="text-base font-extrabold text-[var(--text)]">
+                      {isNy ? 'Nyimbo Zopanda Intaneti' : 'Offline Downloads'}
+                    </h2>
                     {userSettings.dataSaver.downloadWifiOnly && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[10px] font-semibold text-[var(--text-muted)]">
                         <Wifi className="w-3 h-3 text-[var(--accent-text)]" />
-                        <span>Wi-Fi only</span>
+                        <span>{isNy ? 'Wi-Fi yokha' : 'Wi-Fi only'}</span>
                       </span>
                     )}
                   </div>
                   <p className="text-xs text-[var(--text-muted)]">
                     {offlineStats.count === 0
-                      ? 'No tracks stored locally yet — download songs to play anytime without data.'
-                      : `${offlineStats.count} track${offlineStats.count === 1 ? '' : 's'} saved for offline playback · ${formatStorageBytes(offlineStats.totalBytes)} used`}
+                      ? isNy
+                        ? 'Palibe nyimbo zosungidwa pa foni — tsitsani nyimbo kuti mumvere nthawi iliyonse popanda deta.'
+                        : 'No tracks stored locally yet — download songs to play anytime without data.'
+                      : isNy
+                        ? `Nyimbo ${offlineStats.count} zasungidwa pafoni · ${formatStorageBytes(offlineStats.totalBytes)} zagwiritsidwa ntchito`
+                        : `${offlineStats.count} track${offlineStats.count === 1 ? '' : 's'} saved for offline playback · ${formatStorageBytes(offlineStats.totalBytes)} used`}
                   </p>
                 </div>
               </div>
@@ -720,7 +758,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                       className="px-4 py-2 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                     >
                       <Play className="w-3.5 h-3.5 fill-current" />
-                      <span>Play offline</span>
+                      <span>{isNy ? 'Lizani zopanda intaneti' : 'Play offline'}</span>
                     </button>
                   )}
 
@@ -730,7 +768,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                       onClick={() => setConfirmClearDownloads(true)}
                       className="px-3.5 py-2 rounded-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--danger)] text-xs font-semibold text-[var(--danger)] cursor-pointer transition"
                     >
-                      Clear all
+                      {isNy ? 'Fufutani zonse' : 'Clear all'}
                     </button>
                   ) : (
                     <div className="flex items-center gap-1.5">
@@ -739,7 +777,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                         onClick={() => setConfirmClearDownloads(false)}
                         className="px-3 py-1.5 rounded-full text-xs text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
                       >
-                        Cancel
+                        {t('cancel')}
                       </button>
                       <button
                         type="button"
@@ -753,7 +791,9 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                         }}
                         className="px-3.5 py-1.5 rounded-full bg-[var(--danger)] text-white text-xs font-bold cursor-pointer disabled:opacity-50"
                       >
-                        {isClearingDownloads ? 'Clearing...' : 'Confirm clear'}
+                        {isClearingDownloads
+                          ? isNy ? 'Ikufufuta...' : 'Clearing...'
+                          : isNy ? 'Tsimikizirani kufufuta' : 'Confirm clear'}
                       </button>
                     </div>
                   )}
@@ -786,12 +826,16 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                 <div className="space-y-2 pt-1">
                   <div className="flex items-center justify-between text-[11px] font-mono">
                     <span className="text-[var(--text)] font-bold">
-                      Music Cache: {formatStorageBytes(offlineStats.totalBytes)}
+                      {isNy ? 'Malo a Nyimbo' : 'Music Cache'}: {formatStorageBytes(offlineStats.totalBytes)}
                     </span>
                     <span className="text-[var(--text-muted)]">
                       {freeBytes !== null
-                        ? `${formatStorageBytes(freeBytes)} available of ${formatStorageBytes(quotaMax)}`
-                        : 'Local IndexedDB offline storage'}
+                        ? isNy
+                          ? `Patsala ${formatStorageBytes(freeBytes)} pa ${formatStorageBytes(quotaMax)}`
+                          : `${formatStorageBytes(freeBytes)} available of ${formatStorageBytes(quotaMax)}`
+                        : isNy
+                          ? 'Malo osungira a pafoni (IndexedDB)'
+                          : 'Local IndexedDB offline storage'}
                     </span>
                   </div>
                   <div className="w-full h-2.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] overflow-hidden">
@@ -810,9 +854,13 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
             {downloadedTracks.length === 0 ? (
               <EmptyBox
                 icon={Download}
-                title="No offline downloads yet"
-                subtitle="Download tracks over Wi-Fi to listen smoothly on the road without using mobile data."
-                cta="Browse music"
+                title={isNy ? 'Palibe nyimbo zotsitsidwa' : 'No offline downloads yet'}
+                subtitle={
+                  isNy
+                    ? 'Tsitsani nyimbo pogwiritsa ntchito Wi-Fi kuti mumvere popanda kuwononga deta.'
+                    : 'Download tracks over Wi-Fi to listen smoothly on the road without using mobile data.'
+                }
+                cta={isNy ? 'Fufuzani nyimbo' : 'Browse music'}
                 onCta={() => navigate('/discover')}
               />
             ) : (
@@ -829,10 +877,10 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                         </div>
                         <div className="min-w-0">
                           <div className="text-sm font-semibold text-[var(--text)] truncate">
-                            Cached Track ({entry.trackId})
+                            {isNy ? `Nyimbo Yosungidwa (${entry.trackId})` : `Cached Track (${entry.trackId})`}
                           </div>
                           <div className="text-xs text-[var(--text-muted)] font-mono">
-                            {formatStorageBytes(entry.sizeBytes)} · Cached locally
+                            {formatStorageBytes(entry.sizeBytes)} · {isNy ? 'Yasungidwa pafoni' : 'Cached locally'}
                           </div>
                         </div>
                       </div>
@@ -843,7 +891,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                           await loadOffline();
                         }}
                         className="p-2 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--danger)] cursor-pointer"
-                        title="Remove cached file"
+                        title={isNy ? 'Chotsani nyimbo pafoni' : 'Remove cached file'}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -863,7 +911,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                   <div className="flex items-center gap-2">
                     <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--accent)]/15 text-[var(--accent-text)] text-[10px] font-bold">
                       <CheckCircle2 className="w-3 h-3" />
-                      <span>Offline</span>
+                      <span>{t('library_offline')}</span>
                     </span>
                     <span className="text-[11px] font-mono text-[var(--text-muted)] tabular-nums">
                       {formatStorageBytes(entry.sizeBytes)}
@@ -876,7 +924,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                         await loadOffline();
                       }}
                       className="p-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--danger)] cursor-pointer"
-                      title="Delete download"
+                      title={isNy ? 'Fufutani yotsitsidwa' : 'Delete download'}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -890,9 +938,13 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
           {suggestedForOffline.length > 0 && (
             <div className="rounded-[22px] bg-[var(--surface)] border border-[var(--border)] p-4 sm:p-5 space-y-3">
               <div>
-                <h3 className="text-sm font-bold text-[var(--text)]">Ready to Save Offline</h3>
+                <h3 className="text-sm font-bold text-[var(--text)]">
+                  {isNy ? 'Zokonzeka Kusungidwa Popanda Intaneti' : 'Ready to Save Offline'}
+                </h3>
                 <p className="text-xs text-[var(--text-muted)]">
-                  From your saved and liked songs not yet stored on this device
+                  {isNy
+                    ? 'Kuchokera ku nyimbo zanu zosungidwa ndi zokondedwa zomwe sizinatsitsidwe pafoni'
+                    : 'From your saved and liked songs not yet stored on this device'}
                 </p>
               </div>
               <div className="divide-y divide-[var(--border)] rounded-2xl border border-[var(--border)] overflow-hidden">
@@ -908,7 +960,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                     >
                       <Download className="w-3.5 h-3.5" />
                       <span>
-                        {isDownloadingThis ? `${activeDownload?.progress || 0}%` : 'Download'}
+                        {isDownloadingThis ? `${activeDownload?.progress || 0}%` : t('download')}
                       </span>
                     </button>
                   );
@@ -924,9 +976,13 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-2">
             <div>
-              <h2 className="text-base font-bold text-[var(--text)]">Artists I Follow</h2>
+              <h2 className="text-base font-bold text-[var(--text)]">
+                {isNy ? 'Oimba Omwe Ndimatsatira' : 'Artists I Follow'}
+              </h2>
               <p className="text-xs text-[var(--text-muted)]">
-                Artists you follow appear here for fast listening and release updates.
+                {isNy
+                  ? 'Oimba omwe mumawatsatira aonekera pano kuti mumvere mosavuta ndi kudziwa nyimbo zatsopano.'
+                  : 'Artists you follow appear here for fast listening and release updates.'}
               </p>
             </div>
             <button
@@ -934,7 +990,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
               onClick={() => navigate('/artists')}
               className="px-3.5 py-2 rounded-full bg-[var(--surface)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] hover:border-[var(--border-strong)] cursor-pointer shrink-0"
             >
-              Browse artists
+              {isNy ? 'Onani oimba' : 'Browse artists'}
             </button>
           </div>
 
@@ -942,9 +998,13 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
             <div className="rounded-[22px] bg-[var(--surface)] border border-[var(--border)]">
               <EmptyBox
                 icon={UserCheck}
-                title="Sign in to see Artists I Follow"
-                subtitle="Follow your favorite artists and jump back into their music anytime."
-                cta="Sign in"
+                title={isNy ? 'Lowani kuti muwone oimba omwe mumatsatira' : 'Sign in to see Artists I Follow'}
+                subtitle={
+                  isNy
+                    ? 'Tsatirani oimba omwe mumakonda ndipo bwererani ku nyimbo zawo nthawi iliyonse.'
+                    : 'Follow your favorite artists and jump back into their music anytime.'
+                }
+                cta={t('sign_in')}
                 onCta={() => navigate('/login')}
               />
             </div>
@@ -952,9 +1012,13 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
             <div className="rounded-[22px] bg-[var(--surface)] border border-[var(--border)]">
               <EmptyBox
                 icon={UserCheck}
-                title="Not following any artists yet"
-                subtitle="Tap Follow on any artist page to build your list here."
-                cta="Find artists"
+                title={isNy ? 'Simukutsatira woimba aliyense' : 'Not following any artists yet'}
+                subtitle={
+                  isNy
+                    ? 'Dinani Tsatirani pa tsamba la woimba aliyense kuti mupange mndandanda wanu pano.'
+                    : 'Tap Follow on any artist page to build your list here.'
+                }
+                cta={isNy ? 'Pezani oimba' : 'Find artists'}
                 onCta={() => navigate('/artists')}
               />
             </div>
@@ -962,7 +1026,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {followingArtists.map((a) => {
                 const topTrack = tracks
-                  .filter((t) => !t.isDraft && !t.isDeranked && t.artistId === a.id)
+                  .filter((tr) => !tr.isDraft && !tr.isDeranked && tr.artistId === a.id)
                   .sort((x, y) => (y.plays || 0) - (x.plays || 0))[0];
                 const isArtistPlaying = Boolean(
                   topTrack && currentTrack?.id === topTrack.id && isPlaying
@@ -989,10 +1053,10 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                           {a.name}
                         </div>
                         <div className="text-[11px] text-[var(--text-muted)] truncate">
-                          {[a.city, a.country].filter(Boolean).join(', ') || 'Independent Artist'}
+                          {[a.city, a.country].filter(Boolean).join(', ') || (isNy ? 'Woimba Wodziyimira Yekha' : 'Independent Artist')}
                         </div>
                         <div className="text-[11px] text-[var(--text-muted)] tabular-nums mt-0.5">
-                          {(a.followersCount || 0).toLocaleString()} followers
+                          {(a.followersCount || 0).toLocaleString()} {isNy ? 'otsatira' : 'followers'}
                         </div>
                       </div>
                     </button>
@@ -1006,7 +1070,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                               ? togglePlayPause()
                               : playTrack(topTrack)
                           }
-                          title={isArtistPlaying ? `Pause ${a.name}` : `Play ${a.name}`}
+                          title={isArtistPlaying ? `${t('pause')} ${a.name}` : `${t('play')} ${a.name}`}
                           className="w-9 h-9 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] flex items-center justify-center cursor-pointer"
                         >
                           {isArtistPlaying ? (
@@ -1021,7 +1085,7 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                         onClick={() => toggleFollowArtist(a.id)}
                         className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--danger)] hover:text-[var(--danger)] text-[11px] font-semibold text-[var(--text-muted)] cursor-pointer transition"
                       >
-                        Unfollow
+                        {t('unfollow')}
                       </button>
                     </div>
                   </div>
@@ -1038,9 +1102,13 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
           {playHistory.length === 0 ? (
             <EmptyBox
               icon={Clock}
-              title="No listening history yet"
-              subtitle="Songs you play appear here so you can easily jump back in."
-              cta="Play something"
+              title={isNy ? 'Palibe mbiri yakale pakadali pano' : 'No listening history yet'}
+              subtitle={
+                isNy
+                  ? 'Nyimbo zomwe mumamvera zionekera pano kuti mubwerere mosavuta.'
+                  : 'Songs you play appear here so you can easily jump back in.'
+              }
+              cta={isNy ? 'Lizani nyimbo' : 'Play something'}
               onCta={() => navigate('/')}
             />
           ) : (

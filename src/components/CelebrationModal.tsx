@@ -1,6 +1,7 @@
 import { CheckCircle2, ChevronRight, Download, ExternalLink, X } from 'lucide-react';
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { useRouter } from '../context/RouterContext';
 import { openPwaInstallPrompt } from '../utils/pwaManifest';
 import { LowerVibeLogo } from './brand/LowerVibeLogo';
@@ -11,6 +12,8 @@ interface CelebrationModalProps {
 
 export const CelebrationModal: React.FC<CelebrationModalProps> = ({ onGoToStudio }) => {
   const { celebrationModal, dismissCelebrationModal, currentUser } = useAuth();
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
   const { navigate } = useRouter();
 
   if (!celebrationModal?.isOpen) return null;
@@ -30,7 +33,7 @@ export const CelebrationModal: React.FC<CelebrationModalProps> = ({ onGoToStudio
           type="button"
           onClick={dismissCelebrationModal}
           className="absolute top-4 right-4 w-9 h-9 rounded-xl bg-[var(--surface-2)] text-[var(--text-muted)] hover:text-[var(--text)] flex items-center justify-center transition cursor-pointer"
-          aria-label="Close"
+          aria-label={t('close', 'Close')}
         >
           <X className="w-4 h-4" />
         </button>
@@ -39,16 +42,18 @@ export const CelebrationModal: React.FC<CelebrationModalProps> = ({ onGoToStudio
           <LowerVibeLogo size="md" />
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-emerald-500 text-[11px] font-bold">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>Artist Registration Approved</span>
+            <span>{isNy ? 'Kalembetsa ya Woimba Yavomerezedwa' : 'Artist Registration Approved'}</span>
           </div>
         </div>
 
         <div className="space-y-2">
           <h2 className="text-xl sm:text-2xl font-extrabold font-heading text-[var(--text)]">
-            Welcome to Studio, {celebrationModal.artistName}
+            {isNy ? `Takulandirani ku Studio, ${celebrationModal.artistName}` : `Welcome to Studio, ${celebrationModal.artistName}`}
           </h2>
           <p className="text-xs sm:text-sm text-[var(--text-muted)] leading-relaxed max-w-sm mx-auto">
-            Your artist account is approved! You now have exclusive access to install the standalone LOWERVIBE Artist WebApp and open your dedicated Artist Page, uploads, and Withdrawals dashboard.
+            {isNy
+              ? 'Akaunti yanu ya woimba yavomerezedwa! Tsopano mutha kuyika pulogalamu ya LOWERVIBE Creator, kutsegula tsamba lanu la woimba, kutumiza nyimbo, ndi kuwona malipiro.'
+              : 'Your artist account is approved! You now have exclusive access to install the standalone LOWERVIBE Artist WebApp and open your dedicated Artist Page, uploads, and Withdrawals dashboard.'}
           </p>
         </div>
 
@@ -62,7 +67,7 @@ export const CelebrationModal: React.FC<CelebrationModalProps> = ({ onGoToStudio
             className="w-full py-3.5 rounded-2xl font-bold text-sm text-[var(--accent-contrast)] bg-[var(--accent)] hover:brightness-95 transition flex items-center justify-center gap-2 cursor-pointer"
           >
             <Download className="w-4 h-4" />
-            <span>Install LOWERVIBE Creator App</span>
+            <span>{isNy ? 'Ikani Pulogalamu ya LOWERVIBE Creator' : 'Install LOWERVIBE Creator App'}</span>
           </button>
 
           <div className="grid grid-cols-2 gap-2">
@@ -74,7 +79,7 @@ export const CelebrationModal: React.FC<CelebrationModalProps> = ({ onGoToStudio
               }}
               className="py-3 px-3 rounded-2xl font-bold text-xs text-[var(--text)] bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] transition flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              <span>Open Studio</span>
+              <span>{isNy ? 'Tsegulani Studio' : 'Open Studio'}</span>
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
 
@@ -87,7 +92,7 @@ export const CelebrationModal: React.FC<CelebrationModalProps> = ({ onGoToStudio
               className="py-3 px-3 rounded-2xl font-bold text-xs text-[var(--text)] bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] transition flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <ExternalLink className="w-3.5 h-3.5 text-[var(--violet)]" />
-              <span>Artist Page</span>
+              <span>{isNy ? 'Tsamba la Woimba' : 'Artist Page'}</span>
             </button>
           </div>
         </div>

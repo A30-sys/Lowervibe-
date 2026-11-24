@@ -11,8 +11,10 @@ import {
   X,
 } from 'lucide-react';
 import React, { useState } from 'react';
+import { useLanguage } from '../context/LanguageContext';
 import { Artist, Track } from '../types';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../utils/artworkFallback';
+import { translateGenreCategory } from '../utils/genreCategories';
 import {
   getArtistShareUrl,
   getShortArtistShareUrl,
@@ -27,6 +29,8 @@ interface ShareModalProps {
 }
 
 export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }) => {
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
   const [activeTab, setActiveTab] = useState<'card' | 'socials' | 'embed'>('card');
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedShortLink, setCopiedShortLink] = useState(false);
@@ -36,10 +40,14 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
 
   const isTrackShare = Boolean(track);
   const shareTitle = track
-    ? `${track.title} by ${track.artistName} on LOWERVIBE`
-    : `${artist!.name} on LOWERVIBE`;
+    ? `${track.title} — ${track.artistName} | LOWERVIBE`
+    : `${artist!.name} | LOWERVIBE`;
   const shareDescription = track
-    ? `Listen to "${track.title}" by ${track.artistName} on LOWERVIBE`
+    ? isNy
+      ? `Mverani "${track.title}" ya ${track.artistName} pa LOWERVIBE`
+      : `Listen to "${track.title}" by ${track.artistName} on LOWERVIBE`
+    : isNy
+    ? `Pezani ${artist!.name} ndikutsitsa nyimbo zawo pa LOWERVIBE`
     : `Discover ${artist!.name} and stream their tracks on LOWERVIBE`;
 
   const shareUrl = track ? getTrackShareUrl(track.id) : getArtistShareUrl(artist!);
@@ -99,14 +107,20 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
           <div className="flex items-center gap-2">
             <Share2 className="w-5 h-5 text-[var(--accent-text)]" />
             <h3 className="text-base font-bold text-[var(--text)] font-heading">
-              {isTrackShare ? 'Share song' : 'Share artist'}
+              {isTrackShare
+                ? isNy
+                  ? 'Gawani nyimbo'
+                  : 'Share song'
+                : isNy
+                ? 'Gawani woimba'
+                : 'Share artist'}
             </h3>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="p-2 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] rounded-xl transition cursor-pointer"
-            aria-label="Close share dialog"
+            aria-label={t('close')}
           >
             <X className="w-5 h-5" />
           </button>
@@ -114,9 +128,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
 
         <div className="flex border-b border-[var(--border)] bg-[var(--surface-2)]">
           {[
-            { id: 'card', label: 'Preview card' },
-            { id: 'socials', label: 'Trusted links' },
-            { id: 'embed', label: 'Embed' },
+            { id: 'card', label: isNy ? 'Chithunzi' : 'Preview card' },
+            { id: 'socials', label: isNy ? 'Maulalo odalirika' : 'Trusted links' },
+            { id: 'embed', label: isNy ? 'Ikani patsamba' : 'Embed' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -140,12 +154,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--accent-text)] inline-flex items-center gap-1">
                     <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>Official LOWERVIBE Link</span>
+                    <span>{isNy ? 'Ulalo Wovomerezeka wa LOWERVIBE' : 'Official LOWERVIBE Link'}</span>
                   </span>
                   <span className="text-[11px] font-mono text-[var(--text-muted)]">
                     {track
-                      ? `${track.genre}${track.region ? ` · ${track.region}` : ''}`
-                      : artist!.country || artist!.location || 'Artist'}
+                      ? `${translateGenreCategory(track.genre, language)}${track.region ? ` · ${track.region}` : ''}`
+                      : artist!.country || artist!.location || t('artist')}
                   </span>
                 </div>
 
@@ -168,7 +182,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
                       {track ? track.title : artist!.name}
                     </h4>
                     <p className="text-sm text-[var(--text-muted)] font-medium truncate mt-0.5">
-                      {track ? track.artistName : `${artist!.followersCount || 0} followers`}
+                      {track
+                        ? track.artistName
+                        : `${artist!.followersCount || 0} ${
+                            (artist!.followersCount || 0) === 1
+                              ? t('follower_singular')
+                              : t('follower_plural')
+                          }`}
                     </p>
                     <p className="text-[11px] font-mono text-[var(--accent-text)] truncate mt-2">
                       {shortUrl}
@@ -184,7 +204,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
                   className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-[var(--accent)] hover:brightness-95 text-[var(--accent-contrast)] font-bold text-sm transition cursor-pointer"
                 >
                   {copiedShortLink ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                  <span>{copiedShortLink ? 'Short link copied' : 'Copy short link'}</span>
+                  <span>
+                    {copiedShortLink
+                      ? t('link_copied')
+                      : isNy
+                      ? 'Koperani ulalo wachidule'
+                      : 'Copy short link'}
+                  </span>
                 </button>
                 <button
                   type="button"
@@ -192,7 +218,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
                   className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[var(--surface-2)] hover:bg-[var(--bg)] text-[var(--text)] text-sm font-semibold transition border border-[var(--border)] cursor-pointer"
                 >
                   <Share2 className="w-4 h-4" />
-                  <span>Share</span>
+                  <span>{t('share')}</span>
                 </button>
               </div>
             </div>
@@ -202,7 +228,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-[var(--text-dim)] mb-1.5">
-                  Short direct link (opens straight to {isTrackShare ? 'song' : 'artist'})
+                  {isNy
+                    ? `Ulalo wachidule (umatsegula mwachindunji ${isTrackShare ? 'nyimboyi' : 'woimbayu'})`
+                    : `Short direct link (opens straight to ${isTrackShare ? 'song' : 'artist'})`}
                 </label>
                 <div className="flex items-center gap-2">
                   <input
@@ -217,14 +245,14 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
                     className="px-3.5 py-2.5 bg-[var(--accent)] text-[var(--accent-contrast)] rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                   >
                     {copiedShortLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedShortLink ? 'Copied' : 'Copy'}</span>
+                    <span>{copiedShortLink ? (isNy ? 'Wakopedwa' : 'Copied') : (isNy ? 'Koperani' : 'Copy')}</span>
                   </button>
                 </div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-[var(--text-dim)] mb-1.5">
-                  Canonical trusted URL
+                  {isNy ? 'Ulalo wovomerezeka wathunthu' : 'Canonical trusted URL'}
                 </label>
                 <div className="flex items-center gap-2">
                   <input
@@ -239,14 +267,14 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
                     className="px-3.5 py-2.5 bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                   >
                     {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedLink ? 'Copied' : 'Copy'}</span>
+                    <span>{copiedLink ? (isNy ? 'Wakopedwa' : 'Copied') : (isNy ? 'Koperani' : 'Copy')}</span>
                   </button>
                 </div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-[var(--text-dim)] mb-2">
-                  Share to apps
+                  {isNy ? 'Gawani m\'mapulogalamu' : 'Share to apps'}
                 </label>
                 <div className="grid grid-cols-2 gap-2.5">
                   <a
@@ -293,7 +321,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
           {activeTab === 'embed' && (
             <div className="space-y-4">
               <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-                Copy this HTML snippet to embed this verified LOWERVIBE link on your website or blog.
+                {isNy
+                  ? 'Koperani code iyi ya HTML kuti muike nyimbo kapena woimba wa LOWERVIBE pa tsamba lanu.'
+                  : 'Copy this HTML snippet to embed this verified LOWERVIBE link on your website or blog.'}
               </p>
               <div className="relative">
                 <textarea
@@ -308,7 +338,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
                   className="mt-2 px-3.5 py-2 bg-[var(--surface-2)] hover:bg-[var(--bg)] text-[var(--text)] border border-[var(--border)] rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   {copiedEmbed ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Code2 className="w-3.5 h-3.5" />}
-                  <span>{copiedEmbed ? 'Copied' : 'Copy HTML'}</span>
+                  <span>{copiedEmbed ? (isNy ? 'Wakopedwa' : 'Copied') : (isNy ? 'Koperani HTML' : 'Copy HTML')}</span>
                 </button>
               </div>
             </div>

@@ -14,11 +14,13 @@ import {
 import React, { useEffect, useState } from 'react';
 import { useAudio } from '../context/AudioContext';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { useRouter } from '../context/RouterContext';
 import { useToast } from '../context/ToastContext';
 import { Artist } from '../types';
 import { DEFAULT_AVATAR_SVG } from '../utils/artworkFallback';
 import { formatNumber, formatTime, getTrackDurationSeconds, getTrackLikeCount, isTrackLikedByUser } from '../utils/formatters';
+import { translateGenreCategory } from '../utils/genreCategories';
 
 interface ArtistProfileModalProps {
   artist: Artist | null;
@@ -37,6 +39,8 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
   const { currentUser, toggleFollowArtist, toggleLikeTrack } = useAuth();
   const { navigate } = useRouter();
   const { showToast } = useToast();
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
 
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -110,9 +114,13 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
                   </span>
                 )}
                 <span>·</span>
-                <span className="tabular-nums">{formatNumber(artist.monthlyListeners || 0)} monthly listeners</span>
+                <span className="tabular-nums">
+                  {formatNumber(artist.monthlyListeners || 0)} {isNy ? 'omvera pamwezi' : 'monthly listeners'}
+                </span>
                 <span>·</span>
-                <span className="tabular-nums">{formatNumber(artist.followersCount || 0)} followers</span>
+                <span className="tabular-nums">
+                  {formatNumber(artist.followersCount || 0)} {isNy ? 'otsatira' : 'followers'}
+                </span>
               </div>
             </div>
           </div>
@@ -120,7 +128,7 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t('close', 'Close')}
             className="p-2 rounded-xl text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] cursor-pointer shrink-0"
           >
             <X className="w-5 h-5" />
@@ -133,7 +141,15 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
             type="button"
             onClick={() => {
               toggleFollowArtist(artist.id);
-              showToast(isFollowing ? `Unfollowed ${safeName}` : `Following ${safeName}`);
+              showToast(
+                isFollowing
+                  ? isNy
+                    ? `Mwasiya kutsatira ${safeName}`
+                    : `Unfollowed ${safeName}`
+                  : isNy
+                  ? `Mukutsatira ${safeName}`
+                  : `Following ${safeName}`
+              );
             }}
             className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
               isFollowing
@@ -142,7 +158,7 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
             }`}
           >
             {isFollowing ? <Check className="w-3.5 h-3.5" /> : <UserPlus className="w-3.5 h-3.5" />}
-            <span>{isFollowing ? 'Following' : 'Follow'}</span>
+            <span>{isFollowing ? t('following', 'Following') : t('follow', 'Follow')}</span>
           </button>
 
           <button
@@ -153,7 +169,7 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
             }}
             className="px-4 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] hover:border-[var(--border-strong)] cursor-pointer"
           >
-            Open artist page
+            {isNy ? 'Tsegulani tsamba la woimba' : 'Open artist page'}
           </button>
 
           <button
@@ -161,12 +177,12 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
             onClick={async () => {
               const url = `${window.location.origin}/artists/${artist.slug || artist.id}`;
               await navigator.clipboard.writeText(url).catch(() => {});
-              showToast('Artist link copied');
+              showToast(t('link_copied', 'Artist link copied'));
             }}
             className="px-3.5 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] flex items-center gap-1.5 cursor-pointer"
           >
             <Share2 className="w-3.5 h-3.5" />
-            <span>Share</span>
+            <span>{t('share', 'Share')}</span>
           </button>
 
           {isOwner && (
@@ -176,7 +192,7 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
               className="px-3.5 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] flex items-center gap-1.5 cursor-pointer ml-auto"
             >
               <Edit3 className="w-3.5 h-3.5" />
-              <span>Edit</span>
+              <span>{isNy ? 'Konzani' : 'Edit'}</span>
             </button>
           )}
         </div>
@@ -189,7 +205,9 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
                 e.preventDefault();
                 setProfileSaveError(null);
                 if (!profileForm.name.trim()) {
-                  setProfileSaveError('Artist display name cannot be empty.');
+                  setProfileSaveError(
+                    isNy ? 'Dzina la woimba silingakhale lopanda kanthu.' : 'Artist display name cannot be empty.'
+                  );
                   return;
                 }
                 setIsSavingProfile(true);
@@ -200,13 +218,14 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
                 });
                 setIsSavingProfile(false);
                 if (!res.success) {
-                  const errText = res.error || 'Could not update artist profile.';
+                  const errText =
+                    res.error || (isNy ? 'Sitinathe kukonza mbiri ya woimba.' : 'Could not update artist profile.');
                   setProfileSaveError(errText);
                   showToast(errText);
                   return;
                 }
                 setIsEditingProfile(false);
-                showToast('Artist profile updated');
+                showToast(isNy ? 'Mbiri ya woimba yakonzedwa' : 'Artist profile updated');
               }}
               className="p-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] space-y-3"
             >
@@ -216,7 +235,9 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
                 </div>
               )}
               <div>
-                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Display name</label>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                  {isNy ? 'Dzina lowonekera' : 'Display name'}
+                </label>
                 <input
                   type="text"
                   required
@@ -226,7 +247,9 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">City / country</label>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                  {isNy ? 'Mzinda / Dziko' : 'City / country'}
+                </label>
                 <input
                   type="text"
                   value={profileForm.location}
@@ -235,7 +258,9 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Bio</label>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                  {isNy ? 'Mbiri ya Woimba' : 'Bio'}
+                </label>
                 <textarea
                   rows={3}
                   value={profileForm.bio}
@@ -252,14 +277,14 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
                   }}
                   className="px-4 py-2 rounded-xl border border-[var(--border)] text-xs font-semibold cursor-pointer"
                 >
-                  Cancel
+                  {t('cancel', 'Cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingProfile}
                   className="px-4 py-2 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer disabled:opacity-60"
                 >
-                  {isSavingProfile ? 'Saving...' : 'Save'}
+                  {isSavingProfile ? t('saving', 'Saving...') : t('save', 'Save')}
                 </button>
               </div>
             </form>
@@ -267,7 +292,9 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
 
           {artist.bio && (
             <div className="space-y-1">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">About</h3>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                {t('artist_about', 'About')}
+              </h3>
               <p className="text-sm text-[var(--text)] leading-relaxed">{artist.bio}</p>
             </div>
           )}
@@ -275,11 +302,15 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
           <div className="space-y-2.5">
             <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
               <Music className="w-3.5 h-3.5" />
-              <span>Tracks ({artistTracks.length})</span>
+              <span>
+                {isNy ? 'Nyimbo' : 'Tracks'} ({artistTracks.length})
+              </span>
             </h3>
 
             {artistTracks.length === 0 ? (
-              <p className="text-sm text-[var(--text-muted)] py-4">No songs released yet.</p>
+              <p className="text-sm text-[var(--text-muted)] py-4">
+                {isNy ? 'Palibe nyimbo zotulutsidwa pakadali pano.' : 'No songs released yet.'}
+              </p>
             ) : (
               <div className="rounded-2xl border border-[var(--border)] divide-y divide-[var(--border)] overflow-hidden">
                 {artistTracks.map((tr) => {
@@ -301,7 +332,7 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-bold text-[var(--text)] truncate">{tr.title}</div>
                         <div className="text-xs text-[var(--text-muted)]">
-                          {tr.genre} · {formatTime(getTrackDurationSeconds(tr))}
+                          {translateGenreCategory(tr.genre, language)} · {formatTime(getTrackDurationSeconds(tr))}
                         </div>
                       </div>
                       <button

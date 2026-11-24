@@ -20,6 +20,7 @@ import {
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
 import { db } from '../../services/firebase';
@@ -31,6 +32,7 @@ import {
   getTrackLikeCount,
   isTrackLikedByUser,
 } from '../../utils/formatters';
+import { translateGenreCategory } from '../../utils/genreCategories';
 import { DEFAULT_AVATAR_SVG, DEFAULT_BANNER_SVG } from '../../utils/artworkFallback';
 import { applyArtistSeoMeta, resetDefaultSeoMeta } from '../../utils/seoMeta';
 import { SafeImage } from '../SafeImage';
@@ -54,6 +56,8 @@ export const ArtistPublicPageView: React.FC = () => {
   } = useAudio();
   const { currentUser, toggleFollowArtist, toggleLikeTrack } = useAuth();
   const { showToast } = useToast();
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
 
   const [activeTab, setActiveTab] = useState<'popular' | 'releases' | 'about'>('popular');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -168,7 +172,9 @@ export const ArtistPublicPageView: React.FC = () => {
         <div className="w-12 h-12 rounded-2xl bg-[var(--surface)] border border-[var(--border)] flex items-center justify-center mx-auto text-[var(--accent-text)]">
           <Loader2 className="w-6 h-6 animate-spin" />
         </div>
-        <p className="text-xs font-semibold text-[var(--text-muted)]">Loading artist profile...</p>
+        <p className="text-xs font-semibold text-[var(--text-muted)]">
+          {isNy ? 'Ikutsegula mbiri ya woimba...' : 'Loading artist profile...'}
+        </p>
       </div>
     );
   }
@@ -180,9 +186,13 @@ export const ArtistPublicPageView: React.FC = () => {
           <Music className="w-7 h-7" />
         </div>
         <div className="space-y-1.5">
-          <h1 className="text-xl font-extrabold text-[var(--text)]">Artist not found</h1>
+          <h1 className="text-xl font-extrabold text-[var(--text)]">
+            {isNy ? 'Woimba sanapezeke' : 'Artist not found'}
+          </h1>
           <p className="text-sm text-[var(--text-muted)]">
-            We couldn’t find that artist profile. Explore other creators on LOWERVIBE.
+            {isNy
+              ? 'Sitinathe kupeza mbiri ya woimba uyu. Onani oimba ena pa LOWERVIBE.'
+              : 'We couldn’t find that artist profile. Explore other creators on LOWERVIBE.'}
           </p>
         </div>
         <button
@@ -190,7 +200,7 @@ export const ArtistPublicPageView: React.FC = () => {
           onClick={() => navigate('/artists')}
           className="px-6 py-3 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm cursor-pointer"
         >
-          Browse artists
+          {isNy ? 'Onani oimba' : 'Browse artists'}
         </button>
       </div>
     );
@@ -221,7 +231,7 @@ export const ArtistPublicPageView: React.FC = () => {
 
   const handlePlayPopular = () => {
     if (popularTracks.length === 0) {
-      showToast('No tracks uploaded yet');
+      showToast(isNy ? 'Palibe nyimbo zokwezedwa pakadali pano' : 'No tracks uploaded yet');
       return;
     }
     const first = popularTracks[0];
@@ -235,13 +245,13 @@ export const ArtistPublicPageView: React.FC = () => {
 
   const handleShufflePlay = () => {
     if (popularTracks.length === 0) {
-      showToast('No tracks uploaded yet');
+      showToast(isNy ? 'Palibe nyimbo zokwezedwa pakadali pano' : 'No tracks uploaded yet');
       return;
     }
     const shuffled = [...popularTracks].sort(() => Math.random() - 0.5);
     playTrack(shuffled[0]);
     shuffled.slice(1).forEach((t) => addToQueue(t));
-    showToast(`Playing ${safeName} on shuffle`);
+    showToast(isNy ? `Ikusakaniza nyimbo za ${safeName}` : `Playing ${safeName} on shuffle`);
   };
 
   const handleShareProfile = () => {
@@ -262,9 +272,9 @@ export const ArtistPublicPageView: React.FC = () => {
     if (res.success) {
       setReportModalOpen(false);
       setReportReason('');
-      showToast('Report sent to moderation');
+      showToast(isNy ? 'Dandaulo latumizidwa kwa oyang\'anira' : 'Report sent to moderation');
     } else {
-      showToast(res.error || 'Could not send report');
+      showToast(res.error || (isNy ? 'Sitinathe kutumiza dandaulo' : 'Could not send report'));
     }
   };
 
@@ -280,7 +290,7 @@ export const ArtistPublicPageView: React.FC = () => {
           className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text)] transition cursor-pointer min-h-[40px]"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Artists</span>
+          <span>{t('artists', 'Artists')}</span>
         </button>
 
         {isOwner && (
@@ -289,7 +299,7 @@ export const ArtistPublicPageView: React.FC = () => {
             onClick={() => navigate('/artistcreator')}
             className="px-4 py-2 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold transition cursor-pointer min-h-[40px]"
           >
-            Manage in Artist Creator
+            {isNy ? 'Yendetsani mu Situdiyo' : 'Manage in Artist Creator'}
           </button>
         )}
       </div>
@@ -338,9 +348,13 @@ export const ArtistPublicPageView: React.FC = () => {
                   <span aria-hidden="true">·</span>
                 </>
               )}
-              <span className="tabular-nums">{formatNumber(monthlyListeners)} monthly listeners</span>
+              <span className="tabular-nums">
+                {formatNumber(monthlyListeners)} {isNy ? 'omvera pamwezi' : 'monthly listeners'}
+              </span>
               <span aria-hidden="true">·</span>
-              <span className="tabular-nums">{formatNumber(followersCount)} followers</span>
+              <span className="tabular-nums">
+                {formatNumber(followersCount)} {isNy ? 'otsatira' : 'followers'}
+              </span>
             </div>
           </div>
 
@@ -354,12 +368,12 @@ export const ArtistPublicPageView: React.FC = () => {
               {currentTrack && popularTracks.some((t) => t.id === currentTrack.id) && isPlaying ? (
                 <>
                   <Pause className="w-4 h-4 fill-current" />
-                  <span>Pause</span>
+                  <span>{t('pause', 'Pause')}</span>
                 </>
               ) : (
                 <>
                   <Play className="w-4 h-4 fill-current" />
-                  <span>Play</span>
+                  <span>{t('play', 'Play')}</span>
                 </>
               )}
             </button>
@@ -370,7 +384,7 @@ export const ArtistPublicPageView: React.FC = () => {
               className="px-4 h-11 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] text-sm font-semibold text-[var(--text)] flex items-center gap-2 transition cursor-pointer"
             >
               <Shuffle className="w-4 h-4" />
-              <span>Shuffle</span>
+              <span>{t('shuffle', 'Shuffle')}</span>
             </button>
 
             <button
@@ -378,7 +392,15 @@ export const ArtistPublicPageView: React.FC = () => {
               onClick={() => {
                 toggleFollowArtist(artist.id);
                 if (currentUser) {
-                  showToast(isFollowing ? `Unfollowed ${safeName}` : `Following ${safeName}`);
+                  showToast(
+                    isFollowing
+                      ? isNy
+                        ? `Mwasiya kutsatira ${safeName}`
+                        : `Unfollowed ${safeName}`
+                      : isNy
+                      ? `Mukutsatira ${safeName}`
+                      : `Following ${safeName}`
+                  );
                 }
               }}
               className={`px-5 h-11 rounded-xl border text-sm font-bold flex items-center gap-2 transition active:scale-95 cursor-pointer ${
@@ -388,13 +410,13 @@ export const ArtistPublicPageView: React.FC = () => {
               }`}
             >
               {isFollowing ? <Check className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
-              <span>{isFollowing ? 'Following' : 'Follow'}</span>
+              <span>{isFollowing ? t('following', 'Following') : t('follow', 'Follow')}</span>
             </button>
 
             <button
               type="button"
               onClick={handleShareProfile}
-              aria-label="Share artist"
+              aria-label={t('share', 'Share artist')}
               className="w-11 h-11 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] text-[var(--text)] flex items-center justify-center transition cursor-pointer"
             >
               <Share2 className="w-4 h-4" />
@@ -404,7 +426,7 @@ export const ArtistPublicPageView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setMenuOpen((prev) => !prev)}
-                aria-label="More options"
+                aria-label={isNy ? 'Zochita zina' : 'More options'}
                 className="w-11 h-11 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] text-[var(--text)] flex items-center justify-center transition cursor-pointer"
               >
                 <MoreHorizontal className="w-4 h-4" />
@@ -421,7 +443,7 @@ export const ArtistPublicPageView: React.FC = () => {
                     className="w-full px-3 py-2 rounded-lg text-left text-xs font-semibold text-[var(--danger)] hover:bg-[var(--surface-2)] flex items-center gap-2 cursor-pointer"
                   >
                     <Flag className="w-3.5 h-3.5" />
-                    <span>Report artist</span>
+                    <span>{isNy ? 'Nenani woimba' : 'Report artist'}</span>
                   </button>
                 </div>
               )}
@@ -434,9 +456,9 @@ export const ArtistPublicPageView: React.FC = () => {
       {/* Tabs: Popular / Releases / About */}
       <div className="flex items-center gap-2 border-b border-[var(--border)]">
         {[
-          { id: 'popular' as const, label: 'Popular' },
-          { id: 'releases' as const, label: `Releases (${artistTracks.length})` },
-          { id: 'about' as const, label: 'About' },
+          { id: 'popular' as const, label: isNy ? 'Zotchuka' : 'Popular' },
+          { id: 'releases' as const, label: `${isNy ? 'Nyimbo' : 'Releases'} (${artistTracks.length})` },
+          { id: 'about' as const, label: t('artist_about', 'About') },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -458,7 +480,7 @@ export const ArtistPublicPageView: React.FC = () => {
         <section className="space-y-2">
           {popularTracks.length === 0 ? (
             <div className="p-8 rounded-2xl bg-[var(--surface)] border border-[var(--border)] text-center text-sm text-[var(--text-muted)]">
-              No songs released yet.
+              {isNy ? 'Palibe nyimbo zotulutsidwa pakadali pano.' : 'No songs released yet.'}
             </div>
           ) : (
             <div className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] divide-y divide-[var(--border)] overflow-hidden">
@@ -487,9 +509,13 @@ export const ArtistPublicPageView: React.FC = () => {
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-bold text-[var(--text)] truncate">{track.title}</div>
                       <div className="text-xs text-[var(--text-muted)] flex items-center gap-2">
-                        <span>{track.genre || 'Music'}</span>
+                        <span>{translateGenreCategory(track.genre || 'Music', language)}</span>
                         <span aria-hidden="true">·</span>
-                        <span className="tabular-nums">{formatNumber(track.plays || 0)} plays</span>
+                        <span className="tabular-nums">
+                          {t('plays_count', `${formatNumber(track.plays || 0)} plays`, {
+                            count: formatNumber(track.plays || 0),
+                          })}
+                        </span>
                       </div>
                     </div>
 
@@ -519,7 +545,7 @@ export const ArtistPublicPageView: React.FC = () => {
                       }}
                       className="text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text)] px-2 py-1 cursor-pointer"
                     >
-                      Details
+                      {isNy ? 'Zambiri' : 'Details'}
                     </button>
                   </div>
                 );
@@ -534,7 +560,7 @@ export const ArtistPublicPageView: React.FC = () => {
         <section>
           {latestReleases.length === 0 ? (
             <div className="p-8 rounded-2xl bg-[var(--surface)] border border-[var(--border)] text-center text-sm text-[var(--text-muted)]">
-              No releases yet.
+              {isNy ? 'Palibe nyimbo zotulutsidwa pakadali pano.' : 'No releases yet.'}
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
@@ -559,7 +585,8 @@ export const ArtistPublicPageView: React.FC = () => {
                     <div className="space-y-0.5">
                       <div className="text-sm font-bold text-[var(--text)] truncate">{track.title}</div>
                       <div className="text-xs text-[var(--text-muted)] truncate">
-                        {track.releaseDate ? track.releaseDate.slice(0, 4) : 'Single'} · {track.genre}
+                        {track.releaseDate ? track.releaseDate.slice(0, 4) : isNy ? 'Nyimbo imodzi' : 'Single'} ·{' '}
+                        {translateGenreCategory(track.genre, language)}
                       </div>
                     </div>
                   </div>
@@ -574,15 +601,19 @@ export const ArtistPublicPageView: React.FC = () => {
       {activeTab === 'about' && (
         <section className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-6 space-y-5 max-w-2xl">
           <div className="space-y-2">
-            <h2 className="text-base font-bold text-[var(--text)]">Bio</h2>
+            <h2 className="text-base font-bold text-[var(--text)]">{isNy ? 'Mbiri ya Woimba' : 'Bio'}</h2>
             <p className="text-sm text-[var(--text-muted)] leading-relaxed whitespace-pre-line">
-              {artist.bio?.trim() ? artist.bio : 'This artist has not added a bio yet.'}
+              {artist.bio?.trim()
+                ? artist.bio
+                : isNy
+                ? 'Woimbayu sanaike mbiri yake pakadali pano.'
+                : 'This artist has not added a bio yet.'}
             </p>
           </div>
 
           {socials.length > 0 && (
             <div className="space-y-2 pt-2 border-t border-[var(--border)]">
-              <h3 className="text-sm font-bold text-[var(--text)]">Links</h3>
+              <h3 className="text-sm font-bold text-[var(--text)]">{isNy ? 'Maulalo' : 'Links'}</h3>
               <div className="flex flex-wrap gap-2">
                 {socials.map(([label, href]) => (
                   <a
@@ -602,7 +633,12 @@ export const ArtistPublicPageView: React.FC = () => {
 
           {artist.joinedDate && (
             <div className="text-xs text-[var(--text-muted)] pt-2 border-t border-[var(--border)]">
-              Joined LOWERVIBE on {new Date(artist.joinedDate).toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' })}
+              {isNy ? 'Analowa pa LOWERVIBE pa ' : 'Joined LOWERVIBE on '}
+              {new Date(artist.joinedDate).toLocaleDateString(isNy ? 'en-MW' : 'en-GB', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+              })}
             </div>
           )}
         </section>
@@ -620,7 +656,9 @@ export const ArtistPublicPageView: React.FC = () => {
             className="w-full max-w-md rounded-2xl bg-[var(--surface)] border border-[var(--border-strong)] p-6 space-y-4 shadow-2xl"
           >
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-[var(--text)]">Report {safeName}</h3>
+              <h3 className="text-base font-bold text-[var(--text)]">
+                {isNy ? `Nenani ${safeName}` : `Report ${safeName}`}
+              </h3>
               <button
                 type="button"
                 onClick={() => setReportModalOpen(false)}
@@ -634,7 +672,11 @@ export const ArtistPublicPageView: React.FC = () => {
               required
               value={reportReason}
               onChange={(e) => setReportReason(e.target.value)}
-              placeholder="Tell us what is wrong (impersonation, copyright, spam, or abuse)"
+              placeholder={
+                isNy
+                  ? 'Tiuzeni chomwe chalakwika (kutengera dzina, kuba nyimbo, kapena zosayenera)'
+                  : 'Tell us what is wrong (impersonation, copyright, spam, or abuse)'
+              }
               className="w-full p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
             />
             <div className="flex justify-end gap-2">
@@ -643,14 +685,20 @@ export const ArtistPublicPageView: React.FC = () => {
                 onClick={() => setReportModalOpen(false)}
                 className="px-4 py-2 rounded-xl border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer"
               >
-                Cancel
+                {t('cancel', 'Cancel')}
               </button>
               <button
                 type="submit"
                 disabled={reportSending}
                 className="px-4 py-2 rounded-xl bg-[var(--danger)] text-white text-xs font-bold cursor-pointer disabled:opacity-50"
               >
-                {reportSending ? 'Sending...' : 'Submit report'}
+                {reportSending
+                  ? isNy
+                    ? 'Ikutumiza...'
+                    : 'Sending...'
+                  : isNy
+                  ? 'Tumizani dandaulo'
+                  : 'Submit report'}
               </button>
             </div>
           </form>

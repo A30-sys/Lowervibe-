@@ -16,7 +16,7 @@ import {
 import React, { useEffect, useRef, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
-import { useLanguage } from '../../context/LanguageContext';
+import { formatLocalizedRelativeTime, useLanguage } from '../../context/LanguageContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { useRouter } from '../../context/RouterContext';
 import { NotificationItem } from '../../types';
@@ -30,21 +30,13 @@ interface StickyHeaderProps {
   onLogoClick: () => void;
 }
 
-function formatRelativeTime(isoDate: string): string {
-  const diffSec = Math.max(0, Math.floor((Date.now() - new Date(isoDate).getTime()) / 1000));
-  if (diffSec < 60) return 'Just now';
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
-  return new Date(isoDate).toLocaleDateString();
-}
-
 export const StickyHeader: React.FC<StickyHeaderProps> = ({
   onOpenAccount,
   onLogoClick,
 }) => {
   const { isPlaying } = useAudio();
   const { currentUser, isArtist, isAdmin, userSettings, updateUserSettings } = useAuth();
-  const { t } = useLanguage();
+  const { language, t } = useLanguage();
   const { notifications, unreadCount, isNotificationRead, markAsRead, markAllAsRead } = useNotifications();
   const { currentRoute, navigate, searchParams } = useRouter();
 
@@ -184,7 +176,7 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
     { label: t('home', 'Home'), path: '/', active: currentRoute.route === 'home' },
     { label: t('search', 'Search'), path: '/search', active: currentRoute.route === 'search' || currentRoute.route === 'discover' },
     { label: t('library', 'Library'), path: '/library', active: currentRoute.route === 'library' },
-    { label: t('creator', 'Artist Creator'), path: '/artistcreator', active: currentRoute.route === 'studio' },
+    { label: t('artist_creator', 'Artist Creator'), path: '/artistcreator', active: currentRoute.route === 'studio' },
     { label: t('profile', 'Profile'), path: '/account', active: currentRoute.route === 'account' },
   ];
 
@@ -206,7 +198,7 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
               key={link.path}
               type="button"
               onClick={() => navigate(link.path)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-150 cursor-pointer min-h-[40px] ${
+              className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-150 cursor-pointer min-h-[40px] whitespace-nowrap ${
                 link.active
                   ? 'bg-[var(--accent)] text-[var(--accent-contrast)] font-bold shadow-xs'
                   : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)]'
@@ -224,24 +216,24 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
             <button
               type="button"
               onClick={() => openPwaInstallPrompt('creator')}
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 rounded-2xl bg-[var(--surface)] text-[var(--accent-text)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-all active:scale-95 min-h-[44px] sm:min-h-[48px] cursor-pointer text-xs font-bold"
-              title="Install LOWERVIBE Creator & Main App"
-              aria-label="Install WebApps"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 rounded-2xl bg-[var(--surface)] text-[var(--accent-text)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-all active:scale-95 min-h-[44px] sm:min-h-[48px] cursor-pointer text-xs font-bold whitespace-nowrap"
+              title={t('creator_app', 'Creator App')}
+              aria-label={t('creator_app', 'Creator App')}
             >
-              <Download className="w-4 h-4" />
-              <span className="hidden lg:inline">Creator App</span>
+              <Download className="w-4 h-4 shrink-0" />
+              <span className="hidden lg:inline">{t('creator_app', 'Creator App')}</span>
             </button>
           ) : (
             !isMainPwaStandalone && (
               <button
                 type="button"
                 onClick={() => openPwaInstallPrompt('main')}
-                className="flex items-center gap-1.5 px-2.5 sm:px-3 rounded-2xl bg-[var(--surface)] text-[var(--accent-text)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-all active:scale-95 min-h-[44px] sm:min-h-[48px] cursor-pointer text-xs font-bold"
-                title="Install LOWERVIBE App (Android, iPhone & Desktop)"
-                aria-label="Install LOWERVIBE App"
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 rounded-2xl bg-[var(--surface)] text-[var(--accent-text)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-all active:scale-95 min-h-[44px] sm:min-h-[48px] cursor-pointer text-xs font-bold whitespace-nowrap"
+                title={t('install_app', 'Install App')}
+                aria-label={t('install_app', 'Install App')}
               >
-                <Download className="w-4 h-4" />
-                <span className="hidden lg:inline">Install App</span>
+                <Download className="w-4 h-4 shrink-0" />
+                <span className="hidden lg:inline">{t('install_app', 'Install App')}</span>
               </button>
             )
           )}
@@ -287,10 +279,13 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
                   <div className="px-4 py-3.5 border-b border-[var(--border)] flex items-center justify-between gap-2 shrink-0">
                     <div className="min-w-0">
                       <h3 className="text-sm font-extrabold text-[var(--text)] font-heading tracking-tight">
-                        Notifications
+                        {t('notifications', 'Notifications')}
                       </h3>
                       <p className="text-[11px] font-mono tabular-nums text-[var(--text-muted)]">
-                        {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'} · {notifications.length} total
+                        {unreadCount > 0
+                          ? t('unread_count', '{count} unread', { count: unreadCount })
+                          : t('all_caught_up', 'All caught up')}{' '}
+                        · {t('total_count', '{count} total', { count: notifications.length })}
                       </p>
                     </div>
 
@@ -323,14 +318,14 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
                           className="inline-flex items-center gap-1.5 px-3 min-h-[40px] rounded-xl bg-[var(--surface-2)] hover:border-[var(--border-strong)] border border-[var(--border)] text-[11px] font-semibold text-[var(--text)] transition cursor-pointer whitespace-nowrap"
                         >
                           <CheckCheck className="w-3.5 h-3.5 text-[var(--accent-text)]" />
-                          <span>Mark all read</span>
+                          <span>{t('mark_all_read', 'Mark all read')}</span>
                         </button>
                       )}
                       <button
                         type="button"
                         onClick={() => setIsNotifOpen(false)}
                         className="min-w-[40px] min-h-[40px] rounded-xl text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] flex items-center justify-center transition cursor-pointer"
-                        aria-label="Close notifications"
+                        aria-label={t('close', 'Close')}
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -340,7 +335,10 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
                   {notifPermission === 'default' && (
                     <div className="px-4 py-2.5 bg-[var(--accent)]/10 border-b border-[var(--border)] flex items-center justify-between gap-2 text-[11px]">
                       <span className="text-[var(--text)] font-medium">
-                        Enable device sound &amp; OS alerts for releases &amp; admin updates
+                        {t(
+                          'enable_alerts_banner',
+                          'Enable device sound & OS alerts for releases & admin updates'
+                        )}
                       </span>
                       <button
                         type="button"
@@ -367,9 +365,9 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
                             }
                           } catch {}
                         }}
-                        className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--accent-contrast)] font-bold cursor-pointer shrink-0 min-h-[32px]"
+                        className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--accent-contrast)] font-bold cursor-pointer shrink-0 min-h-[36px]"
                       >
-                        Enable
+                        {t('enable', 'Enable')}
                       </button>
                     </div>
                   )}
@@ -381,9 +379,9 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
                     className="px-3 py-2 border-b border-[var(--border)] bg-[var(--surface-2)]/40 grid grid-cols-3 gap-1.5 shrink-0"
                   >
                     {[
-                      { id: 'all' as const, label: 'All', count: notifications.length },
-                      { id: 'unread' as const, label: 'Unread', count: unreadCount },
-                      { id: 'news' as const, label: 'Updates', count: updatesCount },
+                      { id: 'all' as const, label: t('notif_tab_all', 'All'), count: notifications.length },
+                      { id: 'unread' as const, label: t('notif_tab_unread', 'Unread'), count: unreadCount },
+                      { id: 'news' as const, label: t('notif_tab_updates', 'Updates'), count: updatesCount },
                     ].map((tab) => {
                       const active = notifFilter === tab.id;
                       return (
@@ -417,15 +415,21 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
                         </div>
                         <p className="text-sm font-bold text-[var(--text)]">
                           {notifFilter === 'unread'
-                            ? 'No unread notifications'
+                            ? t('no_unread_notifs', 'No unread notifications')
                             : notifFilter === 'news'
-                            ? 'No updates yet'
-                            : 'No notifications yet'}
+                            ? t('no_updates_yet', 'No updates yet')
+                            : t('no_notifs_yet', 'No notifications yet')}
                         </p>
                         <p className="text-xs text-[var(--text-muted)] max-w-xs mx-auto leading-relaxed">
                           {notifFilter === 'unread'
-                            ? 'You have read all incoming creator and account activity.'
-                            : 'Studio approvals, upload updates, and releases appear here.'}
+                            ? t(
+                                'no_unread_desc',
+                                'You have read all incoming creator and account activity.'
+                              )
+                            : t(
+                                'no_notifs_desc',
+                                'Studio approvals, upload updates, and releases appear here.'
+                              )}
                         </p>
                       </div>
                     ) : (
@@ -454,12 +458,12 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
                                 </span>
                                 <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
                                   <span className="text-[10px] font-mono tabular-nums text-[var(--text-muted)]">
-                                    {formatRelativeTime(item.createdAt)}
+                                    {formatLocalizedRelativeTime(item.createdAt, language)}
                                   </span>
                                   {!read && (
                                     <span
                                       className="w-2 h-2 rounded-full bg-[var(--accent)]"
-                                      aria-label="Unread"
+                                      aria-label={t('notif_tab_unread', 'Unread')}
                                     />
                                   )}
                                 </div>
@@ -470,10 +474,10 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
                               {item.actionRoute && (
                                 <span className="inline-block text-[11px] font-semibold text-[var(--accent-text)] pt-0.5">
                                   {item.actionRoute.startsWith('/artistcreator') || item.actionRoute.startsWith('/studio')
-                                    ? 'Open Artist Creator →'
+                                    ? t('open_artist_creator', 'Open Artist Creator →')
                                     : item.actionRoute.startsWith('/artists')
-                                    ? 'View Artist →'
-                                    : 'Open →'}
+                                    ? t('view_artist', 'View Artist →')
+                                    : t('open_arrow', 'Open →')}
                                 </span>
                               )}
                             </div>
@@ -488,12 +492,12 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
           </div>
 
           {/* Profile Avatar Button */}
-          <button
+            <button
             type="button"
             onClick={onOpenAccount}
             className="flex items-center gap-2 p-1.5 pr-2 sm:pr-3 rounded-2xl bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-all active:scale-95 min-h-[48px] cursor-pointer"
-            title={currentUser ? `${currentUser.name}` : 'Sign in'}
-            aria-label="Open profile"
+            title={currentUser ? `${currentUser.name}` : t('sign_in', 'Sign in')}
+            aria-label={t('profile', 'Profile')}
           >
             {currentUser?.avatar ? (
               <img
@@ -508,7 +512,7 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
               </div>
             )}
             <span className="hidden sm:inline text-xs font-semibold text-[var(--text)] max-w-[100px] truncate">
-              {currentUser ? currentUser.name : 'Sign in'}
+              {currentUser ? currentUser.name : t('sign_in', 'Sign in')}
             </span>
           </button>
         </div>

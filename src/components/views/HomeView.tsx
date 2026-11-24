@@ -15,11 +15,13 @@ import {
 import React, { useMemo, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
+import { getLocalizedGreeting, useLanguage } from '../../context/LanguageContext';
 import { useToast } from '../../context/ToastContext';
 import { matchesLocationFilter } from '../../data/regions';
 import { Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../../utils/artworkFallback';
 import { formatNumber, formatTime } from '../../utils/formatters';
+import { normalizeGenreCategory, translateGenreCategory } from '../../utils/genreCategories';
 import { HeroSkeleton, ShelfSkeleton } from '../common/LoadingSkeleton';
 import { LazySlideImage } from '../common/LazySlideImage';
 import { HeroFeaturedCard } from '../hero/HeroFeaturedCard';
@@ -36,13 +38,6 @@ interface HomeViewProps {
   onSelectCategory?: (category: string) => void;
 }
 
-function getTimeGreeting(name?: string): string {
-  const hour = new Date().getHours();
-  const base = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const first = name?.trim().split(/\s+/)[0];
-  return first ? `${base}, ${first}` : base;
-}
-
 interface ShelfSectionProps {
   title: string;
   subtitle: string;
@@ -52,6 +47,7 @@ interface ShelfSectionProps {
   onPlayTrack: (track: Track) => void;
   onPlayAll?: (items: Track[]) => void;
   onSelectArtist: (artistId: string) => void;
+  playAllLabel: string;
   minItems?: number;
 }
 
@@ -64,6 +60,7 @@ const HorizontalTrackShelf: React.FC<ShelfSectionProps> = ({
   onPlayTrack,
   onPlayAll,
   onSelectArtist,
+  playAllLabel,
   minItems = 3,
 }) => {
   if (items.length < minItems) return null;
@@ -81,10 +78,10 @@ const HorizontalTrackShelf: React.FC<ShelfSectionProps> = ({
           <button
             type="button"
             onClick={() => onPlayAll(items)}
-            className="px-3.5 py-2 rounded-2xl bg-[var(--surface)] hover:bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] text-xs font-bold text-[var(--text)] inline-flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer min-h-[40px]"
+            className="px-3.5 py-2 rounded-2xl bg-[var(--surface)] hover:bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] text-xs font-bold text-[var(--text)] inline-flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer min-h-[44px] whitespace-nowrap"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
-            <span>Play all</span>
+            <span>{playAllLabel}</span>
           </button>
         )}
       </div>
@@ -168,24 +165,24 @@ export const HomeView: React.FC<HomeViewProps> = ({
     selectedCountry,
   } = useAudio();
   const { currentUser, toggleFollowArtist } = useAuth();
+  const { language, t } = useLanguage();
   const { showToast } = useToast();
   const [selectedGenre, setSelectedGenre] = useState<string>('All');
 
   const publicTracks = useMemo(
-    () => tracks.filter((t) => !t.isDraft && !t.isDeranked),
+    () => tracks.filter((tr) => !tr.isDraft && !tr.isDeranked),
     [tracks]
   );
 
-  // Live genre chips computed strictly from stored public tracks
+  // Normalized live genre chips computed strictly from stored public tracks
   const topGenres = useMemo(() => {
     const counts = new Map<string, { label: string; score: number }>();
-    for (const t of publicTracks) {
-      const clean = (t.genre || '').trim();
-      if (!clean) continue;
-      const key = clean.toLowerCase();
-      const prev = counts.get(key) || { label: clean, score: 0 };
-      prev.score += 10 + (t.plays || 0);
-      counts.set(key, prev);
+    for (const tr of publicTracks) {
+      const canonical = normalizeGenreCategory(tr.genre);
+      if (!canonical || canonical === 'Other') continue;
+      const prev = counts.get(canonical) || { label: canonical, score: 0 };
+      prev.score += 10 + (tr.plays || 0);
+      counts.set(canonical, prev);
     }
     return Array.from(counts.values())
       .sort((a, b) => b.score - a.score)
@@ -195,9 +192,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   const genreSpotlightTracks = useMemo(() => {
     if (!selectedGenre || selectedGenre === 'All') return [];
-    const target = selectedGenre.trim().toLowerCase();
+    const target = normalizeGenreCategory(selectedGenre);
     return publicTracks
-      .filter((t) => (t.genre || '').trim().toLowerCase() === target)
+      .filter((tr) => normalizeGenreCategory(tr.genre) === target)
       .sort((a, b) => (b.plays || 0) - (a.plays || 0))
       .slice(0, 10);
   }, [publicTracks, selectedGenre]);
@@ -216,7 +213,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
       ? [...publicTracks].sort(() => Math.random() - 0.5)
       : [...publicTracks].sort((a, b) => (b.plays || 0) + (b.likes || 0) * 2 - ((a.plays || 0) + (a.likes || 0) * 2));
     playTrackList(pool.slice(0, 20), 0);
-    showToast(shuffleAll ? 'Shuffling tracks' : 'Playing top mix');
+    showToast(
+      shuffleAll
+        ? t('shuffling_tracks', 'Shuffling tracks')
+        : t('playing_top_mix', 'Playing top mix')
+    );
   };
 
   // Real Continue Listening tracks from actual playHistory + active resumed track (deduped by trackId, sorted by last played)
@@ -386,11 +387,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
     const likedCount = currentUser.likedTrackIds?.length || 0;
     const followingCount = currentUser.followingArtistIds?.length || 0;
     const playedCount = playHistory.length;
-    if (likedCount > 0) parts.push(`${likedCount} liked`);
-    if (followingCount > 0) parts.push(`${followingCount} following`);
-    if (playedCount > 0) parts.push(`${playedCount} recently played`);
+    if (likedCount > 0) parts.push(t('liked_count_short', '{count} liked', { count: likedCount }));
+    if (followingCount > 0) parts.push(t('following_count_short', '{count} following', { count: followingCount }));
+    if (playedCount > 0) parts.push(t('recently_played_count_short', '{count} recently played', { count: playedCount }));
     return parts;
-  }, [currentUser, playHistory.length]);
+  }, [currentUser, playHistory.length, t]);
 
   // 1. Skeleton Loading State
   if (!isCatalogLoaded && tracks.length === 0) {
@@ -413,7 +414,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </div>
           <div className="space-y-1.5">
             <h2 className="text-lg font-extrabold font-heading text-[var(--text)]">
-              Could not load music
+              {t('could_not_load_music', 'Could not load music')}
             </h2>
             <p className="text-xs sm:text-sm text-[var(--text-muted)]">{catalogError}</p>
           </div>
@@ -423,7 +424,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             className="px-5 py-3 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm inline-flex items-center gap-2 cursor-pointer min-h-[48px]"
           >
             <RefreshCw className="w-4 h-4" />
-            <span>Try again</span>
+            <span>{t('try_again', 'Try again')}</span>
           </button>
         </div>
       </div>
@@ -436,10 +437,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
       <div className="space-y-8 pb-8">
         <div className="space-y-1">
           <h1 className="text-2xl sm:text-3xl font-extrabold font-heading text-[var(--text)]">
-            {getTimeGreeting(currentUser?.name)}
+            {getLocalizedGreeting(language, currentUser?.name)}
           </h1>
           <p className="text-xs sm:text-sm text-[var(--text-muted)]">
-            Music feed for {selectedCountry || 'Africa'}
+            {t('music_feed_for', 'Music feed for {country}', {
+              country: selectedCountry || 'Africa',
+            })}
           </p>
         </div>
 
@@ -449,10 +452,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </div>
           <div className="space-y-2">
             <h2 className="text-xl font-extrabold font-heading text-[var(--text)]">
-              No songs uploaded yet
+              {t('no_songs_yet', 'No songs uploaded yet')}
             </h2>
             <p className="text-xs sm:text-sm text-[var(--text-muted)] leading-relaxed">
-              Share the first track on LOWERVIBE and listeners can stream it right away.
+              {t(
+                'no_songs_yet_sub',
+                'Share the first track on LOWERVIBE and listeners can stream it right away.'
+              )}
             </p>
           </div>
           <button
@@ -461,7 +467,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             className="px-6 py-3 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm inline-flex items-center gap-2 hover:brightness-95 active:scale-95 transition cursor-pointer min-h-[48px]"
           >
             <Upload className="w-4 h-4" />
-            <span>Upload a song</span>
+            <span>{t('upload_a_song', 'Upload a song')}</span>
           </button>
         </div>
       </div>
@@ -475,10 +481,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <div className="space-y-1">
             <h1 className="text-2xl sm:text-3xl font-extrabold font-heading text-[var(--text)]">
-              {getTimeGreeting(currentUser?.name)}
+              {getLocalizedGreeting(language, currentUser?.name)}
             </h1>
             <p className="text-xs sm:text-sm text-[var(--text-muted)]">
-              Music feed for {selectedCountry || 'Africa'}
+              {t('music_feed_for', 'Music feed for {country}', {
+                country: selectedCountry || 'Africa',
+              })}
               {activityParts.length > 0 ? ` · ${activityParts.join(' · ')}` : ''}
             </p>
           </div>
@@ -487,18 +495,18 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <button
               type="button"
               onClick={() => handlePlayMix(false)}
-              className="px-5 py-3 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs sm:text-sm inline-flex items-center gap-2 hover:brightness-95 active:scale-95 transition cursor-pointer min-h-[48px]"
+              className="px-5 py-3 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs sm:text-sm inline-flex items-center gap-2 hover:brightness-95 active:scale-95 transition cursor-pointer min-h-[48px] whitespace-nowrap"
             >
               <Play className="w-4 h-4 fill-current" />
-              <span>Play mix</span>
+              <span>{t('play_mix', 'Play mix')}</span>
             </button>
             <button
               type="button"
               onClick={() => handlePlayMix(true)}
-              className="px-4 py-3 rounded-2xl bg-[var(--surface)] hover:bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] text-[var(--text)] font-semibold text-xs sm:text-sm inline-flex items-center gap-2 active:scale-95 transition cursor-pointer min-h-[48px]"
+              className="px-4 py-3 rounded-2xl bg-[var(--surface)] hover:bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] text-[var(--text)] font-semibold text-xs sm:text-sm inline-flex items-center gap-2 active:scale-95 transition cursor-pointer min-h-[48px] whitespace-nowrap"
             >
               <Shuffle className="w-4 h-4" />
-              <span>Shuffle</span>
+              <span>{t('shuffle', 'Shuffle')}</span>
             </button>
           </div>
         </div>
@@ -508,18 +516,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
             {['All', ...topGenres].map((genreName) => {
               const active = selectedGenre === genreName;
+              const displayLabel =
+                genreName === 'All'
+                  ? t('all', 'All')
+                  : translateGenreCategory(genreName, language);
               return (
                 <button
                   key={genreName}
                   type="button"
                   onClick={() => setSelectedGenre(genreName)}
-                  className={`px-4 py-2.5 rounded-2xl text-xs font-semibold shrink-0 transition active:scale-95 cursor-pointer min-h-[44px] ${
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-semibold shrink-0 transition active:scale-95 cursor-pointer min-h-[44px] whitespace-nowrap ${
                     active
                       ? 'bg-[var(--accent)] text-[var(--accent-contrast)] font-bold'
                       : 'bg-[var(--surface)] hover:bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)]'
                   }`}
                 >
-                  {genreName}
+                  {displayLabel}
                 </button>
               );
             })}
@@ -530,16 +542,21 @@ export const HomeView: React.FC<HomeViewProps> = ({
       {/* Instant Genre Spotlight when user picks a specific genre chip */}
       {selectedGenre !== 'All' && genreSpotlightTracks.length > 0 && (
         <HorizontalTrackShelf
-          title={`${selectedGenre} spotlight`}
-          subtitle={`Top ${selectedGenre} songs playing right now`}
+          title={t('spotlight_suffix', '{genre} spotlight', {
+            genre: translateGenreCategory(selectedGenre, language),
+          })}
+          subtitle={t('top_genre_playing', 'Top {genre} songs playing right now', {
+            genre: translateGenreCategory(selectedGenre, language),
+          })}
           items={genreSpotlightTracks}
           minItems={1}
           currentTrackId={currentTrack?.id}
           isPlaying={isPlaying}
           onPlayTrack={handleTrackPlay}
+          playAllLabel={t('play_all', 'Play all')}
           onPlayAll={(list) => {
             playTrackList(list, 0);
-            showToast(`Playing ${selectedGenre}`);
+            showToast(translateGenreCategory(selectedGenre, language));
           }}
           onSelectArtist={onSelectArtist}
         />
@@ -549,7 +566,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
       {continueListening.length > 0 && (
         <section className="space-y-2.5">
           <h2 className="text-sm sm:text-base font-extrabold font-heading text-[var(--text)]">
-            Resume song
+            {t('resume_song', 'Resume song')}
           </h2>
           {continueListening.slice(0, 1).map(({ track, listenedSec, durationSec }) => {
             const isCurrent = currentTrack?.id === track.id;
@@ -577,7 +594,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     </p>
                     <p className="text-[11px] text-[var(--text-muted)] truncate">
                       {track.artistName} ·{' '}
-                      <span className="font-mono tabular-nums">{formatTime(remainingSec)} left</span>
+                      <span className="font-mono tabular-nums">
+                        {t('time_left', '{time} left', { time: formatTime(remainingSec) })}
+                      </span>
                     </p>
                   </div>
                   <div
@@ -621,10 +640,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
         <section className="space-y-4">
           <div>
             <h2 className="text-lg sm:text-xl font-extrabold font-heading text-[var(--text)]">
-              Public playlists
+              {t('public_playlists', 'Public playlists')}
             </h2>
             <p className="text-xs text-[var(--text-muted)]">
-              Listener-made collections ready to stream
+              {t('public_playlists_sub', 'Listener-made collections ready to stream')}
             </p>
           </div>
 
@@ -645,7 +664,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   onClick={() => {
                     playTrackList(resolvedTracks, 0);
                     recordPlaylistPlay(playlist.id);
-                    showToast(`Playing ${playlist.name}`);
+                    showToast(playlist.name);
                   }}
                   className="group shrink-0 snap-start w-[184px] sm:w-[208px] p-3 rounded-[20px] bg-[var(--surface)] hover:bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] transition cursor-pointer flex flex-col justify-between gap-3"
                 >
@@ -670,8 +689,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         <ListMusic className="w-3 h-3 shrink-0" />
                         <span>
                           {resolvedTracks.length}{' '}
-                          {resolvedTracks.length === 1 ? 'song' : 'songs'} ·{' '}
-                          {playlist.creatorName || 'Listener'}
+                          {resolvedTracks.length === 1
+                            ? t('song_singular', 'song')
+                            : t('song_plural', 'songs')}{' '}
+                          · {playlist.creatorName || t('listener', 'Listener')}
                         </span>
                       </p>
                     </div>
@@ -679,7 +700,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
                   <div className="flex items-center justify-between pt-1 border-t border-[var(--border)]">
                     <span className="text-[11px] font-mono text-[var(--text-muted)] tabular-nums">
-                      {formatNumber(likeCount)} {likeCount === 1 ? 'like' : 'likes'}
+                      {formatNumber(likeCount)}{' '}
+                      {likeCount === 1
+                        ? t('like_singular', 'like')
+                        : t('like_plural', 'likes')}
                     </span>
                     <button
                       type="button"
@@ -687,12 +711,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         e.stopPropagation();
                         toggleLikePlaylist(playlist.id);
                       }}
-                      className={`p-2 -mr-1 rounded-xl transition cursor-pointer min-h-[40px] min-w-[40px] flex items-center justify-center ${
+                      className={`p-2 -mr-1 rounded-xl transition cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center ${
                         isLiked
                           ? 'text-rose-500'
                           : 'text-[var(--text-muted)] hover:text-[var(--text)]'
                       }`}
-                      aria-label={isLiked ? 'Unlike playlist' : 'Like playlist'}
+                      aria-label={isLiked ? t('unlike', 'Unlike') : t('like', 'Like')}
                     >
                       <Heart className={`w-4 h-4 ${isLiked ? 'fill-rose-500' : ''}`} />
                     </button>
@@ -706,16 +730,19 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
       {preferredGenreTracks.length > 0 && (
         <HorizontalTrackShelf
-          title="Picked for your genres"
-          subtitle={`Based on ${(currentUser?.preferredGenres || []).slice(0, 3).join(', ')}`}
+          title={t('picked_for_genres', 'Picked for your genres')}
+          subtitle={t('based_on_genres', 'Based on {genres}', {
+            genres: (currentUser?.preferredGenres || []).slice(0, 3).join(', '),
+          })}
           items={preferredGenreTracks}
           minItems={1}
           currentTrackId={currentTrack?.id}
           isPlaying={isPlaying}
           onPlayTrack={handleTrackPlay}
+          playAllLabel={t('play_all', 'Play all')}
           onPlayAll={(list) => {
             playTrackList(list, 0);
-            showToast('Playing your genre picks');
+            showToast(t('picked_for_genres', 'Picked for your genres'));
           }}
           onSelectArtist={onSelectArtist}
         />
@@ -723,15 +750,16 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
       {/* Personalized Shelves (automatically hidden when < 3 items) */}
       <HorizontalTrackShelf
-        title="Daily Mix"
-        subtitle="Built from genres you listen to"
+        title={t('daily_mix', 'Daily Mix')}
+        subtitle={t('daily_mix_sub', 'Built from genres you listen to')}
         items={dailyMixTracks}
         currentTrackId={currentTrack?.id}
         isPlaying={isPlaying}
         onPlayTrack={handleTrackPlay}
+        playAllLabel={t('play_all', 'Play all')}
         onPlayAll={(list) => {
           playTrackList(list, 0);
-          showToast('Playing Daily Mix');
+          showToast(t('daily_mix', 'Daily Mix'));
         }}
         onSelectArtist={onSelectArtist}
       />
@@ -741,10 +769,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
         <section className="space-y-4">
           <div>
             <h2 className="text-lg sm:text-xl font-extrabold font-heading text-[var(--text)]">
-              Artists to follow
+              {t('artists_to_follow', 'Artists to follow')}
             </h2>
             <p className="text-xs text-[var(--text-muted)]">
-              Independent creators releasing on LOWERVIBE
+              {t('artists_to_follow_sub', 'Independent creators releasing on LOWERVIBE')}
             </p>
           </div>
 
@@ -776,8 +804,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         )}
                       </div>
                       <p className="text-[11px] font-mono text-[var(--text-muted)] truncate">
-                        {formatNumber(artist.followersCount || 0)} followers · {songCount}{' '}
-                        {songCount === 1 ? 'song' : 'songs'}
+                        {formatNumber(artist.followersCount || 0)}{' '}
+                        {(artist.followersCount || 0) === 1
+                          ? t('follower_singular', 'follower')
+                          : t('follower_plural', 'followers')}{' '}
+                        · {songCount}{' '}
+                        {songCount === 1
+                          ? t('song_singular', 'song')
+                          : t('song_plural', 'songs')}
                       </p>
                     </div>
                   </div>
@@ -797,12 +831,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     {isFollowing ? (
                       <>
                         <Check className="w-3.5 h-3.5" />
-                        <span>Following</span>
+                        <span>{t('following', 'Following')}</span>
                       </>
                     ) : (
                       <>
                         <UserPlus className="w-3.5 h-3.5" />
-                        <span>Follow</span>
+                        <span>{t('follow', 'Follow')}</span>
                       </>
                     )}
                   </button>
@@ -815,36 +849,45 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
       {becauseYouPlayed.items.length >= 3 && (
         <HorizontalTrackShelf
-          title={`Because you played ${becauseYouPlayed.anchorTitle}`}
-          subtitle="Similar genre and sound"
+          title={t('because_you_played', 'Because you played {title}', {
+            title: becauseYouPlayed.anchorTitle,
+          })}
+          subtitle={t('similar_genre_sound', 'Similar genre and sound')}
           items={becauseYouPlayed.items}
           currentTrackId={currentTrack?.id}
           isPlaying={isPlaying}
           onPlayTrack={handleTrackPlay}
+          playAllLabel={t('play_all', 'Play all')}
           onPlayAll={(list) => playTrackList(list, 0)}
           onSelectArtist={onSelectArtist}
         />
       )}
 
       <HorizontalTrackShelf
-        title="From artists you follow"
-        subtitle="Latest songs from creators in your list"
+        title={t('from_followed_artists', 'From artists you follow')}
+        subtitle={t('latest_followed_sub', 'Latest songs from creators in your list')}
         items={followedArtistTracks}
         currentTrackId={currentTrack?.id}
         isPlaying={isPlaying}
         onPlayTrack={handleTrackPlay}
+        playAllLabel={t('play_all', 'Play all')}
         onPlayAll={(list) => playTrackList(list, 0)}
         onSelectArtist={onSelectArtist}
       />
 
       {selectedCountry && selectedCountry !== 'Global' && (
         <HorizontalTrackShelf
-          title={`Trending in ${selectedCountry}`}
-          subtitle={`Most played tracks from ${selectedCountry}`}
+          title={t('trending_in_country', 'Trending in {country}', {
+            country: selectedCountry,
+          })}
+          subtitle={t('most_played_country', 'Most played tracks from {country}', {
+            country: selectedCountry,
+          })}
           items={countryTrending}
           currentTrackId={currentTrack?.id}
           isPlaying={isPlaying}
           onPlayTrack={handleTrackPlay}
+          playAllLabel={t('play_all', 'Play all')}
           onPlayAll={(list) => playTrackList(list, 0)}
           onSelectArtist={onSelectArtist}
         />

@@ -16,6 +16,7 @@ import {
 import React, { useEffect, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
 import { db } from '../../services/firebase';
@@ -27,12 +28,15 @@ import {
   getTrackLikeCount,
   isTrackLikedByUser,
 } from '../../utils/formatters';
+import { translateGenreCategory } from '../../utils/genreCategories';
 import { applyTrackSeoMeta, resetDefaultSeoMeta } from '../../utils/seoMeta';
 import { SafeImage } from '../SafeImage';
 
 export const TrackPublicPageView: React.FC = () => {
   const { currentRoute, navigate } = useRouter();
   const trackId = currentRoute.params.id;
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
 
   const {
     tracks,
@@ -62,8 +66,8 @@ export const TrackPublicPageView: React.FC = () => {
   const [isResolvingTrack, setIsResolvingTrack] = useState(false);
 
   const contextTrack =
-    tracks.find((t) => t.id === trackId && !t.isDraft && !t.isDeranked) ||
-    tracks.find((t) => t.id === trackId);
+    tracks.find((tr) => tr.id === trackId && !tr.isDraft && !tr.isDeranked) ||
+    tracks.find((tr) => tr.id === trackId);
   const track = contextTrack || (fetchedTrack?.id === trackId ? fetchedTrack : undefined);
   const artistForTrack = track ? artists.find((a) => a.id === track.artistId) : undefined;
 
@@ -121,7 +125,9 @@ export const TrackPublicPageView: React.FC = () => {
         <div className="w-12 h-12 rounded-2xl bg-[var(--surface)] border border-[var(--border)] text-[var(--accent-text)] flex items-center justify-center mx-auto">
           <Loader2 className="w-6 h-6 animate-spin" />
         </div>
-        <p className="text-xs font-semibold text-[var(--text-muted)]">Loading song...</p>
+        <p className="text-xs font-semibold text-[var(--text-muted)]">
+          {isNy ? 'Ikutsegula nyimbo...' : 'Loading song...'}
+        </p>
       </div>
     );
   }
@@ -133,9 +139,11 @@ export const TrackPublicPageView: React.FC = () => {
           <Music className="w-7 h-7" />
         </div>
         <div className="space-y-1.5">
-          <h1 className="text-2xl font-extrabold font-heading text-[var(--text)]">Song not found</h1>
+          <h1 className="text-2xl font-extrabold font-heading text-[var(--text)]">
+            {isNy ? 'Nyimbo sinapezeke' : 'Song not found'}
+          </h1>
           <p className="text-xs sm:text-sm text-[var(--text-muted)]">
-            This song may have been removed or moved.
+            {isNy ? 'Nyimboyi mwina yachotsedwa kapena yasunthidwa.' : 'This song may have been removed or moved.'}
           </p>
         </div>
 
@@ -144,7 +152,7 @@ export const TrackPublicPageView: React.FC = () => {
           onClick={() => navigate('/')}
           className="px-6 py-3 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs cursor-pointer"
         >
-          Back to Home
+          {isNy ? 'Bwererani Kunyumba' : 'Back to Home'}
         </button>
       </div>
     );
@@ -197,14 +205,14 @@ export const TrackPublicPageView: React.FC = () => {
 
     addCommentToTrack(track.id, {
       userId: currentUser?.id || 'guest',
-      userName: currentUser?.name || 'Listener',
+      userName: currentUser?.name || (isNy ? 'Womvera' : 'Listener'),
       userAvatar: currentUser?.avatar || DEFAULT_AVATAR_SVG,
       timestampSeconds: isCurrent ? Math.floor(currentTime) : 0,
       content: commentText.trim(),
     });
 
     setCommentText('');
-    showToast('Comment posted');
+    showToast(isNy ? 'Ndemanga yatumizidwa' : 'Comment posted');
   };
 
   return (
@@ -215,21 +223,25 @@ export const TrackPublicPageView: React.FC = () => {
         className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text)] transition cursor-pointer"
       >
         <ArrowLeft className="w-4 h-4" />
-        <span>Back</span>
+        <span>{t('back', 'Back')}</span>
       </button>
 
       {audioError && (
         <div className="p-4 rounded-2xl bg-[var(--danger)]/10 border border-[var(--danger)]/30 text-[var(--text)] flex items-center justify-between gap-3">
           <div className="text-xs">
-            <span className="font-bold text-[var(--danger)]">Playback error</span>
-            <p className="text-[var(--text-muted)] mt-0.5">Could not play audio. Please try again.</p>
+            <span className="font-bold text-[var(--danger)]">
+              {isNy ? 'Vuto posewera' : 'Playback error'}
+            </span>
+            <p className="text-[var(--text-muted)] mt-0.5">
+              {isNy ? 'Nyimbo ikanika kusewera. Chonde yesaninso.' : 'Could not play audio. Please try again.'}
+            </p>
           </div>
           <button
             type="button"
             onClick={handlePlayToggle}
             className="px-4 py-2 rounded-xl bg-[var(--danger)] text-white font-bold text-xs cursor-pointer shrink-0"
           >
-            Try again
+            {t('retry', 'Try again')}
           </button>
         </div>
       )}
@@ -247,7 +259,9 @@ export const TrackPublicPageView: React.FC = () => {
         <div className="space-y-4 flex-1 w-full text-center md:text-left">
           <div className="space-y-1">
             <div className="flex items-center justify-center md:justify-start gap-2 flex-wrap">
-              <span className="text-xs font-semibold text-[var(--accent-text)]">{track.genre}</span>
+              <span className="text-xs font-semibold text-[var(--accent-text)]">
+                {translateGenreCategory(track.genre, language)}
+              </span>
               {track.mood && (
                 <span className="text-xs text-[var(--text-muted)]">· {track.mood}</span>
               )}
@@ -315,21 +329,29 @@ export const TrackPublicPageView: React.FC = () => {
               className="px-6 py-3 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs flex items-center gap-2 hover:brightness-95 active:scale-95 transition cursor-pointer min-h-[48px]"
             >
               {isPlayingThis ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
-              <span>{isPlayingThis ? 'Pause' : 'Play'}</span>
+              <span>{isPlayingThis ? t('pause', 'Pause') : t('play', 'Play')}</span>
             </button>
 
             <button
               type="button"
               onClick={() => {
                 toggleSaveTrack(track.id);
-                showToast(isSaved ? `Removed "${track.title}" from Library` : `Saved "${track.title}" to Library`);
+                showToast(
+                  isSaved
+                    ? isNy
+                      ? `"${track.title}" yachotsedwa mu Nyumba`
+                      : `Removed "${track.title}" from Library`
+                    : isNy
+                    ? `"${track.title}" yasungidwa mu Nyumba`
+                    : `Saved "${track.title}" to Library`
+                );
               }}
               className={`p-3 rounded-2xl border transition cursor-pointer min-h-[48px] min-w-[48px] flex items-center justify-center ${
                 isSaved
                   ? 'bg-[var(--accent)]/15 border-[var(--accent)] text-[var(--accent-text)]'
                   : 'bg-[var(--surface-2)] border-[var(--border)] text-[var(--text)]'
               }`}
-              title="Save to Library"
+              title={isNy ? 'Sungani mu Nyumba' : 'Save to Library'}
             >
               <FolderHeart className={`w-4 h-4 ${isSaved ? 'fill-current' : ''}`} />
             </button>
@@ -338,7 +360,15 @@ export const TrackPublicPageView: React.FC = () => {
               type="button"
               onClick={() => {
                 toggleLikeTrack(track.id);
-                showToast(isLiked ? 'Removed from Liked songs' : 'Added to Liked songs');
+                showToast(
+                  isLiked
+                    ? isNy
+                      ? 'Yachotsedwa pa zokonda'
+                      : 'Removed from Liked songs'
+                    : isNy
+                    ? 'Yaonjezedwa pa zokonda'
+                    : 'Added to Liked songs'
+                );
               }}
               className={`px-3.5 py-3 rounded-2xl border transition cursor-pointer min-h-[48px] flex items-center justify-center gap-1.5 ${
                 isLiked
@@ -354,10 +384,10 @@ export const TrackPublicPageView: React.FC = () => {
               type="button"
               onClick={() => {
                 downloadTrack(track);
-                showToast(`Saving "${track.title}" offline`);
+                showToast(isNy ? `Ikusunga "${track.title}" popanda intaneti` : `Saving "${track.title}" offline`);
               }}
               className="p-3 rounded-2xl bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)] transition cursor-pointer min-h-[48px] min-w-[48px] flex items-center justify-center"
-              title="Download offline"
+              title={isNy ? 'Tsitsani popanda intaneti' : 'Download offline'}
             >
               <Download className="w-4 h-4" />
             </button>
@@ -366,7 +396,7 @@ export const TrackPublicPageView: React.FC = () => {
               type="button"
               onClick={handleShare}
               className="p-3 rounded-2xl bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)] transition cursor-pointer min-h-[48px] min-w-[48px] flex items-center justify-center"
-              title="Share"
+              title={t('share', 'Share')}
             >
               <Share2 className="w-4 h-4" />
             </button>
@@ -379,12 +409,12 @@ export const TrackPublicPageView: React.FC = () => {
               {canEditMetadata ? (
                 <>
                   <Edit3 className="w-3.5 h-3.5 text-[var(--accent-text)]" />
-                  <span>Edit &amp; Details</span>
+                  <span>{isNy ? 'Sinthani & Tsatanetsatane' : 'Edit & Details'}</span>
                 </>
               ) : (
                 <>
                   <Moon className="w-3.5 h-3.5 text-[var(--violet)]" />
-                  <span>Details &amp; Timer</span>
+                  <span>{isNy ? 'Tsatanetsatane & Nthawi' : 'Details & Timer'}</span>
                 </>
               )}
             </button>
@@ -394,23 +424,29 @@ export const TrackPublicPageView: React.FC = () => {
 
       {/* Song Info */}
       <div className="p-6 rounded-[24px] bg-[var(--surface)] border border-[var(--border)] space-y-3">
-        <h3 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Song info</h3>
+        <h3 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">
+          {isNy ? 'Zokhudza nyimbo' : 'Song info'}
+        </h3>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
           <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
-            <span className="text-[11px] text-[var(--text-muted)] block">Duration</span>
+            <span className="text-[11px] text-[var(--text-muted)] block">{t('duration', 'Duration')}</span>
             <span className="font-mono font-bold text-[var(--text)]">{formatTime(activeDuration)}</span>
           </div>
           <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
-            <span className="text-[11px] text-[var(--text-muted)] block">Plays</span>
+            <span className="text-[11px] text-[var(--text-muted)] block">{t('plays', 'Plays')}</span>
             <span className="font-mono font-bold text-[var(--text)]">{track.plays.toLocaleString()}</span>
           </div>
           <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
-            <span className="text-[11px] text-[var(--text-muted)] block">Release date</span>
+            <span className="text-[11px] text-[var(--text-muted)] block">
+              {isNy ? 'Tsiku lotuluka' : 'Release date'}
+            </span>
             <span className="font-mono font-bold text-[var(--text)]">{track.releaseDate || 'N/A'}</span>
           </div>
           <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
             <span className="text-[11px] text-[var(--text-muted)] block">ISRC</span>
-            <span className="font-mono font-bold text-[var(--text)]">{track.isrcCode || 'Not set'}</span>
+            <span className="font-mono font-bold text-[var(--text)]">
+              {track.isrcCode || (isNy ? 'Silinayikidwe' : 'Not set')}
+            </span>
           </div>
         </div>
       </div>
@@ -418,13 +454,13 @@ export const TrackPublicPageView: React.FC = () => {
       {/* Comments */}
       <div className="p-6 rounded-[24px] bg-[var(--surface)] border border-[var(--border)] space-y-4">
         <h3 className="text-base font-bold font-heading text-[var(--text)]">
-          Comments ({(track.comments || []).length})
+          {t('comments', 'Comments')} ({(track.comments || []).length})
         </h3>
 
         <div className="space-y-3">
           {(track.comments || []).length === 0 ? (
             <div className="py-8 text-center text-xs text-[var(--text-muted)]">
-              No comments yet. Share what you think below.
+              {isNy ? 'Palibe ndemanga pano. Lembani maganizo anu pansipa.' : 'No comments yet. Share what you think below.'}
             </div>
           ) : (
             track.comments.map((c) => (
@@ -458,7 +494,7 @@ export const TrackPublicPageView: React.FC = () => {
           <input
             type="text"
             required
-            placeholder="Write a comment..."
+            placeholder={t('write_comment', 'Write a comment...')}
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
             className="flex-1 px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border-strong)] text-xs text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-text)]"
@@ -468,7 +504,7 @@ export const TrackPublicPageView: React.FC = () => {
             className="px-5 py-2.5 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs cursor-pointer flex items-center gap-1.5"
           >
             <Send className="w-3.5 h-3.5" />
-            <span>Post</span>
+            <span>{isNy ? 'Tumizani' : 'Post'}</span>
           </button>
         </form>
       </div>

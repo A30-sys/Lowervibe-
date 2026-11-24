@@ -2,9 +2,11 @@ import { ArrowRight, Calendar, Check, MapPin, Music, UserPlus, Users, X } from '
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAudio } from '../context/AudioContext';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { useToast } from '../context/ToastContext';
 import { detectDefaultCountry, REGION_LIST } from '../data/regions';
 import { DEFAULT_AVATAR_SVG } from '../utils/artworkFallback';
+import { translateGenreCategory } from '../utils/genreCategories';
 import { RegionSelect } from './common/RegionSelect';
 
 const STARTER_GENRES = [
@@ -24,13 +26,6 @@ const STARTER_GENRES = [
 
 type GenderOption = 'male' | 'female' | 'non-binary' | 'prefer_not_to_say';
 
-const GENDER_OPTIONS: Array<{ value: GenderOption; label: string }> = [
-  { value: 'male', label: 'Male' },
-  { value: 'female', label: 'Female' },
-  { value: 'non-binary', label: 'Non-binary' },
-  { value: 'prefer_not_to_say', label: 'Prefer not to say' },
-];
-
 interface OnboardingModalProps {
   isOpen: boolean;
   onComplete: () => void;
@@ -38,16 +33,25 @@ interface OnboardingModalProps {
 
 const STEP_ORDER: Array<'about' | 'genres' | 'artists'> = ['about', 'genres', 'artists'];
 
-const STEP_META: Array<{ id: 'about' | 'genres' | 'artists'; label: string }> = [
-  { id: 'about', label: 'About you' },
-  { id: 'genres', label: 'Genres' },
-  { id: 'artists', label: 'Artists' },
-];
-
 export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComplete }) => {
   const { currentUser, updateCurrentUser, toggleFollowArtist } = useAuth();
   const { artists, tracks, setSelectedCountry } = useAudio();
+  const { language, t } = useLanguage();
+  const isNy = language === 'ny';
   const { showToast } = useToast();
+
+  const GENDER_OPTIONS: Array<{ value: GenderOption; label: string }> = [
+    { value: 'male', label: isNy ? 'Mwamuna' : 'Male' },
+    { value: 'female', label: isNy ? 'Mkazi' : 'Female' },
+    { value: 'non-binary', label: isNy ? 'Zina' : 'Non-binary' },
+    { value: 'prefer_not_to_say', label: isNy ? 'Sindikufuna kunena' : 'Prefer not to say' },
+  ];
+
+  const STEP_META: Array<{ id: 'about' | 'genres' | 'artists'; label: string }> = [
+    { id: 'about', label: isNy ? 'Zokhudza inu' : 'About you' },
+    { id: 'genres', label: isNy ? 'Mitundu' : 'Genres' },
+    { id: 'artists', label: isNy ? 'Oimba' : 'Artists' },
+  ];
 
   const [step, setStep] = useState<'about' | 'genres' | 'artists'>('about');
   const [slideDirection, setSlideDirection] = useState<'forward' | 'back'>('forward');
@@ -136,7 +140,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
       }
     } catch {}
     if (!skipped) {
-      showToast('Your home feed is ready');
+      showToast(isNy ? 'Tsamba lanu lakonzeka' : 'Your home feed is ready');
     }
     onComplete();
   };
@@ -146,7 +150,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Personalize your LOWERVIBE experience"
+        aria-label={isNy ? 'Konzani LOWERVIBE yanu' : 'Personalize your LOWERVIBE experience'}
         className="w-full max-w-[490px] rounded-3xl bg-[var(--surface)] border border-[var(--border-strong)] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] text-[var(--text)]"
         onClick={(e) => e.stopPropagation()}
       >
@@ -155,7 +159,9 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-xs font-semibold text-[var(--text-muted)]">
               <span className="text-[var(--text)] font-bold">
-                Step {currentStepIdx + 1} of {STEP_ORDER.length}
+                {isNy
+                  ? `Gawo ${currentStepIdx + 1} pa ${STEP_ORDER.length}`
+                  : `Step ${currentStepIdx + 1} of ${STEP_ORDER.length}`}
               </span>
               <span aria-hidden="true">·</span>
               <span className="font-mono tabular-nums text-[var(--accent-text)]">{progressPct}%</span>
@@ -165,7 +171,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
               onClick={() => finishOnboarding(true)}
               className="text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text)] flex items-center gap-1 cursor-pointer min-h-[36px]"
             >
-              <span>Skip for now</span>
+              <span>{isNy ? 'Dumphani kaye' : 'Skip for now'}</span>
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -230,14 +236,20 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
                   <Users className="w-5 h-5" />
                 </div>
                 <div className="space-y-1">
-                  <h2 className="text-xl font-extrabold text-[var(--text)]">Tell us about you</h2>
+                  <h2 className="text-xl font-extrabold text-[var(--text)]">
+                    {isNy ? 'Tiuzeni za inu' : 'Tell us about you'}
+                  </h2>
                   <p className="text-sm text-[var(--text-muted)]">
-                    Select your gender, age, and country so we can tailor LOWERVIBE for you.
+                    {isNy
+                      ? 'Sankhani ubale wanu, zaka, ndi dziko kuti tikonze bwino LOWERVIBE yanu.'
+                      : 'Select your gender, age, and country so we can tailor LOWERVIBE for you.'}
                   </p>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs font-semibold text-[var(--text-muted)]">Gender</label>
+                  <label className="text-xs font-semibold text-[var(--text-muted)]">
+                    {isNy ? 'Ubale (Gender)' : 'Gender'}
+                  </label>
                   <div className="grid grid-cols-2 gap-2">
                     {GENDER_OPTIONS.map((opt) => {
                       const active = gender === opt.value;
@@ -269,7 +281,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
                   <div className="flex items-center justify-between">
                     <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)]">
                       <Calendar className="w-3.5 h-3.5 text-[var(--accent-text)]" />
-                      <span>Age</span>
+                      <span>{isNy ? 'Zaka' : 'Age'}</span>
                     </label>
                     {age.trim().length > 0 && (
                       <span
@@ -277,7 +289,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
                           isAgeValid ? 'text-[var(--accent-text)]' : 'text-[var(--danger)]'
                         }`}
                       >
-                        {isAgeValid ? 'Looks good' : 'Must be 13–120'}
+                        {isAgeValid ? (isNy ? 'Zabwino' : 'Looks good') : (isNy ? 'Ziyenera kukhala 13–120' : 'Must be 13–120')}
                       </span>
                     )}
                   </div>
@@ -288,7 +300,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
                     inputMode="numeric"
                     value={age}
                     onChange={(e) => setAge(e.target.value)}
-                    placeholder="e.g. 22 (13+)"
+                    placeholder={isNy ? 'mwachitsanzo 22 (13+)' : 'e.g. 22 (13+)'}
                     className="w-full h-12 px-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] transition-colors focus:outline-none focus:border-[var(--accent)]"
                   />
                 </div>
@@ -296,7 +308,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
                 <div className="space-y-1.5">
                   <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)]">
                     <MapPin className="w-3.5 h-3.5 text-[var(--accent-text)]" />
-                    <span>Country</span>
+                    <span>{isNy ? 'Dziko' : 'Country'}</span>
                   </label>
                   <RegionSelect
                     value={country}
@@ -333,13 +345,17 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
                 </div>
                 <div className="space-y-1">
                   <div className="flex items-center justify-between gap-2">
-                    <h2 className="text-xl font-extrabold text-[var(--text)]">Pick your favourite genres</h2>
+                    <h2 className="text-xl font-extrabold text-[var(--text)]">
+                      {isNy ? 'Sankhani mitundu yomwe mumakonda' : 'Pick your favourite genres'}
+                    </h2>
                     <span className="text-xs font-mono tabular-nums text-[var(--accent-text)]">
-                      {selectedGenres.length} picked
+                      {isNy ? `${selectedGenres.length} zasankhidwa` : `${selectedGenres.length} picked`}
                     </span>
                   </div>
                   <p className="text-sm text-[var(--text-muted)]">
-                    Choose at least 1 sound (3+ recommended) so we can tune your Home feed.
+                    {isNy
+                      ? 'Sankhani mtundu umodzi kapena kuposerapo kuti tikuwonetseni nyimbo zanu.'
+                      : 'Choose at least 1 sound (3+ recommended) so we can tune your Home feed.'}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -357,7 +373,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
                         }`}
                       >
                         {active && <Check className="w-3.5 h-3.5 stroke-[3]" />}
-                        <span>{g}</span>
+                        <span>{translateGenreCategory(g, language)}</span>
                       </button>
                     );
                   })}
@@ -372,18 +388,24 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
                 </div>
                 <div className="space-y-1">
                   <div className="flex items-center justify-between gap-2">
-                    <h2 className="text-xl font-extrabold text-[var(--text)]">Follow your favourite artists</h2>
+                    <h2 className="text-xl font-extrabold text-[var(--text)]">
+                      {isNy ? 'Tsatirani oimba omwe mumakonda' : 'Follow your favourite artists'}
+                    </h2>
                     <span className="text-xs font-mono tabular-nums text-[var(--accent-text)]">
-                      {followedIds.length} following
+                      {isNy ? `Mukutsatira ${followedIds.length}` : `${followedIds.length} following`}
                     </span>
                   </div>
                   <p className="text-sm text-[var(--text-muted)]">
-                    Pick creators to start your setup and get their new drops in your feed.
+                    {isNy
+                      ? 'Sankhani oimba kuti mudzilandira zidziwitso nyimbo zatsopano zikatuluka.'
+                      : 'Pick creators to start your setup and get their new drops in your feed.'}
                   </p>
                 </div>
                 {artistSuggestions.length === 0 ? (
                   <div className="p-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text-muted)]">
-                    No artists are published yet. You can follow artists anytime as tracks go live.
+                    {isNy
+                      ? 'Palibe oimba omwe atulutsa nyimbo pano. Mutha kuwatsatira nthawi ina.'
+                      : 'No artists are published yet. You can follow artists anytime as tracks go live.'}
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -439,7 +461,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
               onClick={() => goToStep(step === 'artists' ? 'genres' : 'about')}
               className="px-4 h-11 rounded-xl border border-[var(--border)] text-sm font-semibold text-[var(--text)] hover:bg-[var(--surface-2)] active:scale-95 transition cursor-pointer"
             >
-              Back
+              {t('back', 'Back')}
             </button>
           ) : (
             <div />
@@ -450,18 +472,18 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
               type="button"
               onClick={() => {
                 if (!gender) {
-                  showToast('Please select your gender option');
+                  showToast(isNy ? 'Sankhani ubale wanu' : 'Please select your gender option');
                   return;
                 }
                 if (!isAgeValid) {
-                  showToast('Please enter a valid age (minimum 13)');
+                  showToast(isNy ? 'Lowetsani zaka zolondola (13+)' : 'Please enter a valid age (minimum 13)');
                   return;
                 }
                 goToStep('genres');
               }}
               className="px-6 h-11 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center gap-2 hover:brightness-95 active:scale-95 transition cursor-pointer"
             >
-              <span>Next</span>
+              <span>{t('next', 'Next')}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           )}
@@ -471,14 +493,18 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
               type="button"
               onClick={() => {
                 if (selectedGenres.length < 1) {
-                  showToast('Pick at least 1 genre or tap Skip');
+                  showToast(isNy ? 'Sankhani mtundu umodzi kapena dumphani' : 'Pick at least 1 genre or tap Skip');
                   return;
                 }
                 goToStep('artists');
               }}
               className="px-6 h-11 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center gap-2 hover:brightness-95 active:scale-95 transition cursor-pointer"
             >
-              <span>Next ({selectedGenres.length} picked)</span>
+              <span>
+                {isNy
+                  ? `Pitilizani (${selectedGenres.length} zasankhidwa)`
+                  : `Next (${selectedGenres.length} picked)`}
+              </span>
               <ArrowRight className="w-4 h-4" />
             </button>
           )}
@@ -489,7 +515,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onComp
               onClick={() => finishOnboarding(false)}
               className="px-6 h-11 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm flex items-center gap-2 hover:brightness-95 active:scale-95 transition cursor-pointer"
             >
-              <span>Start listening &amp; Enter</span>
+              <span>{isNy ? 'Yambani kumvera & Lowani' : 'Start listening & Enter'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           )}

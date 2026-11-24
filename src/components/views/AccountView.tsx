@@ -82,56 +82,110 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-const HELP_TOPICS = [
-  {
-    q: 'How do I upload my music to LOWERVIBE?',
-    a: 'Tap "Become an artist" in Creator Tools (or open Studio if you are already an artist), pick an audio file (MP3, WAV, FLAC, or M4A) and a square cover image (at least 1400×1400 px), then publish.',
-  },
-  {
-    q: 'Why does cover art need to be square and at least 1400×1400?',
-    a: 'Clean square high-resolution artwork prevents blurry thumbnails across phones, TVs, and share cards, and avoids cut-off text or third-party app banners.',
-  },
-  {
-    q: 'How do plays and likes count?',
-    a: 'Every play counts only after 30+ seconds of real listening and is deduplicated per listener every 30 minutes. Likes are 1 per signed-in listener.',
-  },
-  {
-    q: 'When can artists earn money and withdraw?',
-    a: 'Monetization unlocks only after you meet the catalog, plays, and follower requirements in Studio → Monetization and an admin approves your request. Self-plays never earn revenue.',
-  },
-  {
-    q: 'What payout methods are supported in Malawi?',
-    a: 'Approved artists can add Airtel Money (+265 99/98), TNM Mpamba (+265 88/89), or USDT (TRC-20 / BEP-20). Newly added methods have a 24-hour security hold.',
-  },
-  {
-    q: 'Why is the minimum withdrawal 20,000 MWK?',
-    a: 'Mobile money and transfer fees make smaller payouts costly. Keeping the minimum at 20,000 MWK protects artist net earnings.',
-  },
-  {
-    q: 'Can I listen offline without mobile bundles?',
-    a: 'Yes. Tap Download on any downloadable track to save it in your device storage. You can manage or clear downloaded files anytime under Data & Storage.',
-  },
-  {
-    q: 'How often can I change my @username?',
-    a: 'You can update your @username once every 30 days to keep artist links and mentions stable.',
-  },
-  {
-    q: 'What happens when I turn on Data Saver?',
-    a: 'Data Saver switches streaming to lower-bandwidth bitrate (~0.6 MB/min) to help stretch Airtel or TNM bundles.',
-  },
-  {
-    q: 'How do I verify my email or link Google?',
-    a: 'Check your inbox for our verification link (remember Spam/Promotions), or link Google under Account → Linked sign-in methods.',
-  },
-  {
-    q: 'How do I report stolen music or copyright infringement?',
-    a: 'Open the three-dot menu on any track or artist and tap Report, or review our Copyright Policy at /copyright.',
-  },
-  {
-    q: 'Can I export or delete my personal data?',
-    a: 'Yes. Go to Privacy & Safety → Download my data for a JSON export, or delete your account anytime under Account → Danger zone.',
-  },
-];
+function getHelpTopics(isNy: boolean) {
+  if (isNy) {
+    return [
+      {
+        q: 'Ndingakweze bwanji nyimbo yanga pa LOWERVIBE?',
+        a: 'Dinani "Lembani ngati woimba" mu Zida za Woimba (kapena tsegulani Situdiyo ngati ndinu kale woimba), sankhani nyimbo yanu (MP3, WAV, FLAC, kapena M4A) ndi chithunzi chachikulu cha sikweya (osachepera 1400×1400 px), kenako kwezani.',
+      },
+      {
+        q: 'Chifukwa chiyani chithunzi cha nyimbo chikufunika kukhala sikweya ndi 1400×1400?',
+        a: 'Chithunzi choyera ndi chakulu chimaletsa kusafooka pa mafoni ndi ma TV ndipo chimaonekera bwino mukagawana ulalo wa nyimbo.',
+      },
+      {
+        q: 'Kodi kuwerenga nyimbo ndi zokonda zimaikidwa bwanji?',
+        a: 'Nyimbo imawerengedwa pambuyo pomvera masekondi 30+ ndipo imayikidwa kamodzi pa mphindi 30 kwa womvera aliyense. Kukonda ndi kamodzi pa akaunti iliyonse.',
+      },
+      {
+        q: 'Kodi oimba amayamba liti kupeza ndalama ndi kuzitenga?',
+        a: 'Malipiro amatseguka mukakwaniritsa zofunikira za nyimbo, kuwerengedwa ndi otsatira mu Situdiyo → Malipiro ndipo oyang\'anira atavomereza. Kudziliza nokha sikulipiritsa.',
+      },
+      {
+        q: 'Ndi njira ziti zolandirira ndalama zomwe zilipo ku Malawi?',
+        a: 'Oimba ovomerezedwa angawonjezere Airtel Money (+265 99/98), TNM Mpamba (+265 88/89), kapena USDT (TRC-20 / BEP-20). Njira zatsopano zimadikira maola 24 pachitetezo.',
+      },
+      {
+        q: 'Chifukwa chiyani ndalama zochepa zotengera ndi 20,000 MWK?',
+        a: 'Ndondomeko za m\'manja zimakhala ndi ndalama zotumizira. Kusunga malire a 20,000 MWK kumateteza phindu la woimba.',
+      },
+      {
+        q: 'Kodi ndingamvere nyimbo popanda ma bando a intaneti?',
+        a: 'Inde. Dinani Tsitsani pa nyimbo iliyonse kuti musunge pa chipangizo chanu. Mutha kuyang\'anira kapena kufufuta mafayilo nthawi iliyonse mu Deta & Malo Osungira.',
+      },
+      {
+        q: 'Ndingasinthe @dzina langa kangati?',
+        a: 'Mutha kusintha @dzina lanu kamodzi masiku 30 aliwonse kuti maulalo a oimba asamasokonezeke.',
+      },
+      {
+        q: 'Chimachitika ndi chiyani ndikatsegula Kusunga Deta?',
+        a: 'Kusunga Deta kumachepetsa liwiro la phokoso (~0.6 MB/mphindi) kuti ma bando anu a Airtel kapena TNM akhale nthawi yaitali.',
+      },
+      {
+        q: 'Ndingatsimikizire bwanji imelo yanga kapena kulumikiza Google?',
+        a: 'Yang\'anani m\'bokosi lanu la imelo ulalo wotsimikizira (onani ndi ku Spam/Promotions), kapena lumikizani Google mu Akaunti → Njira zolowera.',
+      },
+      {
+        q: 'Ndinganene bwanji za nyimbo zakuba kapena kuphwanya ufulu?',
+        a: 'Dinani madontho atatu pa nyimbo kapena woimba aliyense ndikudina Nena, kapena werengani malamulo athu pa /copyright.',
+      },
+      {
+        q: 'Kodi ndingatulutse kapena kufufuta deta yanga?',
+        a: 'Inde. Pitani ku Chinsinsi & Chitetezo → Tsitsani deta yanga (JSON), kapena fufutani akaunti yanu nthawi iliyonse mu Akaunti.',
+      },
+    ];
+  }
+  return [
+    {
+      q: 'How do I upload my music to LOWERVIBE?',
+      a: 'Tap "Become an artist" in Creator Tools (or open Studio if you are already an artist), pick an audio file (MP3, WAV, FLAC, or M4A) and a square cover image (at least 1400×1400 px), then publish.',
+    },
+    {
+      q: 'Why does cover art need to be square and at least 1400×1400?',
+      a: 'Clean square high-resolution artwork prevents blurry thumbnails across phones, TVs, and share cards, and avoids cut-off text or third-party app banners.',
+    },
+    {
+      q: 'How do plays and likes count?',
+      a: 'Every play counts only after 30+ seconds of real listening and is deduplicated per listener every 30 minutes. Likes are 1 per signed-in listener.',
+    },
+    {
+      q: 'When can artists earn money and withdraw?',
+      a: 'Monetization unlocks only after you meet the catalog, plays, and follower requirements in Studio → Monetization and an admin approves your request. Self-plays never earn revenue.',
+    },
+    {
+      q: 'What payout methods are supported in Malawi?',
+      a: 'Approved artists can add Airtel Money (+265 99/98), TNM Mpamba (+265 88/89), or USDT (TRC-20 / BEP-20). Newly added methods have a 24-hour security hold.',
+    },
+    {
+      q: 'Why is the minimum withdrawal 20,000 MWK?',
+      a: 'Mobile money and transfer fees make smaller payouts costly. Keeping the minimum at 20,000 MWK protects artist net earnings.',
+    },
+    {
+      q: 'Can I listen offline without mobile bundles?',
+      a: 'Yes. Tap Download on any downloadable track to save it in your device storage. You can manage or clear downloaded files anytime under Data & Storage.',
+    },
+    {
+      q: 'How often can I change my @username?',
+      a: 'You can update your @username once every 30 days to keep artist links and mentions stable.',
+    },
+    {
+      q: 'What happens when I turn on Data Saver?',
+      a: 'Data Saver switches streaming to lower-bandwidth bitrate (~0.6 MB/min) to help stretch Airtel or TNM bundles.',
+    },
+    {
+      q: 'How do I verify my email or link Google?',
+      a: 'Check your inbox for our verification link (remember Spam/Promotions), or link Google under Account → Linked sign-in methods.',
+    },
+    {
+      q: 'How do I report stolen music or copyright infringement?',
+      a: 'Open the three-dot menu on any track or artist and tap Report, or review our Copyright Policy at /copyright.',
+    },
+    {
+      q: 'Can I export or delete my personal data?',
+      a: 'Yes. Go to Privacy & Safety → Download my data for a JSON export, or delete your account anytime under Account → Danger zone.',
+    },
+  ];
+}
 
 export const AccountView: React.FC = () => {
   const {
@@ -174,7 +228,8 @@ export const AccountView: React.FC = () => {
 
   const { navigate } = useRouter();
   const { themeMode, setThemeMode } = useTheme();
-  const { setLanguage } = useLanguage();
+  const { language, setLanguage, t } = useLanguage();
+  const isNy = language === 'ny';
 
   const [toast, setToast] = useState<{ text: string; type: 'ok' | 'err' } | null>(null);
   const showNotice = (text: string, type: 'ok' | 'err' = 'ok') => {
@@ -289,13 +344,15 @@ export const AccountView: React.FC = () => {
   const followingCount = currentUser?.followingArtistIds?.length || 0;
   const followersCount = linkedArtist?.followersCount || 0;
 
+  const helpTopics = useMemo(() => getHelpTopics(isNy), [isNy]);
+
   const filteredHelpTopics = useMemo(() => {
     const q = helpQuery.trim().toLowerCase();
-    if (!q) return HELP_TOPICS;
-    return HELP_TOPICS.filter(
+    if (!q) return helpTopics;
+    return helpTopics.filter(
       (item) => item.q.toLowerCase().includes(q) || item.a.toLowerCase().includes(q)
     );
-  }, [helpQuery]);
+  }, [helpQuery, helpTopics]);
 
   // Handlers
   const handleAvatarUpload = async (file: File) => {
@@ -321,17 +378,23 @@ export const AccountView: React.FC = () => {
       if (!saveRes.success) {
         await deleteUploadedStoragePaths([uploaded.storagePath]).catch(() => {});
         setOptimisticAvatar(null);
-        showNotice(saveRes.error || 'Could not save new profile photo.', 'err');
+        showNotice(
+          saveRes.error || (isNy ? 'Sitinathe kusunga chithunzi chatsopano.' : 'Could not save new profile photo.'),
+          'err'
+        );
         return;
       }
       if (oldPath && oldPath !== uploaded.storagePath) {
         deleteUploadedStoragePaths([oldPath]).catch(() => {});
       }
       setOptimisticAvatar(null);
-      showNotice('Profile photo updated.');
+      showNotice(isNy ? 'Chithunzi cha mbiri chasinthidwa.' : 'Profile photo updated.');
     } catch (err) {
       setOptimisticAvatar(null);
-      showNotice(err instanceof Error ? err.message : 'Could not upload profile photo.', 'err');
+      showNotice(
+        err instanceof Error ? err.message : isNy ? 'Sitinathe kukweza chithunzi.' : 'Could not upload profile photo.',
+        'err'
+      );
     } finally {
       if (localPreview) URL.revokeObjectURL(localPreview);
       setIsUploadingAvatar(false);
@@ -362,17 +425,23 @@ export const AccountView: React.FC = () => {
       if (!saveRes.success) {
         await deleteUploadedStoragePaths([uploaded.storagePath]).catch(() => {});
         setOptimisticCover(null);
-        showNotice(saveRes.error || 'Could not save cover photo.', 'err');
+        showNotice(
+          saveRes.error || (isNy ? 'Sitinathe kusunga chithunzi cha kumbuyo.' : 'Could not save cover photo.'),
+          'err'
+        );
         return;
       }
       if (oldPath && oldPath !== uploaded.storagePath) {
         deleteUploadedStoragePaths([oldPath]).catch(() => {});
       }
       setOptimisticCover(null);
-      showNotice('Cover photo updated.');
+      showNotice(isNy ? 'Chithunzi cha kumbuyo chasinthidwa.' : 'Cover photo updated.');
     } catch (err) {
       setOptimisticCover(null);
-      showNotice(err instanceof Error ? err.message : 'Could not upload cover photo.', 'err');
+      showNotice(
+        err instanceof Error ? err.message : isNy ? 'Sitinathe kukweza chithunzi cha kumbuyo.' : 'Could not upload cover photo.',
+        'err'
+      );
     } finally {
       if (localPreview) URL.revokeObjectURL(localPreview);
       setIsUploadingCover(false);
@@ -385,13 +454,16 @@ export const AccountView: React.FC = () => {
     if (!currentUser) return;
     const cleanName = editName.trim();
     if (cleanName.length < 2) {
-      showNotice('Display name must be at least 2 characters.', 'err');
+      showNotice(
+        isNy ? 'Dzina likuyenera kukhala ndi zilembo zosachepera ziwiri.' : 'Display name must be at least 2 characters.',
+        'err'
+      );
       return;
     }
 
     const parsedAge = editAge.trim() ? Math.floor(Number(editAge)) : undefined;
     if (editAge.trim() && (!Number.isFinite(parsedAge) || (parsedAge as number) < 13 || (parsedAge as number) > 120)) {
-      showNotice('Age must be between 13 and 120.', 'err');
+      showNotice(isNy ? 'Zaka zikuyenera kukhala pakati pa 13 ndi 120.' : 'Age must be between 13 and 120.', 'err');
       return;
     }
 
@@ -401,7 +473,7 @@ export const AccountView: React.FC = () => {
       if (cleanedTargetHandle && cleanedTargetHandle !== currentUser.username) {
         const res = await updateHandleWithCooldown(cleanedTargetHandle);
         if (!res.success) {
-          showNotice(res.error || 'Could not update @username.', 'err');
+          showNotice(res.error || (isNy ? 'Sitinathe kusintha @dzina.' : 'Could not update @username.'), 'err');
           setIsSavingProfile(false);
           return;
         }
@@ -416,14 +488,20 @@ export const AccountView: React.FC = () => {
         ...(typeof parsedAge === 'number' ? { age: parsedAge } : {}),
       });
       if (!saveRes.success) {
-        showNotice(saveRes.error || 'Could not save profile changes.', 'err');
+        showNotice(
+          saveRes.error || (isNy ? 'Sitinathe kusunga zosintha.' : 'Could not save profile changes.'),
+          'err'
+        );
         return;
       }
       setSelectedCountry(editCountry || 'Malawi');
       setIsEditingProfile(false);
-      showNotice('Profile saved.');
+      showNotice(isNy ? 'Mbiri yasungidwa.' : 'Profile saved.');
     } catch (err) {
-      showNotice(err instanceof Error ? err.message : 'Could not save profile changes.', 'err');
+      showNotice(
+        err instanceof Error ? err.message : isNy ? 'Sitinathe kusunga zosintha.' : 'Could not save profile changes.',
+        'err'
+      );
     } finally {
       setIsSavingProfile(false);
     }
@@ -434,7 +512,9 @@ export const AccountView: React.FC = () => {
       setEmailRevealed(false);
       return;
     }
-    const ok = await requireReauth('Confirm it is you to view your full email address.');
+    const ok = await requireReauth(
+      isNy ? 'Tsimikizirani kuti ndinu kuti muwone imelo yanu yonse.' : 'Confirm it is you to view your full email address.'
+    );
     if (ok) {
       setEmailRevealed(true);
     }
@@ -443,15 +523,20 @@ export const AccountView: React.FC = () => {
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPassword.length < 8) {
-      showNotice('New password must be at least 8 characters.', 'err');
+      showNotice(
+        isNy ? 'Mawu achinsinsi atsopano akhale osachepera zilembo 8.' : 'New password must be at least 8 characters.',
+        'err'
+      );
       return;
     }
     if (newPassword !== confirmPassword) {
-      showNotice('Passwords do not match.', 'err');
+      showNotice(isNy ? 'Mawu achinsinsi sakufanana.' : 'Passwords do not match.', 'err');
       return;
     }
 
-    const ok = await requireReauth('Confirm your current sign-in before changing your password.');
+    const ok = await requireReauth(
+      isNy ? 'Tsimikizirani akaunti yanu musanasinthe mawu achinsinsi.' : 'Confirm your current sign-in before changing your password.'
+    );
     if (!ok) return;
 
     setIsChangingPassword(true);
@@ -461,15 +546,17 @@ export const AccountView: React.FC = () => {
       setNewPassword('');
       setConfirmPassword('');
       setIsChangePasswordOpen(false);
-      showNotice('Password updated.');
+      showNotice(isNy ? 'Mawu achinsinsi asinthidwa.' : 'Password updated.');
     } else {
-      showNotice(res.error || 'Could not update password.', 'err');
+      showNotice(res.error || (isNy ? 'Sitinathe kusintha mawu achinsinsi.' : 'Could not update password.'), 'err');
     }
   };
 
   const handleDeleteAccountConfirm = async () => {
     if (deleteConfirmText.trim().toUpperCase() !== 'DELETE') return;
-    const ok = await requireReauth('Confirm your identity before permanently deleting your account.');
+    const ok = await requireReauth(
+      isNy ? 'Tsimikizirani kuti ndinu musanafufute akaunti yanu.' : 'Confirm your identity before permanently deleting your account.'
+    );
     if (!ok) return;
 
     setIsDeletingAccount(true);
@@ -479,7 +566,7 @@ export const AccountView: React.FC = () => {
       setIsDeleteModalOpen(false);
       navigate('/');
     } else {
-      showNotice(res.error || 'Could not delete account.', 'err');
+      showNotice(res.error || (isNy ? 'Sitinathe kufufuta akaunti.' : 'Could not delete account.'), 'err');
     }
   };
 
@@ -516,7 +603,7 @@ export const AccountView: React.FC = () => {
     a.download = `lowervibe-data-${currentUser.username || 'export'}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    showNotice('Your data export is downloading.');
+    showNotice(isNy ? 'Deta yanu ikutsitsidwa.' : 'Your data export is downloading.');
   };
 
   const handleRequestPushPermission = async (key: keyof typeof userSettings.notifications, nextVal: boolean) => {
@@ -542,9 +629,9 @@ export const AccountView: React.FC = () => {
       setSupportSubject('');
       setSupportMessage('');
       setIsSupportOpen(false);
-      showNotice('Support request sent. We will reply by email.');
+      showNotice(isNy ? 'Pempho lathandizo latumizidwa. Tikuyankhani pa imelo.' : 'Support request sent. We will reply by email.');
     } else {
-      showNotice(res.error || 'Could not send request.', 'err');
+      showNotice(res.error || (isNy ? 'Sitinathe kutumiza pempho.' : 'Could not send request.'), 'err');
     }
   };
 
@@ -562,9 +649,9 @@ export const AccountView: React.FC = () => {
       setBugSummary('');
       setBugDetails('');
       setIsBugOpen(false);
-      showNotice('Bug report received. Thank you.');
+      showNotice(isNy ? 'Lipoti la vuto lalandilidwa. Zikomo.' : 'Bug report received. Thank you.');
     } else {
-      showNotice(res.error || 'Could not submit bug report.', 'err');
+      showNotice(res.error || (isNy ? 'Sitinathe kutumiza lipoti.' : 'Could not submit bug report.'), 'err');
     }
   };
 
@@ -577,7 +664,7 @@ export const AccountView: React.FC = () => {
       navigator.share({ title: `${currentUser.name} on LOWERVIBE`, url: shareUrl }).catch(() => {});
     } else {
       navigator.clipboard?.writeText(shareUrl);
-      showNotice('Profile link copied.');
+      showNotice(isNy ? 'Ulalo wa mbiri wakopedwa.' : 'Profile link copied.');
     }
   };
 
@@ -591,10 +678,10 @@ export const AccountView: React.FC = () => {
           </div>
           <div className="space-y-1">
             <h1 className="text-2xl font-extrabold tracking-tight text-[var(--text)]">
-              {isGuestMode ? 'You are browsing as a guest' : 'Sign in to your profile'}
+              {isGuestMode ? t('browsing_as_guest') : t('sign_in_profile')}
             </h1>
             <p className="text-sm text-[var(--text-muted)] max-w-md mx-auto">
-              Save liked songs, create playlists, follow Malawian and African artists, or upload your music.
+              {t('guest_profile_sub')}
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
@@ -603,37 +690,41 @@ export const AccountView: React.FC = () => {
               onClick={() => navigate('/login')}
               className="px-6 py-3 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm hover:brightness-95 transition cursor-pointer"
             >
-              Sign in
+              {t('sign_in')}
             </button>
             <button
               type="button"
               onClick={() => navigate('/register')}
               className="px-6 py-3 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] font-semibold text-sm hover:opacity-90 transition cursor-pointer"
             >
-              Create account
+              {t('create_account')}
             </button>
           </div>
         </div>
 
         {/* Appearance & Language for guests */}
         <div className="rounded-[20px] bg-[var(--surface)] border border-[var(--border)] p-5 space-y-4">
-          <h2 className="text-sm font-bold text-[var(--text)]">Appearance &amp; Language</h2>
+          <h2 className="text-sm font-bold text-[var(--text)]">{t('appearance_language')}</h2>
           <div className="grid grid-cols-3 gap-2">
-            {(['system', 'light', 'dark'] as const).map((mode) => (
+            {[
+              { id: 'system' as const, label: isNy ? 'Makina' : 'System' },
+              { id: 'light' as const, label: isNy ? 'Kuwala' : 'Light' },
+              { id: 'dark' as const, label: isNy ? 'Mdima' : 'Dark' },
+            ].map((mode) => (
               <button
-                key={mode}
+                key={mode.id}
                 type="button"
                 onClick={() => {
-                  setThemeMode(mode);
-                  updateUserSettings({ appearance: { theme: mode } });
+                  setThemeMode(mode.id);
+                  updateUserSettings({ appearance: { theme: mode.id } });
                 }}
-                className={`py-2.5 px-3 rounded-xl border text-xs font-semibold capitalize cursor-pointer transition ${
-                  themeMode === mode
+                className={`py-2.5 px-3 rounded-xl border text-xs font-semibold cursor-pointer transition ${
+                  themeMode === mode.id
                     ? 'bg-[var(--accent)] text-[var(--accent-contrast)] border-transparent font-bold'
                     : 'bg-[var(--surface-2)] text-[var(--text)] border-[var(--border)]'
                 }`}
               >
-                {mode}
+                {mode.label}
               </button>
             ))}
           </div>
@@ -650,7 +741,7 @@ export const AccountView: React.FC = () => {
                   updateUserSettings({ appearance: { language: lang.id } });
                 }}
                 className={`flex-1 py-2.5 rounded-xl border text-xs font-semibold cursor-pointer ${
-                  userSettings.appearance.language === lang.id
+                  language === lang.id
                     ? 'bg-[var(--accent)] text-[var(--accent-contrast)] border-transparent font-bold'
                     : 'bg-[var(--surface-2)] text-[var(--text)] border-[var(--border)]'
                 }`}
@@ -698,9 +789,13 @@ export const AccountView: React.FC = () => {
           <div className="flex items-start gap-3">
             <Mail className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
             <div>
-              <p className="text-xs font-bold text-[var(--text)]">Verify your email address</p>
+              <p className="text-xs font-bold text-[var(--text)]">
+                {isNy ? 'Tsimikizirani imelo yanu' : 'Verify your email address'}
+              </p>
               <p className="text-[11px] text-[var(--text-muted)]">
-                We sent a verification link to {maskEmailAddress(currentUser.email)}. Check Spam/Promotions too.
+                {isNy
+                  ? `Tinatumiza ulalo wotsimikizira ku ${maskEmailAddress(currentUser.email)}. Yang'anani ndi mu Spam/Promotions.`
+                  : `We sent a verification link to ${maskEmailAddress(currentUser.email)}. Check Spam/Promotions too.`}
               </p>
             </div>
           </div>
@@ -709,21 +804,30 @@ export const AccountView: React.FC = () => {
               type="button"
               onClick={async () => {
                 const res = await refreshEmailVerification();
-                showNotice(res.verified ? 'Email verified!' : 'Not verified yet. Open the link in your inbox.');
+                showNotice(
+                  res.verified
+                    ? isNy ? 'Imelo yatsimikizika!' : 'Email verified!'
+                    : isNy ? 'Sitinatsimikizirebe. Tsegulani ulalo mu imelo yanu.' : 'Not verified yet. Open the link in your inbox.'
+                );
               }}
               className="px-3 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer"
             >
-              I verified
+              {isNy ? 'Ndatsimikizira' : 'I verified'}
             </button>
             <button
               type="button"
               onClick={async () => {
                 const res = await resendVerification();
-                showNotice(res.success ? 'Verification email sent.' : res.error || 'Wait a moment and try again.', res.success ? 'ok' : 'err');
+                showNotice(
+                  res.success
+                    ? isNy ? 'Imelo yotsimikizira yatumizidwa.' : 'Verification email sent.'
+                    : res.error || (isNy ? 'Dikirani pang\'ono ndi kuyesanso.' : 'Wait a moment and try again.'),
+                  res.success ? 'ok' : 'err'
+                );
               }}
               className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] text-xs font-semibold cursor-pointer"
             >
-              Resend
+              {isNy ? 'Tumizaninso' : 'Resend'}
             </button>
           </div>
         </div>
@@ -756,7 +860,9 @@ export const AccountView: React.FC = () => {
               <ImageIcon className="w-3.5 h-3.5 text-[var(--accent-text)]" />
             )}
             <span>
-              {isUploadingCover ? `Uploading ${coverProgress}%` : 'Upload cover'}
+              {isUploadingCover
+                ? `${isNy ? 'Ikukweza' : 'Uploading'} ${coverProgress}%`
+                : isNy ? 'Kwezani chithunzi cha kumbuyo' : 'Upload cover'}
             </span>
           </button>
           <input
@@ -828,7 +934,7 @@ export const AccountView: React.FC = () => {
                 {currentUser.name}
               </h1>
               <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] capitalize">
-                {isAdmin ? 'Admin' : isArtist ? 'Artist' : 'Listener'}
+                {isAdmin ? t('admin') : isArtist ? t('artist') : t('listener')}
               </span>
             </div>
 
@@ -848,7 +954,7 @@ export const AccountView: React.FC = () => {
                   className="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--accent-text)] hover:underline cursor-pointer"
                 >
                   <Eye className="w-3 h-3" />
-                  <span>{emailRevealed ? 'Hide' : 'Reveal'}</span>
+                  <span>{emailRevealed ? (isNy ? 'Bisani' : 'Hide') : (isNy ? 'Onetsani' : 'Reveal')}</span>
                 </button>
               )}
             </div>
@@ -863,15 +969,15 @@ export const AccountView: React.FC = () => {
         <div className="grid grid-cols-3 gap-2 pt-2 border-t border-[var(--border)]">
           <div className="p-3 rounded-xl bg-[var(--surface-2)] text-center">
             <div className="text-base font-extrabold text-[var(--text)] tabular-nums">{followersCount}</div>
-            <div className="text-[11px] text-[var(--text-muted)]">Followers</div>
+            <div className="text-[11px] text-[var(--text-muted)]">{t('followers')}</div>
           </div>
           <div className="p-3 rounded-xl bg-[var(--surface-2)] text-center">
             <div className="text-base font-extrabold text-[var(--text)] tabular-nums">{followingCount}</div>
-            <div className="text-[11px] text-[var(--text-muted)]">Following</div>
+            <div className="text-[11px] text-[var(--text-muted)]">{t('following')}</div>
           </div>
           <div className="p-3 rounded-xl bg-[var(--surface-2)] text-center">
             <div className="text-base font-extrabold text-[var(--text)] tabular-nums">{myPlaylistsCount}</div>
-            <div className="text-[11px] text-[var(--text-muted)]">Playlists</div>
+            <div className="text-[11px] text-[var(--text-muted)]">{t('playlists_label')}</div>
           </div>
         </div>
 
@@ -882,7 +988,7 @@ export const AccountView: React.FC = () => {
             onClick={() => setIsEditingProfile(!isEditingProfile)}
             className="px-4 py-2 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold hover:brightness-95 transition cursor-pointer"
           >
-            {isEditingProfile ? 'Close editor' : 'Edit profile'}
+            {isEditingProfile ? t('close_editor') : t('edit_profile')}
           </button>
 
           {currentUser.artistId && (
@@ -892,7 +998,7 @@ export const AccountView: React.FC = () => {
               className="px-4 py-2 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] text-xs font-semibold hover:opacity-90 transition cursor-pointer flex items-center gap-1.5"
             >
               <ExternalLink className="w-3.5 h-3.5" />
-              <span>View public profile</span>
+              <span>{t('view_public_profile')}</span>
             </button>
           )}
 
@@ -902,7 +1008,7 @@ export const AccountView: React.FC = () => {
             className="px-4 py-2 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] text-xs font-semibold hover:opacity-90 transition cursor-pointer flex items-center gap-1.5"
           >
             <Share2 className="w-3.5 h-3.5" />
-            <span>Share profile</span>
+            <span>{t('share_profile')}</span>
           </button>
 
           <button
@@ -911,7 +1017,7 @@ export const AccountView: React.FC = () => {
             className="ml-auto px-4 py-2 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--danger)] text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
           >
             <LogOut className="w-3.5 h-3.5" />
-            <span>Sign out</span>
+            <span>{t('sign_out')}</span>
           </button>
         </div>
 
@@ -920,7 +1026,9 @@ export const AccountView: React.FC = () => {
           <form onSubmit={handleSaveProfile} className="pt-4 border-t border-[var(--border)] space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-[var(--text)]">Display name</label>
+                <label className="text-xs font-semibold text-[var(--text)]">
+                  {isNy ? 'Dzina loonekera' : 'Display name'}
+                </label>
                 <input
                   type="text"
                   required
@@ -932,10 +1040,10 @@ export const AccountView: React.FC = () => {
 
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-[var(--text)] flex items-center justify-between">
-                  <span>@username</span>
+                  <span>{isNy ? '@dzina' : '@username'}</span>
                   {handleCooldownDays > 0 && (
                     <span className="text-[10px] text-[var(--text-muted)]">
-                      Cooldown: {handleCooldownDays}d left
+                      {isNy ? `Kwadikira: masiku ${handleCooldownDays}` : `Cooldown: ${handleCooldownDays}d left`}
                     </span>
                   )}
                 </label>
@@ -951,10 +1059,12 @@ export const AccountView: React.FC = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-[var(--text)]">City</label>
+                <label className="text-xs font-semibold text-[var(--text)]">
+                  {isNy ? 'Mzinda' : 'City'}
+                </label>
                 <input
                   type="text"
-                  placeholder="e.g. Blantyre, Lilongwe, Lagos"
+                  placeholder={isNy ? 'mwachitsanzo, Blantyre, Lilongwe, Lagos' : 'e.g. Blantyre, Lilongwe, Lagos'}
                   value={editCity}
                   onChange={(e) => setEditCity(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent-text)]"
@@ -962,7 +1072,9 @@ export const AccountView: React.FC = () => {
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-[var(--text)]">Country</label>
+                <label className="text-xs font-semibold text-[var(--text)]">
+                  {isNy ? 'Dziko' : 'Country'}
+                </label>
                 <select
                   value={editCountry}
                   onChange={(e) => setEditCountry(e.target.value)}
@@ -979,7 +1091,9 @@ export const AccountView: React.FC = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-[var(--text)]">Gender</label>
+                <label className="text-xs font-semibold text-[var(--text)]">
+                  {isNy ? 'Umuna / Ukazi' : 'Gender'}
+                </label>
                 <select
                   value={editGender}
                   onChange={(e) =>
@@ -989,16 +1103,18 @@ export const AccountView: React.FC = () => {
                   }
                   className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent-text)]"
                 >
-                  <option value="">Not specified</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                  <option value="non-binary">Non-binary</option>
-                  <option value="prefer_not_to_say">Prefer not to say</option>
+                  <option value="">{isNy ? 'Osasankhidwa' : 'Not specified'}</option>
+                  <option value="male">{isNy ? 'Mwamuna' : 'Male'}</option>
+                  <option value="female">{isNy ? 'Mkazi' : 'Female'}</option>
+                  <option value="non-binary">{isNy ? 'Zina' : 'Non-binary'}</option>
+                  <option value="prefer_not_to_say">{isNy ? 'Ndisanene' : 'Prefer not to say'}</option>
                 </select>
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-[var(--text)]">Age</label>
+                <label className="text-xs font-semibold text-[var(--text)]">
+                  {isNy ? 'Zaka' : 'Age'}
+                </label>
                 <input
                   type="number"
                   min={13}
@@ -1013,13 +1129,15 @@ export const AccountView: React.FC = () => {
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-[var(--text)]">Bio</label>
+              <label className="text-xs font-semibold text-[var(--text)]">
+                {isNy ? 'Mbiri yanu' : 'Bio'}
+              </label>
               <textarea
                 rows={2}
                 maxLength={500}
                 value={editBio}
                 onChange={(e) => setEditBio(e.target.value)}
-                placeholder="Tell listeners what you love..."
+                placeholder={isNy ? 'Uzani omvera zomwe mumakonda...' : 'Tell listeners what you love...'}
                 className="w-full px-3.5 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent-text)]"
               />
             </div>
@@ -1030,14 +1148,14 @@ export const AccountView: React.FC = () => {
                 onClick={() => setIsEditingProfile(false)}
                 className="px-4 py-2 rounded-xl bg-[var(--surface-2)] text-xs font-semibold text-[var(--text-muted)] cursor-pointer"
               >
-                Cancel
+                {t('cancel')}
               </button>
               <button
                 type="submit"
                 disabled={isSavingProfile}
                 className="px-5 py-2 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer disabled:opacity-60"
               >
-                {isSavingProfile ? 'Saving...' : 'Save changes'}
+                {isSavingProfile ? t('saving') : (isNy ? 'Sungani zosintha' : 'Save changes')}
               </button>
             </div>
           </form>
@@ -1051,8 +1169,12 @@ export const AccountView: React.FC = () => {
         <SettingsGroup
           id="account"
           icon={KeyRound}
-          title="Account"
-          subtitle="Password, linked accounts, devices, and danger zone"
+          title={t('account')}
+          subtitle={
+            isNy
+              ? 'Mawu achinsinsi, maakaunti olumikizidwa, zipangizo ndi kufufuta akaunti'
+              : 'Password, linked accounts, devices, and danger zone'
+          }
           isOpen={openSection === 'account'}
           onToggle={() => setOpenSection(openSection === 'account' ? '' : 'account')}
         >
@@ -1060,11 +1182,11 @@ export const AccountView: React.FC = () => {
             {/* Change Password */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
               <div>
-                <div className="text-xs font-bold text-[var(--text)]">Password</div>
+                <div className="text-xs font-bold text-[var(--text)]">{t('auth_password')}</div>
                 <div className="text-[11px] text-[var(--text-muted)]">
                   {hasPasswordProvider
-                    ? 'Update your email sign-in password'
-                    : 'Add a password to sign in with email as well'}
+                    ? isNy ? 'Sinthani mawu achinsinsi olowera ndi imelo' : 'Update your email sign-in password'
+                    : isNy ? 'Ikani mawu achinsinsi kuti mulowenso ndi imelo' : 'Add a password to sign in with email as well'}
                 </div>
               </div>
               <button
@@ -1072,7 +1194,7 @@ export const AccountView: React.FC = () => {
                 onClick={() => setIsChangePasswordOpen(!isChangePasswordOpen)}
                 className="px-3.5 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer self-start sm:self-auto"
               >
-                {isChangePasswordOpen ? 'Close' : 'Change password'}
+                {isChangePasswordOpen ? t('close') : (isNy ? 'Sinthani mawu achinsinsi' : 'Change password')}
               </button>
             </div>
 
@@ -1083,7 +1205,7 @@ export const AccountView: React.FC = () => {
                     type="password"
                     required
                     minLength={8}
-                    placeholder="New password (8+ chars)"
+                    placeholder={isNy ? 'Mawu achinsinsi atsopano (zilembo 8+)' : 'New password (8+ chars)'}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     className="px-3.5 py-2.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text)] focus:outline-none focus:border-[var(--accent-text)]"
@@ -1091,7 +1213,7 @@ export const AccountView: React.FC = () => {
                   <input
                     type="password"
                     required
-                    placeholder="Confirm new password"
+                    placeholder={isNy ? 'Tsimikizirani mawu achinsinsi' : 'Confirm new password'}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     className="px-3.5 py-2.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text)] focus:outline-none focus:border-[var(--accent-text)]"
@@ -1102,31 +1224,46 @@ export const AccountView: React.FC = () => {
                   disabled={isChangingPassword}
                   className="px-4 py-2 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer"
                 >
-                  {isChangingPassword ? 'Updating...' : 'Save new password'}
+                  {isChangingPassword
+                    ? isNy ? 'Ikusintha...' : 'Updating...'
+                    : isNy ? 'Sungani mawu achinsinsi' : 'Save new password'}
                 </button>
               </form>
             )}
 
             {/* Linked Sign-in Methods */}
             <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] space-y-2.5">
-              <div className="text-xs font-bold text-[var(--text)]">Linked sign-in methods</div>
+              <div className="text-xs font-bold text-[var(--text)]">
+                {isNy ? 'Njira zolowera zolumikizidwa' : 'Linked sign-in methods'}
+              </div>
               <div className="flex flex-wrap gap-2">
                 <div className="px-3 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs flex items-center gap-2 text-[var(--text)]">
-                  <span>Email: {hasPasswordProvider ? 'Connected' : 'Not set'}</span>
+                  <span>
+                    {isNy ? 'Imelo:' : 'Email:'}{' '}
+                    {hasPasswordProvider ? (isNy ? 'Zalumikizidwa' : 'Connected') : (isNy ? 'Zinaikidwabe' : 'Not set')}
+                  </span>
                 </div>
                 <div className="px-3 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs flex items-center gap-2 text-[var(--text)]">
-                  <span>Google: {hasGoogleProvider ? 'Connected' : 'Not linked'}</span>
+                  <span>
+                    Google:{' '}
+                    {hasGoogleProvider ? (isNy ? 'Zalumikizidwa' : 'Connected') : (isNy ? 'Sizinaphatikizidwe' : 'Not linked')}
+                  </span>
                   {hasGoogleProvider ? (
                     firebaseProviders.length > 1 && (
                       <button
                         type="button"
                         onClick={async () => {
                           const res = await unlinkProvider('google.com');
-                          showNotice(res.success ? 'Google unlinked.' : res.error || 'Could not unlink.', res.success ? 'ok' : 'err');
+                          showNotice(
+                            res.success
+                              ? isNy ? 'Google yachotsedwa.' : 'Google unlinked.'
+                              : res.error || (isNy ? 'Sitinathe kuchotsa.' : 'Could not unlink.'),
+                            res.success ? 'ok' : 'err'
+                          );
                         }}
                         className="text-[11px] font-semibold text-[var(--danger)] cursor-pointer"
                       >
-                        Unlink
+                        {isNy ? 'Chotsani' : 'Unlink'}
                       </button>
                     )
                   ) : (
@@ -1134,17 +1271,22 @@ export const AccountView: React.FC = () => {
                       type="button"
                       onClick={async () => {
                         const res = await linkGoogle();
-                        showNotice(res.success ? 'Google linked.' : res.error || 'Could not link.', res.success ? 'ok' : 'err');
+                        showNotice(
+                          res.success
+                            ? isNy ? 'Google yalumikizidwa.' : 'Google linked.'
+                            : res.error || (isNy ? 'Sitinathe kulumikiza.' : 'Could not link.'),
+                          res.success ? 'ok' : 'err'
+                        );
                       }}
                       className="text-[11px] font-semibold text-[var(--accent-text)] cursor-pointer"
                     >
-                      Link
+                      {isNy ? 'Lumikizani' : 'Link'}
                     </button>
                   )}
                 </div>
                 {hasPhoneProvider && (
                   <div className="px-3 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text)]">
-                    Phone: {currentUser.phoneNumber || 'Connected'}
+                    {isNy ? 'Foni:' : 'Phone:'} {currentUser.phoneNumber || (isNy ? 'Zalumikizidwa' : 'Connected')}
                   </div>
                 )}
               </div>
@@ -1154,9 +1296,13 @@ export const AccountView: React.FC = () => {
             <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] space-y-2.5">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <div className="text-xs font-bold text-[var(--text)]">Active devices</div>
+                  <div className="text-xs font-bold text-[var(--text)]">
+                    {isNy ? 'Zipangizo zomwe zilimo' : 'Active devices'}
+                  </div>
                   <div className="text-[11px] text-[var(--text-muted)]">
-                    {(currentUser.sessions || []).length || 1} recent session(s)
+                    {isNy
+                      ? `Zipangizo ${(currentUser.sessions || []).length || 1} zaposachedwa`
+                      : `${(currentUser.sessions || []).length || 1} recent session(s)`}
                   </div>
                 </div>
                 <button
@@ -1164,14 +1310,17 @@ export const AccountView: React.FC = () => {
                   onClick={async () => {
                     try {
                       await signOutOtherSessions();
-                      showNotice('Other device sessions cleared.');
+                      showNotice(isNy ? 'Zipangizo zina zatulutsidwa.' : 'Other device sessions cleared.');
                     } catch (err) {
-                      showNotice(err instanceof Error ? err.message : 'Could not clear sessions.', 'err');
+                      showNotice(
+                        err instanceof Error ? err.message : isNy ? 'Sitinathe kutulutsa zipangizo zina.' : 'Could not clear sessions.',
+                        'err'
+                      );
                     }
                   }}
                   className="px-3 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer"
                 >
-                  Sign out other devices
+                  {isNy ? 'Tulutsani zipangizo zina' : 'Sign out other devices'}
                 </button>
               </div>
               <div className="space-y-1.5">
@@ -1184,7 +1333,7 @@ export const AccountView: React.FC = () => {
                       {sess.deviceLabel} • {sess.browser}
                     </span>
                     <span className="text-[var(--text-muted)]">
-                      {sess.isCurrent ? 'This device' : new Date(sess.lastActiveAt).toLocaleDateString()}
+                      {sess.isCurrent ? (isNy ? 'Chipangizo ichi' : 'This device') : new Date(sess.lastActiveAt).toLocaleDateString()}
                     </span>
                   </div>
                 ))}
@@ -1197,9 +1346,13 @@ export const AccountView: React.FC = () => {
               className="p-4 rounded-xl bg-[var(--surface-2)] border border-[var(--danger)]/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
             >
               <div>
-                <div className="text-xs font-bold text-[var(--danger)]">Delete account</div>
+                <div className="text-xs font-bold text-[var(--danger)]">
+                  {isNy ? 'Fufutani akaunti' : 'Delete account'}
+                </div>
                 <div className="text-[11px] text-[var(--text-muted)]">
-                  Permanently remove your account, playlists, and saved preferences.
+                  {isNy
+                    ? 'Fufutani akaunti yanu, mindandanda ndi zosankha zonse kotheratu.'
+                    : 'Permanently remove your account, playlists, and saved preferences.'}
                 </div>
               </div>
               <button
@@ -1207,7 +1360,7 @@ export const AccountView: React.FC = () => {
                 onClick={() => setIsDeleteModalOpen(true)}
                 className="px-4 py-2 rounded-xl bg-[var(--danger)] text-white text-xs font-bold cursor-pointer self-start sm:self-auto"
               >
-                Delete account
+                {isNy ? 'Fufutani akaunti' : 'Delete account'}
               </button>
             </div>
           </div>
@@ -1217,15 +1370,21 @@ export const AccountView: React.FC = () => {
         <SettingsGroup
           id="playback"
           icon={Headphones}
-          title="Playback"
-          subtitle="Audio quality, crossfade, equalizer, and lyrics"
+          title={t('playback')}
+          subtitle={
+            isNy
+              ? 'Ubwino wa phokoso, kusakaniza, kukonza phokoso ndi mawu a nyimbo'
+              : 'Audio quality, crossfade, equalizer, and lyrics'
+          }
           isOpen={openSection === 'playback'}
           onToggle={() => setOpenSection(openSection === 'playback' ? '' : 'playback')}
         >
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-[var(--text)]">Streaming quality</label>
+                <label className="text-xs font-semibold text-[var(--text)]">
+                  {isNy ? 'Ubwino wa phokoso poliza' : 'Streaming quality'}
+                </label>
                 <select
                   value={userSettings.playback.streamingQuality}
                   onChange={(e) => {
@@ -1234,14 +1393,16 @@ export const AccountView: React.FC = () => {
                   }}
                   className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
                 >
-                  <option value="auto">Auto (adjusts to network)</option>
-                  <option value="high">High (~1.8 MB/min)</option>
-                  <option value="saver">Data Saver (~0.6 MB/min)</option>
+                  <option value="auto">{isNy ? 'Zokha (kutengera netiweki)' : 'Auto (adjusts to network)'}</option>
+                  <option value="high">{isNy ? 'Chokwera (~1.8 MB/min)' : 'High (~1.8 MB/min)'}</option>
+                  <option value="saver">{isNy ? 'Kusunga Deta (~0.6 MB/min)' : 'Data Saver (~0.6 MB/min)'}</option>
                 </select>
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-[var(--text)]">Download quality</label>
+                <label className="text-xs font-semibold text-[var(--text)]">
+                  {isNy ? 'Ubwino wa phokoso potsitsa' : 'Download quality'}
+                </label>
                 <select
                   value={userSettings.playback.downloadQuality}
                   onChange={(e) =>
@@ -1249,8 +1410,8 @@ export const AccountView: React.FC = () => {
                   }
                   className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
                 >
-                  <option value="high">High (Original file)</option>
-                  <option value="saver">Data Saver</option>
+                  <option value="high">{isNy ? 'Chokwera (Fayilo yeniyeni)' : 'High (Original file)'}</option>
+                  <option value="saver">{isNy ? 'Kusunga Deta' : 'Data Saver'}</option>
                 </select>
               </div>
             </div>
@@ -1258,10 +1419,12 @@ export const AccountView: React.FC = () => {
             {/* Crossfade Slider 0-12s */}
             <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-[var(--text)]">Crossfade between songs</span>
+                <span className="font-semibold text-[var(--text)]">
+                  {isNy ? 'Kulumikiza nyimbo pang\'onopang\'ono' : 'Crossfade between songs'}
+                </span>
                 <span className="font-mono font-bold text-[var(--accent-text)]">
                   {userSettings.playback.crossfadeSeconds === 0
-                    ? 'Off'
+                    ? t('timer_off')
                     : `${userSettings.playback.crossfadeSeconds}s`}
                 </span>
               </div>
@@ -1278,13 +1441,13 @@ export const AccountView: React.FC = () => {
 
             {/* Equalizer Preset */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-[var(--text)]">Equalizer</label>
+              <label className="text-xs font-semibold text-[var(--text)]">{t('equalizer')}</label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {[
-                  { id: 'flat' as const, label: 'Flat' },
-                  { id: 'bass_boost' as const, label: 'Bass Boost' },
-                  { id: 'vocal' as const, label: 'Vocal' },
-                  { id: 'treble' as const, label: 'Treble' },
+                  { id: 'flat' as const, label: isNy ? 'Choyenerera' : 'Flat' },
+                  { id: 'bass_boost' as const, label: isNy ? 'Besi Yambiri' : 'Bass Boost' },
+                  { id: 'vocal' as const, label: isNy ? 'Mawu' : 'Vocal' },
+                  { id: 'treble' as const, label: isNy ? 'Phokoso Lalikulu' : 'Treble' },
                 ].map((eq) => (
                   <button
                     key={eq.id}
@@ -1304,32 +1467,32 @@ export const AccountView: React.FC = () => {
 
             <div className="space-y-2">
               <ToggleRow
-                label="Gapless playback"
-                description="Preload the next track for seamless transitions"
+                label={isNy ? 'Kuliza mosadukiza' : 'Gapless playback'}
+                description={isNy ? 'Konzerani nyimbo yotsatira pasadakhale kuti isadukize' : 'Preload the next track for seamless transitions'}
                 checked={userSettings.playback.gapless}
                 onChange={(v) => updateUserSettings({ playback: { gapless: v } })}
               />
               <ToggleRow
-                label="Normalize volume"
-                description="Keep volume steady across tracks using live audio compression"
+                label={isNy ? 'Kulinganiza phokoso' : 'Normalize volume'}
+                description={isNy ? 'Sungani phokoso lofanana pa nyimbo zonse' : 'Keep volume steady across tracks using live audio compression'}
                 checked={userSettings.playback.normalizeVolume}
                 onChange={(v) => updateUserSettings({ playback: { normalizeVolume: v } })}
               />
               <ToggleRow
-                label="Autoplay similar tracks"
-                description="Keep music playing when your queue ends"
+                label={isNy ? 'Pitilizani kuliza nyimbo zofanana' : 'Autoplay similar tracks'}
+                description={isNy ? 'Nyimbo zina zizilira mndandanda ukatha' : 'Keep music playing when your queue ends'}
                 checked={userSettings.playback.autoplaySimilar}
                 onChange={(v) => updateUserSettings({ playback: { autoplaySimilar: v } })}
               />
               <ToggleRow
-                label="Mono audio"
-                description="Combine left and right channels into one signal"
+                label={isNy ? 'Phokoso limodzi (Mono)' : 'Mono audio'}
+                description={isNy ? 'Phatikizani makutu onse awiri kukhala njira imodzi' : 'Combine left and right channels into one signal'}
                 checked={userSettings.playback.monoAudio}
                 onChange={(v) => updateUserSettings({ playback: { monoAudio: v } })}
               />
               <ToggleRow
-                label="Show lyrics when available"
-                description="Display track lyrics in the player drawer"
+                label={isNy ? 'Onetsani mawu a nyimbo ngati alipo' : 'Show lyrics when available'}
+                description={isNy ? 'Onetsani mawu a nyimbo mu choleretsa' : 'Display track lyrics in the player drawer'}
                 checked={userSettings.playback.showLyrics}
                 onChange={(v) => updateUserSettings({ playback: { showLyrics: v } })}
               />
@@ -1341,41 +1504,49 @@ export const AccountView: React.FC = () => {
         <SettingsGroup
           id="storage"
           icon={HardDrive}
-          title="Data & Storage"
-          subtitle={`${formatBytes(offlineStats.totalBytes)} downloaded · Data saver & bundle controls`}
+          title={t('data_storage')}
+          subtitle={
+            isNy
+              ? `Zotsitsidwa ${formatBytes(offlineStats.totalBytes)} · Kusunga deta ndi ma bando`
+              : `${formatBytes(offlineStats.totalBytes)} downloaded · Data saver & bundle controls`
+          }
           isOpen={openSection === 'storage'}
           onToggle={() => setOpenSection(openSection === 'storage' ? '' : 'storage')}
         >
           <div className="space-y-3">
             <ToggleRow
-              label="Data Saver"
-              description="Reduces streaming audio bitrate (~0.6 MB/min) to save bundles"
+              label={isNy ? 'Kusunga Deta (Data Saver)' : 'Data Saver'}
+              description={isNy ? 'Kumachepetsa kugwiritsa ntchito ma bando (~0.6 MB/mphindi)' : 'Reduces streaming audio bitrate (~0.6 MB/min) to save bundles'}
               checked={userSettings.dataSaver.enabled}
               onChange={(v) => updateUserSettings({ dataSaver: { enabled: v } })}
             />
             <ToggleRow
-              label="Stream over Wi-Fi only"
-              description="Avoid mobile data while streaming"
+              label={isNy ? 'Mverani pa Wi-Fi yokha' : 'Stream over Wi-Fi only'}
+              description={isNy ? 'Pewani kugwiritsa ntchito deta ya pafoni pomvera' : 'Avoid mobile data while streaming'}
               checked={userSettings.dataSaver.streamWifiOnly}
               onChange={(v) => updateUserSettings({ dataSaver: { streamWifiOnly: v } })}
             />
             <ToggleRow
-              label="Download over Wi-Fi only"
-              description="Wait for Wi-Fi before saving tracks offline"
+              label={isNy ? 'Tsitsani pa Wi-Fi yokha' : 'Download over Wi-Fi only'}
+              description={isNy ? 'Dikirani Wi-Fi musanasunge nyimbo pafoni' : 'Wait for Wi-Fi before saving tracks offline'}
               checked={userSettings.dataSaver.downloadWifiOnly}
               onChange={(v) => updateUserSettings({ dataSaver: { downloadWifiOnly: v } })}
             />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
-                <div className="text-[11px] text-[var(--text-muted)]">Estimated data used this month</div>
+                <div className="text-[11px] text-[var(--text-muted)]">
+                  {isNy ? 'Deta yomwe yagwiritsidwa mwezi uno' : 'Estimated data used this month'}
+                </div>
                 <div className="text-base font-bold text-[var(--text)] mt-0.5 tabular-nums">
                   {formatBytes(userSettings.dataSaver.estimatedDataUsedBytesThisMonth)}
                 </div>
               </div>
               <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-between">
                 <div>
-                  <div className="text-[11px] text-[var(--text-muted)]">Offline storage</div>
+                  <div className="text-[11px] text-[var(--text-muted)]">
+                    {isNy ? 'Malo osungira pafoni' : 'Offline storage'}
+                  </div>
                   <div className="text-base font-bold text-[var(--text)] mt-0.5 tabular-nums">
                     {formatBytes(offlineStats.totalBytes)} ({offlineStats.count})
                   </div>
@@ -1388,7 +1559,7 @@ export const AccountView: React.FC = () => {
                   }}
                   className="px-3 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer"
                 >
-                  Manage
+                  {isNy ? 'Yang\'anirani' : 'Manage'}
                 </button>
               </div>
             </div>
@@ -1399,8 +1570,12 @@ export const AccountView: React.FC = () => {
         <SettingsGroup
           id="notifications"
           icon={Bell}
-          title="Notifications"
-          subtitle="Choose what updates arrive in the app and by browser push"
+          title={t('notifications')}
+          subtitle={
+            isNy
+              ? 'Sankhani zidziwitso zomwe zifika mu pulogalamu ndi pafoni'
+              : 'Choose what updates arrive in the app and by browser push'
+          }
           isOpen={openSection === 'notifications'}
           onToggle={() => setOpenSection(openSection === 'notifications' ? '' : 'notifications')}
         >
@@ -1409,10 +1584,12 @@ export const AccountView: React.FC = () => {
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2 text-xs font-bold text-[var(--text)]">
                   <Volume2 className="w-4 h-4 text-[var(--accent-text)]" />
-                  <span>Real-time notification sound</span>
+                  <span>{isNy ? 'Phokoso la zidziwitso panthawi yake' : 'Real-time notification sound'}</span>
                 </div>
                 <p className="text-[11px] text-[var(--text-muted)]">
-                  Play an instant chime inside the installed app for artist releases &amp; administration updates.
+                  {isNy
+                    ? 'Lizani belu nthawi yomweyo mukakhala mu pulogalamu pakakhala nyimbo zatsopano kapena zosintha.'
+                    : 'Play an instant chime inside the installed app for artist releases & administration updates.'}
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -1422,15 +1599,15 @@ export const AccountView: React.FC = () => {
                     void playNotificationSound('artist').then((played) => {
                       showNotice(
                         played
-                          ? 'Notification chime played.'
-                          : 'Tap anywhere in the app first to unlock audio playback.',
+                          ? isNy ? 'Phokoso la chidziwitso lalira.' : 'Notification chime played.'
+                          : isNy ? 'Dinani penapake kaye kuti mutsegule phokoso.' : 'Tap anywhere in the app first to unlock audio playback.',
                         played ? 'ok' : 'err'
                       );
                     });
                   }}
                   className="px-3 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[11px] font-semibold text-[var(--text)] hover:border-[var(--accent)] cursor-pointer"
                 >
-                  Test Sound
+                  {isNy ? 'Yesani Phokoso' : 'Test Sound'}
                 </button>
                 <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-[var(--text)] px-2.5 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
                   <input
@@ -1441,7 +1618,11 @@ export const AccountView: React.FC = () => {
                     }
                     className="accent-[var(--accent)]"
                   />
-                  <span>{userSettings.notifications.soundEnabled !== false ? 'On' : 'Muted'}</span>
+                  <span>
+                    {userSettings.notifications.soundEnabled !== false
+                      ? isNy ? 'Yoyatsidwa' : 'On'
+                      : isNy ? 'Yozimitsidwa' : 'Muted'}
+                  </span>
                 </label>
               </div>
             </div>
@@ -1450,7 +1631,7 @@ export const AccountView: React.FC = () => {
               <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div className="space-y-0.5">
                   <div className="text-xs font-semibold text-[var(--text)]">
-                    Device alerts:{' '}
+                    {isNy ? 'Zidziwitso za pafoni:' : 'Device alerts:'}{' '}
                     <span
                       className={
                         Notification.permission === 'granted'
@@ -1461,14 +1642,16 @@ export const AccountView: React.FC = () => {
                       }
                     >
                       {Notification.permission === 'granted'
-                        ? 'Enabled'
+                        ? isNy ? 'Zayatsidwa' : 'Enabled'
                         : Notification.permission === 'denied'
-                        ? 'Blocked in browser'
-                        : 'Not enabled'}
+                        ? isNy ? 'Zatsekedwa mu bulawuza' : 'Blocked in browser'
+                        : isNy ? 'Sizinayatsidwe' : 'Not enabled'}
                     </span>
                   </div>
                   <p className="text-[11px] text-[var(--text-muted)]">
-                    Receive system banners on your phone or computer when artists drop music or admin updates your account.
+                    {isNy
+                      ? 'Landirani mauthenga pafoni yanu oimba akatulutsa nyimbo kapena oyang\'anira akasintha akaunti yanu.'
+                      : 'Receive system banners on your phone or computer when artists drop music or admin updates your account.'}
                   </p>
                 </div>
                 {Notification.permission !== 'granted' && (
@@ -1479,7 +1662,9 @@ export const AccountView: React.FC = () => {
                         .then((perm) => {
                           showNotice(
                             perm === 'granted'
-                              ? 'Device alerts enabled!'
+                              ? isNy ? 'Zidziwitso za pafoni zayatsidwa!' : 'Device alerts enabled!'
+                              : isNy
+                              ? 'Yatsani zidziwitso mu zokonda za bulawuza yanu.'
                               : 'Enable notifications in your browser/app settings to receive alerts.',
                             perm === 'granted' ? 'ok' : 'err'
                           );
@@ -1488,7 +1673,7 @@ export const AccountView: React.FC = () => {
                     }}
                     className="px-3.5 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer self-start sm:self-auto shrink-0"
                   >
-                    Enable Device Alerts
+                    {isNy ? 'Yatsani Zidziwitso' : 'Enable Device Alerts'}
                   </button>
                 )}
               </div>
@@ -1496,11 +1681,31 @@ export const AccountView: React.FC = () => {
 
             <div className="space-y-2">
               {[
-                { title: 'New releases from followed artists', inApp: 'newReleasesInApp' as const, push: 'newReleasesPush' as const },
-                { title: 'Likes & new followers', inApp: 'likesFollowsInApp' as const, push: 'likesFollowsPush' as const },
-                { title: 'Weekly listening recap', inApp: 'weeklyRecapInApp' as const, push: 'weeklyRecapPush' as const },
-                { title: 'Artist monetization & payout updates', inApp: 'payoutUpdatesInApp' as const, push: 'payoutUpdatesPush' as const },
-                { title: 'Platform news & tips', inApp: 'productNewsInApp' as const, push: 'productNewsPush' as const },
+                {
+                  title: isNy ? 'Nyimbo zatsopano za oimba omwe mumawatsatira' : 'New releases from followed artists',
+                  inApp: 'newReleasesInApp' as const,
+                  push: 'newReleasesPush' as const,
+                },
+                {
+                  title: isNy ? 'Okonda nyimbo & otsatira atsopano' : 'Likes & new followers',
+                  inApp: 'likesFollowsInApp' as const,
+                  push: 'likesFollowsPush' as const,
+                },
+                {
+                  title: isNy ? 'Chidule cha mlungu ndi mlungu' : 'Weekly listening recap',
+                  inApp: 'weeklyRecapInApp' as const,
+                  push: 'weeklyRecapPush' as const,
+                },
+                {
+                  title: isNy ? 'Malipiro a woimba & kutenga ndalama' : 'Artist monetization & payout updates',
+                  inApp: 'payoutUpdatesInApp' as const,
+                  push: 'payoutUpdatesPush' as const,
+                },
+                {
+                  title: isNy ? 'Nkhani za nsanja & malangizo' : 'Platform news & tips',
+                  inApp: 'productNewsInApp' as const,
+                  push: 'productNewsPush' as const,
+                },
               ].map((row) => (
                 <div
                   key={row.inApp}
@@ -1515,7 +1720,7 @@ export const AccountView: React.FC = () => {
                         onChange={(e) => updateUserSettings({ notifications: { [row.inApp]: e.target.checked } })}
                         className="accent-[var(--accent)]"
                       />
-                      <span>In-App</span>
+                      <span>{isNy ? 'M\'pulogalamu' : 'In-App'}</span>
                     </label>
                     <label className="flex items-center gap-1.5 cursor-pointer text-[var(--text-muted)]">
                       <input
@@ -1524,7 +1729,7 @@ export const AccountView: React.FC = () => {
                         onChange={(e) => handleRequestPushPermission(row.push, e.target.checked)}
                         className="accent-[var(--accent)]"
                       />
-                      <span>Push</span>
+                      <span>{isNy ? 'Pafoni' : 'Push'}</span>
                     </label>
                   </div>
                 </div>
@@ -1538,33 +1743,37 @@ export const AccountView: React.FC = () => {
           id="privacy"
           domId="privacy-data"
           icon={Shield}
-          title="Privacy & Safety"
-          subtitle="Profile visibility, listening activity, and personal data export"
+          title={t('privacy_safety')}
+          subtitle={
+            isNy
+              ? 'Maonekedwe a mbiri, zomwe mumamvera ndi kutenga deta yanu'
+              : 'Profile visibility, listening activity, and personal data export'
+          }
           isOpen={openSection === 'privacy'}
           onToggle={() => setOpenSection(openSection === 'privacy' ? '' : 'privacy')}
         >
           <div className="space-y-3">
             <ToggleRow
-              label="Public profile"
-              description="Let others discover your profile and creator page"
+              label={isNy ? 'Mbiri ya aliyense' : 'Public profile'}
+              description={isNy ? 'Lolani ena kuwona mbiri yanu ndi tsamba la woimba' : 'Let others discover your profile and creator page'}
               checked={userSettings.privacy.publicProfile}
               onChange={(v) => updateUserSettings({ privacy: { publicProfile: v } })}
             />
             <ToggleRow
-              label="Show listening activity"
-              description="Allow followed creators to see aggregated play counts"
+              label={isNy ? 'Onetsani zomwe mukumvera' : 'Show listening activity'}
+              description={isNy ? 'Lolani oimba omwe mumatsatira awone chiwerengero chanu' : 'Allow followed creators to see aggregated play counts'}
               checked={userSettings.privacy.showListeningActivity}
               onChange={(v) => updateUserSettings({ privacy: { showListeningActivity: v } })}
             />
             <ToggleRow
-              label="Show playlists publicly"
-              description="Display your public playlists in Search and Discover"
+              label={isNy ? 'Onetsani mindandanda kwa aliyense' : 'Show playlists publicly'}
+              description={isNy ? 'Onetsani mindandanda yanu ya aliyense pa Kusaka ndi Fufuzani' : 'Display your public playlists in Search and Discover'}
               checked={userSettings.privacy.showPlaylistsPublicly}
               onChange={(v) => updateUserSettings({ privacy: { showPlaylistsPublicly: v } })}
             />
             <ToggleRow
-              label="Hide explicit content"
-              description="Skip or blur tracks marked explicit"
+              label={isNy ? 'Bisani nyimbo za mawu achipongwe' : 'Hide explicit content'}
+              description={isNy ? 'Dumphani nyimbo zolembedwa kuti zili ndi mawu oopsa' : 'Skip or blur tracks marked explicit'}
               checked={userSettings.privacy.explicitContentFilter}
               onChange={(v) => updateUserSettings({ privacy: { explicitContentFilter: v } })}
             />
@@ -1576,7 +1785,7 @@ export const AccountView: React.FC = () => {
                 className="px-4 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] flex items-center gap-1.5 cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>Download my data (JSON)</span>
+                <span>{isNy ? 'Tsitsani deta yanga (JSON)' : 'Download my data (JSON)'}</span>
               </button>
 
               {!confirmClearHistory ? (
@@ -1585,28 +1794,30 @@ export const AccountView: React.FC = () => {
                   onClick={() => setConfirmClearHistory(true)}
                   className="px-4 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--danger)] cursor-pointer"
                 >
-                  Clear listening history
+                  {isNy ? 'Fufutani mbiri ya zomveredwa' : 'Clear listening history'}
                 </button>
               ) : (
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--danger)]/40">
-                  <span className="text-xs text-[var(--text)]">Clear {playHistory.length} items?</span>
+                  <span className="text-xs text-[var(--text)]">
+                    {isNy ? `Fufutani zinthu ${playHistory.length}?` : `Clear ${playHistory.length} items?`}
+                  </span>
                   <button
                     type="button"
                     onClick={() => {
                       clearHistory();
                       setConfirmClearHistory(false);
-                      showNotice('Listening history cleared.');
+                      showNotice(isNy ? 'Mbiri ya zomveredwa yafufutidwa.' : 'Listening history cleared.');
                     }}
                     className="px-2.5 py-1 rounded-lg bg-[var(--danger)] text-white text-xs font-bold cursor-pointer"
                   >
-                    Yes, clear
+                    {isNy ? 'Inde, fufutani' : 'Yes, clear'}
                   </button>
                   <button
                     type="button"
                     onClick={() => setConfirmClearHistory(false)}
                     className="px-2 py-1 text-xs text-[var(--text-muted)] cursor-pointer"
                   >
-                    Cancel
+                    {t('cancel')}
                   </button>
                 </div>
               )}
@@ -1618,19 +1829,25 @@ export const AccountView: React.FC = () => {
         <SettingsGroup
           id="appearance"
           icon={Palette}
-          title="Appearance & Language"
-          subtitle="Theme (System / Light / Dark), language, and layout density"
+          title={t('appearance_language')}
+          subtitle={
+            isNy
+              ? 'Mtundu wa tsamba (Makina / Kuwala / Mdima), chilankhulo ndi kachulukidwe'
+              : 'Theme (System / Light / Dark), language, and layout density'
+          }
           isOpen={openSection === 'appearance'}
           onToggle={() => setOpenSection(openSection === 'appearance' ? '' : 'appearance')}
         >
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-[var(--text)]">Theme appearance</label>
+              <label className="text-xs font-semibold text-[var(--text)]">
+                {isNy ? 'Maonekedwe a tsamba' : 'Theme appearance'}
+              </label>
               <div className="grid grid-cols-3 gap-2">
                 {[
-                  { id: 'system' as const, label: 'System', icon: Monitor },
-                  { id: 'light' as const, label: 'Light', icon: Sun },
-                  { id: 'dark' as const, label: 'Dark', icon: Moon },
+                  { id: 'system' as const, label: isNy ? 'Makina' : 'System', icon: Monitor },
+                  { id: 'light' as const, label: isNy ? 'Kuwala' : 'Light', icon: Sun },
+                  { id: 'dark' as const, label: isNy ? 'Mdima' : 'Dark', icon: Moon },
                 ].map((opt) => {
                   const Icon = opt.icon;
                   const active = themeMode === opt.id;
@@ -1657,7 +1874,7 @@ export const AccountView: React.FC = () => {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-[var(--text)]">Language</label>
+              <label className="text-xs font-semibold text-[var(--text)]">{t('language')}</label>
               <div className="grid grid-cols-2 gap-2">
                 {[
                   { id: 'en' as const, label: 'English' },
@@ -1666,9 +1883,12 @@ export const AccountView: React.FC = () => {
                   <button
                     key={l.id}
                     type="button"
-                    onClick={() => updateUserSettings({ appearance: { language: l.id } })}
+                    onClick={() => {
+                      setLanguage(l.id);
+                      updateUserSettings({ appearance: { language: l.id } });
+                    }}
                     className={`py-2.5 px-3 rounded-xl border text-xs font-semibold cursor-pointer ${
-                      userSettings.appearance.language === l.id
+                      language === l.id
                         ? 'bg-[var(--accent)] text-[var(--accent-contrast)] border-transparent font-bold'
                         : 'bg-[var(--surface-2)] text-[var(--text)] border-[var(--border)]'
                     }`}
@@ -1680,11 +1900,13 @@ export const AccountView: React.FC = () => {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-[var(--text)]">Card density</label>
+              <label className="text-xs font-semibold text-[var(--text)]">
+                {isNy ? 'Makulidwe a makadi' : 'Card density'}
+              </label>
               <div className="grid grid-cols-2 gap-2">
                 {[
-                  { id: 'comfortable' as const, label: 'Comfortable' },
-                  { id: 'compact' as const, label: 'Compact' },
+                  { id: 'comfortable' as const, label: isNy ? 'Otambasuka' : 'Comfortable' },
+                  { id: 'compact' as const, label: isNy ? 'Ochepa malo' : 'Compact' },
                 ].map((d) => (
                   <button
                     key={d.id}
@@ -1708,8 +1930,12 @@ export const AccountView: React.FC = () => {
         <SettingsGroup
           id="creator"
           icon={Music}
-          title="Creator Tools"
-          subtitle="Upload your songs, check analytics, and manage monetization"
+          title={t('creator_tools')}
+          subtitle={
+            isNy
+              ? 'Kwezani nyimbo zanu, onani ziwerengero ndi kutenga ndalama'
+              : 'Upload your songs, check analytics, and manage monetization'
+          }
           isOpen={openSection === 'creator'}
           onToggle={() => setOpenSection(openSection === 'creator' ? '' : 'creator')}
         >
@@ -1717,9 +1943,11 @@ export const AccountView: React.FC = () => {
             {isArtist || isAdmin ? (
               <div className="p-4 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs font-bold text-[var(--text)]">Artist Creator</div>
+                  <div className="text-xs font-bold text-[var(--text)]">{t('artist_creator')}</div>
                   <div className="text-[11px] text-[var(--text-muted)]">
-                    Upload tracks, review real stats, and manage your payouts.
+                    {isNy
+                      ? 'Kwezani nyimbo, onani ziwerengero zenizeni ndi kuyang\'anira malipiro.'
+                      : 'Upload tracks, review real stats, and manage your payouts.'}
                   </div>
                 </div>
                 <button
@@ -1727,7 +1955,7 @@ export const AccountView: React.FC = () => {
                   onClick={() => navigate('/artistcreator')}
                   className="px-4 py-2 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer self-start sm:self-auto"
                 >
-                  Open Artist Creator
+                  {t('go_to_studio')}
                 </button>
               </div>
             ) : (
@@ -1735,13 +1963,17 @@ export const AccountView: React.FC = () => {
                 <div>
                   <div className="text-xs font-bold text-[var(--text)]">
                     {currentUser.applicationStatus === 'pending'
-                      ? 'Artist application under review'
-                      : 'Ready to release music?'}
+                      ? isNy ? 'Pempho lanu la woimba likuyang\'aniridwa' : 'Artist application under review'
+                      : isNy ? 'Mwakonzeka kutulutsa nyimbo?' : 'Ready to release music?'}
                   </div>
                   <div className="text-[11px] text-[var(--text-muted)]">
                     {currentUser.applicationStatus === 'pending'
-                      ? 'Your creator request is queued for review. View your status in Artist Creator.'
-                      : 'Submit your artist details to unlock Artist Creator and upload music.'}
+                      ? isNy
+                        ? 'Pempho lanu lili m\'ndandanda woyang\'anira. Onani mmene lilili mu Situdiyo.'
+                        : 'Your creator request is queued for review. View your status in Artist Creator.'
+                      : isNy
+                        ? 'Tumizani zambiri zanu kuti mutsegule Situdiyo ya Woimba ndi kukweza nyimbo.'
+                        : 'Submit your artist details to unlock Artist Creator and upload music.'}
                   </div>
                 </div>
                 <button
@@ -1749,7 +1981,9 @@ export const AccountView: React.FC = () => {
                   onClick={() => navigate('/artistcreator')}
                   className="px-4 py-2 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer self-start sm:self-auto"
                 >
-                  {currentUser.applicationStatus === 'pending' ? 'View wait page' : 'Apply as artist'}
+                  {currentUser.applicationStatus === 'pending'
+                    ? isNy ? 'Onani tsamba lodikira' : 'View wait page'
+                    : isNy ? 'Lembani ngati woimba' : 'Apply as artist'}
                 </button>
               </div>
             )}
@@ -1760,8 +1994,12 @@ export const AccountView: React.FC = () => {
         <SettingsGroup
           id="support"
           icon={HelpCircle}
-          title="Support & About"
-          subtitle="Help center, contact support, legal policies, and app info"
+          title={t('support_about')}
+          subtitle={
+            isNy
+              ? 'Malo a thandizo, lumikizanani nafe, malamulo ndi zambiri za pulogalamu'
+              : 'Help center, contact support, legal policies, and app info'
+          }
           isOpen={openSection === 'support'}
           onToggle={() => setOpenSection(openSection === 'support' ? '' : 'support')}
         >
@@ -1773,7 +2011,7 @@ export const AccountView: React.FC = () => {
             >
               <span className="text-xs font-semibold text-[var(--text)] flex items-center gap-2">
                 <HelpCircle className="w-4 h-4 text-[var(--accent-text)]" />
-                Help Center
+                {isNy ? 'Malo a Thandizo' : 'Help Center'}
               </span>
               <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
             </button>
@@ -1785,7 +2023,7 @@ export const AccountView: React.FC = () => {
             >
               <span className="text-xs font-semibold text-[var(--text)] flex items-center gap-2">
                 <MessageSquare className="w-4 h-4 text-[var(--accent-text)]" />
-                Contact support
+                {isNy ? 'Lumikizanani ndi Thandizo' : 'Contact support'}
               </span>
               <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
             </button>
@@ -1797,7 +2035,7 @@ export const AccountView: React.FC = () => {
             >
               <span className="text-xs font-semibold text-[var(--text)] flex items-center gap-2">
                 <Bug className="w-4 h-4 text-[var(--accent-text)]" />
-                Report a bug
+                {isNy ? 'Nenani za vuto' : 'Report a bug'}
               </span>
               <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
             </button>
@@ -1809,7 +2047,7 @@ export const AccountView: React.FC = () => {
             >
               <span className="text-xs font-semibold text-[var(--text)] flex items-center gap-2">
                 <Star className="w-4 h-4 text-[var(--accent-text)]" />
-                Rate LOWERVIBE
+                {isNy ? 'Perekani ndemanga pa LOWERVIBE' : 'Rate LOWERVIBE'}
               </span>
               <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
             </button>
@@ -1819,7 +2057,7 @@ export const AccountView: React.FC = () => {
               onClick={() => navigate('/terms')}
               className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-left hover:border-[var(--border-strong)] transition cursor-pointer flex items-center justify-between"
             >
-              <span className="text-xs font-semibold text-[var(--text)]">Terms of Service</span>
+              <span className="text-xs font-semibold text-[var(--text)]">{t('footer_terms')}</span>
               <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
             </button>
 
@@ -1828,7 +2066,7 @@ export const AccountView: React.FC = () => {
               onClick={() => navigate('/privacy')}
               className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-left hover:border-[var(--border-strong)] transition cursor-pointer flex items-center justify-between"
             >
-              <span className="text-xs font-semibold text-[var(--text)]">Privacy Policy</span>
+              <span className="text-xs font-semibold text-[var(--text)]">{t('footer_privacy')}</span>
               <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
             </button>
 
@@ -1837,7 +2075,7 @@ export const AccountView: React.FC = () => {
               onClick={() => navigate('/copyright')}
               className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-left hover:border-[var(--border-strong)] transition cursor-pointer flex items-center justify-between"
             >
-              <span className="text-xs font-semibold text-[var(--text)]">Copyright &amp; Takedown</span>
+              <span className="text-xs font-semibold text-[var(--text)]">{t('footer_copyright')}</span>
               <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
             </button>
 
@@ -1846,7 +2084,9 @@ export const AccountView: React.FC = () => {
               onClick={() => setIsLicensesOpen(true)}
               className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-left hover:border-[var(--border-strong)] transition cursor-pointer flex items-center justify-between"
             >
-              <span className="text-xs font-semibold text-[var(--text)]">Open-source licenses</span>
+              <span className="text-xs font-semibold text-[var(--text)]">
+                {isNy ? 'Zilolezo za pulogalamu' : 'Open-source licenses'}
+              </span>
               <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
             </button>
 
@@ -1857,7 +2097,9 @@ export const AccountView: React.FC = () => {
             >
               <span className="text-xs font-semibold text-[var(--text)] flex items-center gap-2">
                 <Smartphone className="w-4 h-4 text-[var(--accent-text)]" />
-                Install LOWERVIBE Main App (Android, iPhone &amp; Desktop)
+                {isNy
+                  ? 'Ikani LOWERVIBE Main App (Android, iPhone & Kompyuta)'
+                  : 'Install LOWERVIBE Main App (Android, iPhone & Desktop)'}
               </span>
               <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
             </button>
@@ -1870,8 +2112,8 @@ export const AccountView: React.FC = () => {
               <span className="text-xs font-semibold text-[var(--text)] flex items-center gap-2">
                 <Music className="w-4 h-4 text-[var(--violet)]" />
                 {isArtist || isAdmin
-                  ? 'Install LOWERVIBE Creator App (Standalone Studio)'
-                  : 'LOWERVIBE Creator App (Unlocks After Artist Approval)'}
+                  ? isNy ? 'Ikani LOWERVIBE Creator App (Situdiyo Yokha)' : 'Install LOWERVIBE Creator App (Standalone Studio)'
+                  : isNy ? 'LOWERVIBE Creator App (Imatseguka Mukavomerezedwa)' : 'LOWERVIBE Creator App (Unlocks After Artist Approval)'}
               </span>
               <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
             </button>
@@ -1885,21 +2127,21 @@ export const AccountView: React.FC = () => {
 
       {/* MANAGE DOWNLOADS MODAL */}
       {isManageDownloadsOpen && (
-        <ModalShell title="Offline Downloads" onClose={() => setIsManageDownloadsOpen(false)}>
+        <ModalShell title={isNy ? 'Nyimbo Zopanda Intaneti' : 'Offline Downloads'} onClose={() => setIsManageDownloadsOpen(false)}>
           <div className="space-y-4">
             <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
-              <span>{offlineStats.count} cached file(s)</span>
+              <span>{isNy ? `Mafayilo ${offlineStats.count} osungidwa` : `${offlineStats.count} cached file(s)`}</span>
               <span className="font-mono font-bold text-[var(--text)]">{formatBytes(offlineStats.totalBytes)}</span>
             </div>
 
             {offlineStats.entries.length === 0 ? (
               <div className="py-8 text-center text-xs text-[var(--text-muted)]">
-                No songs downloaded to device storage yet.
+                {isNy ? 'Palibe nyimbo zotsitsidwa pa foni pakadali pano.' : 'No songs downloaded to device storage yet.'}
               </div>
             ) : (
               <div className="space-y-2 max-h-72 overflow-y-auto">
                 {offlineStats.entries.map((entry) => {
-                  const t = tracks.find((tr) => tr.id === entry.trackId);
+                  const trItem = tracks.find((tr) => tr.id === entry.trackId);
                   return (
                     <div
                       key={entry.trackId}
@@ -1907,14 +2149,14 @@ export const AccountView: React.FC = () => {
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <img
-                          src={t?.coverArt || DEFAULT_ARTWORK_SVG}
-                          alt={t?.title || 'Track'}
+                          src={trItem?.coverArt || DEFAULT_ARTWORK_SVG}
+                          alt={trItem?.title || 'Track'}
                           referrerPolicy="no-referrer"
                           className="w-9 h-9 rounded-lg object-cover shrink-0"
                         />
                         <div className="min-w-0">
                           <div className="text-xs font-semibold text-[var(--text)] truncate">
-                            {t?.title || entry.trackId}
+                            {trItem?.title || entry.trackId}
                           </div>
                           <div className="text-[11px] text-[var(--text-muted)]">
                             {formatBytes(entry.sizeBytes)}
@@ -1928,7 +2170,7 @@ export const AccountView: React.FC = () => {
                           await refreshCacheStats();
                         }}
                         className="p-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--danger)] cursor-pointer"
-                        title="Remove from offline cache"
+                        title={isNy ? 'Chotsani pafoni' : 'Remove from offline cache'}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -1946,7 +2188,7 @@ export const AccountView: React.FC = () => {
                     onClick={() => setConfirmClearCache(true)}
                     className="px-4 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--danger)] cursor-pointer"
                   >
-                    Clear all offline files
+                    {isNy ? 'Fufutani zonse zopanda intaneti' : 'Clear all offline files'}
                   </button>
                 ) : (
                   <div className="flex items-center gap-2">
@@ -1955,7 +2197,7 @@ export const AccountView: React.FC = () => {
                       onClick={() => setConfirmClearCache(false)}
                       className="px-3 py-1.5 text-xs text-[var(--text-muted)] cursor-pointer"
                     >
-                      Cancel
+                      {t('cancel')}
                     </button>
                     <button
                       type="button"
@@ -1963,11 +2205,11 @@ export const AccountView: React.FC = () => {
                         await clearOfflineCache();
                         await refreshCacheStats();
                         setConfirmClearCache(false);
-                        showNotice('Offline storage cleared.');
+                        showNotice(isNy ? 'Zosungidwa pafoni zafufutidwa.' : 'Offline storage cleared.');
                       }}
                       className="px-4 py-1.5 rounded-xl bg-[var(--danger)] text-white text-xs font-bold cursor-pointer"
                     >
-                      Confirm clear
+                      {isNy ? 'Tsimikizirani kufufuta' : 'Confirm clear'}
                     </button>
                   </div>
                 )}
@@ -1979,15 +2221,24 @@ export const AccountView: React.FC = () => {
 
       {/* DELETE ACCOUNT CONFIRM MODAL */}
       {isDeleteModalOpen && (
-        <ModalShell title="Delete account" onClose={() => setIsDeleteModalOpen(false)}>
+        <ModalShell title={isNy ? 'Fufutani akaunti' : 'Delete account'} onClose={() => setIsDeleteModalOpen(false)}>
           <div className="space-y-4">
             <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-              This removes your profile, settings, and playlists permanently. Type{' '}
-              <strong className="text-[var(--text)]">DELETE</strong> below to confirm.
+              {isNy ? (
+                <>
+                  Izi zichotsa mbiri yanu, zokonda ndi mindandanda yanu kotheratu. Lembani{' '}
+                  <strong className="text-[var(--text)]">DELETE</strong> pansipa kuti mutsimikizire.
+                </>
+              ) : (
+                <>
+                  This removes your profile, settings, and playlists permanently. Type{' '}
+                  <strong className="text-[var(--text)]">DELETE</strong> below to confirm.
+                </>
+              )}
             </p>
             <input
               type="text"
-              placeholder="Type DELETE"
+              placeholder={isNy ? 'Lembani DELETE' : 'Type DELETE'}
               value={deleteConfirmText}
               onChange={(e) => setDeleteConfirmText(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--danger)]"
@@ -1998,7 +2249,7 @@ export const AccountView: React.FC = () => {
                 onClick={() => setIsDeleteModalOpen(false)}
                 className="px-4 py-2 rounded-xl bg-[var(--surface-2)] text-xs font-semibold text-[var(--text)] cursor-pointer"
               >
-                Cancel
+                {t('cancel')}
               </button>
               <button
                 type="button"
@@ -2006,7 +2257,9 @@ export const AccountView: React.FC = () => {
                 onClick={handleDeleteAccountConfirm}
                 className="px-4 py-2 rounded-xl bg-[var(--danger)] text-white text-xs font-bold cursor-pointer disabled:opacity-50"
               >
-                {isDeletingAccount ? 'Deleting...' : 'Delete permanently'}
+                {isDeletingAccount
+                  ? isNy ? 'Ikufufuta...' : 'Deleting...'
+                  : isNy ? 'Fufutani kotheratu' : 'Delete permanently'}
               </button>
             </div>
           </div>
@@ -2015,13 +2268,13 @@ export const AccountView: React.FC = () => {
 
       {/* HELP CENTER MODAL */}
       {isHelpOpen && (
-        <ModalShell title="Help Center" onClose={() => setIsHelpOpen(false)}>
+        <ModalShell title={isNy ? 'Malo a Thandizo' : 'Help Center'} onClose={() => setIsHelpOpen(false)}>
           <div className="space-y-3">
             <div className="relative">
               <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3 top-3" />
               <input
                 type="text"
-                placeholder="Search questions..."
+                placeholder={isNy ? 'Sakani mafunso...' : 'Search questions...'}
                 value={helpQuery}
                 onChange={(e) => setHelpQuery(e.target.value)}
                 className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
@@ -2041,23 +2294,23 @@ export const AccountView: React.FC = () => {
 
       {/* CONTACT SUPPORT MODAL */}
       {isSupportOpen && (
-        <ModalShell title="Contact Support" onClose={() => setIsSupportOpen(false)}>
+        <ModalShell title={isNy ? 'Lumikizanani ndi Thandizo' : 'Contact Support'} onClose={() => setIsSupportOpen(false)}>
           <form onSubmit={handleSendSupport} className="space-y-3">
             <select
               value={supportCategory}
               onChange={(e) => setSupportCategory(e.target.value as typeof supportCategory)}
               className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
             >
-              <option value="account">Account &amp; Sign-in</option>
-              <option value="playback">Playback &amp; Downloads</option>
-              <option value="uploads">Music Uploads</option>
-              <option value="payouts">Payouts &amp; Monetization</option>
-              <option value="other">Other</option>
+              <option value="account">{isNy ? 'Akaunti & Kulowa' : 'Account & Sign-in'}</option>
+              <option value="playback">{isNy ? 'Kuliza Nyimbo & Kutsitsa' : 'Playback & Downloads'}</option>
+              <option value="uploads">{isNy ? 'Kukweza Nyimbo' : 'Music Uploads'}</option>
+              <option value="payouts">{isNy ? 'Malipiro & Kutenga Ndalama' : 'Payouts & Monetization'}</option>
+              <option value="other">{isNy ? 'Zina' : 'Other'}</option>
             </select>
             <input
               type="text"
               required
-              placeholder="Subject"
+              placeholder={isNy ? 'Mutu wa nkhani' : 'Subject'}
               value={supportSubject}
               onChange={(e) => setSupportSubject(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
@@ -2065,7 +2318,7 @@ export const AccountView: React.FC = () => {
             <textarea
               rows={4}
               required
-              placeholder="Describe how we can help..."
+              placeholder={isNy ? 'Fotokozani momwe tingakuthandizireni...' : 'Describe how we can help...'}
               value={supportMessage}
               onChange={(e) => setSupportMessage(e.target.value)}
               className="w-full px-3.5 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
@@ -2076,14 +2329,14 @@ export const AccountView: React.FC = () => {
                 onClick={() => setIsSupportOpen(false)}
                 className="px-4 py-2 rounded-xl bg-[var(--surface-2)] text-xs text-[var(--text-muted)] cursor-pointer"
               >
-                Cancel
+                {t('cancel')}
               </button>
               <button
                 type="submit"
                 disabled={isSendingSupport}
                 className="px-5 py-2 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer"
               >
-                {isSendingSupport ? 'Sending...' : 'Send message'}
+                {isSendingSupport ? (isNy ? 'Ikutumiza...' : 'Sending...') : (isNy ? 'Tumizani uthenga' : 'Send message')}
               </button>
             </div>
           </form>
@@ -2092,25 +2345,27 @@ export const AccountView: React.FC = () => {
 
       {/* REPORT A BUG MODAL */}
       {isBugOpen && (
-        <ModalShell title="Report a Bug" onClose={() => setIsBugOpen(false)}>
+        <ModalShell title={isNy ? 'Nenani za Vuto' : 'Report a Bug'} onClose={() => setIsBugOpen(false)}>
           <form onSubmit={handleSendBugReport} className="space-y-3">
             <input
               type="text"
               required
-              placeholder="What went wrong?"
+              placeholder={isNy ? 'Chalakwika chiyani?' : 'What went wrong?'}
               value={bugSummary}
               onChange={(e) => setBugSummary(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
             />
             <textarea
               rows={3}
-              placeholder="Steps to reproduce (optional)"
+              placeholder={isNy ? 'Njira zobwereza vutolo (osakakamizidwa)' : 'Steps to reproduce (optional)'}
               value={bugDetails}
               onChange={(e) => setBugDetails(e.target.value)}
               className="w-full px-3.5 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
             />
             <p className="text-[11px] text-[var(--text-muted)]">
-              Includes basic browser and device context so we can investigate faster.
+              {isNy
+                ? 'Zimaphatikizapo zambiri za foni kapena bulawuza kuti tifufuze mwachangu.'
+                : 'Includes basic browser and device context so we can investigate faster.'}
             </p>
             <div className="flex justify-end gap-2">
               <button
@@ -2118,14 +2373,14 @@ export const AccountView: React.FC = () => {
                 onClick={() => setIsBugOpen(false)}
                 className="px-4 py-2 rounded-xl bg-[var(--surface-2)] text-xs text-[var(--text-muted)] cursor-pointer"
               >
-                Cancel
+                {t('cancel')}
               </button>
               <button
                 type="submit"
                 disabled={isSendingBug}
                 className="px-5 py-2 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer"
               >
-                {isSendingBug ? 'Sending...' : 'Submit bug'}
+                {isSendingBug ? (isNy ? 'Ikutumiza...' : 'Sending...') : (isNy ? 'Tumizani lipoti' : 'Submit bug')}
               </button>
             </div>
           </form>
@@ -2134,9 +2389,11 @@ export const AccountView: React.FC = () => {
 
       {/* OPEN-SOURCE LICENSES MODAL */}
       {isLicensesOpen && (
-        <ModalShell title="Open-Source Licenses" onClose={() => setIsLicensesOpen(false)}>
+        <ModalShell title={isNy ? 'Zilolezo za Pulogalamu' : 'Open-Source Licenses'} onClose={() => setIsLicensesOpen(false)}>
           <div className="space-y-2 text-xs text-[var(--text-muted)] max-h-72 overflow-y-auto">
-            <p className="font-semibold text-[var(--text)]">LOWERVIBE uses these open-source packages:</p>
+            <p className="font-semibold text-[var(--text)]">
+              {isNy ? 'LOWERVIBE imagwiritsa ntchito zida izi:' : 'LOWERVIBE uses these open-source packages:'}
+            </p>
             <ul className="space-y-1.5 list-disc pl-5">
               <li>React &amp; React DOM (MIT License)</li>
               <li>Firebase Web SDK (Apache 2.0 License)</li>
@@ -2150,9 +2407,11 @@ export const AccountView: React.FC = () => {
 
       {/* RATE LOWERVIBE MODAL */}
       {isRateOpen && (
-        <ModalShell title="Rate LOWERVIBE" onClose={() => setIsRateOpen(false)}>
+        <ModalShell title={isNy ? 'Perekani Ndemanga pa LOWERVIBE' : 'Rate LOWERVIBE'} onClose={() => setIsRateOpen(false)}>
           <div className="space-y-4 text-center">
-            <p className="text-xs text-[var(--text-muted)]">How is your experience so far?</p>
+            <p className="text-xs text-[var(--text-muted)]">
+              {isNy ? 'Kodi mukugwiritsa ntchito bwanji LOWERVIBE pakadali pano?' : 'How is your experience so far?'}
+            </p>
             <div className="flex items-center justify-center gap-2">
               {[1, 2, 3, 4, 5].map((star) => (
                 <button
@@ -2171,7 +2430,7 @@ export const AccountView: React.FC = () => {
             </div>
             <textarea
               rows={2}
-              placeholder="Optional feedback..."
+              placeholder={isNy ? 'Ndemanga zanu (osakakamizidwa)...' : 'Optional feedback...'}
               value={ratingFeedback}
               onChange={(e) => setRatingFeedback(e.target.value)}
               className="w-full px-3.5 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
@@ -2185,16 +2444,16 @@ export const AccountView: React.FC = () => {
                   message: ratingFeedback.trim() || `Rated ${ratingStars} stars`,
                 });
                 if (!res.success) {
-                  showNotice(res.error || 'Could not send feedback.', 'err');
+                  showNotice(res.error || (isNy ? 'Sitinathe kutumiza ndemanga.' : 'Could not send feedback.'), 'err');
                   return;
                 }
                 setRatingFeedback('');
                 setIsRateOpen(false);
-                showNotice('Thank you for your feedback!');
+                showNotice(isNy ? 'Zikomo chifukwa cha ndemanga zanu!' : 'Thank you for your feedback!');
               }}
               className="w-full py-2.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer"
             >
-              Send feedback
+              {isNy ? 'Tumizani ndemanga' : 'Send feedback'}
             </button>
           </div>
         </ModalShell>
