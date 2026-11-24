@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Clock,
   DollarSign,
+  Download,
   FileAudio,
   FileCheck,
   HelpCircle,
@@ -55,8 +56,10 @@ import {
 import { CANONICAL_GENRES, subscribeToFirestoreGenres } from '../services/genresService';
 import { detectDefaultCountry } from '../data/regions';
 import { GenreSelectOrCustom } from './common/GenreSelectOrCustom';
+import { LowervibeBanner } from './common/LowervibeBanner';
 import { MoodSelectOrCustom } from './common/MoodSelectOrCustom';
 import { RegionSelect } from './common/RegionSelect';
+import { exportAlertBannerPng } from '../utils/promoBannerExport';
 
 interface AdminPortalProps {
   onBackToExplore: () => void;
@@ -1644,8 +1647,86 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
                 Create Platform Banner
               </h2>
               <p className="text-xs text-[var(--text-muted)]">
-                Publish a structured LOWERVIBE banner (announcements, maintenance, new features, or release highlights).
+                Publish a structured LOWERVIBE banner or load a ready-made sample to preview and export for social media.
               </p>
+            </div>
+
+            {/* Ready-to-Use Banner Sample Presets */}
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold text-[var(--text-dim)]">
+                Quick Banner Samples (Click to load)
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  {
+                    label: 'New Release Drop',
+                    type: 'new_release' as const,
+                    category: 'promotional' as const,
+                    audience: 'all' as const,
+                    title: 'Fresh Sounds Live on LOWERVIBE',
+                    message: 'Stream the latest Malawian Afro-Pop, Amapiano, and Hip-Hop drops free on any mobile network.',
+                    actionLabel: 'Listen Now',
+                    actionRoute: '/discover',
+                  },
+                  {
+                    label: 'Artist Open Call ($0)',
+                    type: 'platform_announcement' as const,
+                    category: 'promotional' as const,
+                    audience: 'all' as const,
+                    title: 'Upload Your Music Free on LOWERVIBE',
+                    message: 'Independent artists get verified artist pages, real-time analytics, and direct fan shares at zero cost.',
+                    actionLabel: 'Artist Studio',
+                    actionRoute: '/studio',
+                  },
+                  {
+                    label: 'New Player Upgrade',
+                    type: 'new_feature' as const,
+                    category: 'promotional' as const,
+                    audience: 'all' as const,
+                    title: 'Smooth Crossfades & Swipe Player Live',
+                    message: 'Swipe album art left or right to skip tracks with uninterrupted crossfade transitions even when your screen is locked.',
+                    actionLabel: 'Explore',
+                    actionRoute: '/',
+                  },
+                  {
+                    label: 'Maintenance Notice',
+                    type: 'maintenance' as const,
+                    category: 'essential' as const,
+                    audience: 'all' as const,
+                    title: 'Scheduled Audio CDN Upgrade Tonight',
+                    message: 'Brief stream buffering may occur between 02:00 and 02:20 CAT while we optimize mobile playback servers.',
+                    actionLabel: 'Details',
+                    actionRoute: '/account',
+                  },
+                  {
+                    label: 'Security Alert',
+                    type: 'account_security' as const,
+                    category: 'essential' as const,
+                    audience: 'all' as const,
+                    title: 'Protect Your Creator Account',
+                    message: 'Verify your account email and never share sign-in verification codes with anyone claiming to be support.',
+                    actionLabel: 'Account Security',
+                    actionRoute: '/account',
+                  },
+                ].map((sample) => (
+                  <button
+                    key={sample.label}
+                    type="button"
+                    onClick={() => {
+                      setBannerType(sample.type);
+                      setBannerCategory(sample.category);
+                      setBannerAudience(sample.audience);
+                      setBannerTitle(sample.title);
+                      setBannerMessage(sample.message);
+                      setBannerActionLabel(sample.actionLabel);
+                      setBannerActionRoute(sample.actionRoute);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] hover:bg-[var(--bg)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] transition cursor-pointer"
+                  >
+                    {sample.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1723,11 +1804,49 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
               />
             </div>
 
-            <div className="flex justify-end">
+            {/* Live Redesigned Banner Preview */}
+            <div className="space-y-2 pt-2">
+              <p className="text-[11px] font-semibold text-[var(--text-muted)]">
+                Live Banner Preview
+              </p>
+              <LowervibeBanner
+                id="admin-live-preview"
+                type={bannerType}
+                category={bannerCategory}
+                title={bannerTitle.trim() || 'Fresh Sounds Live on LOWERVIBE'}
+                message={
+                  bannerMessage.trim() ||
+                  'Stream the latest Malawian Afro-Pop, Amapiano, and Hip-Hop drops free on any mobile network.'
+                }
+                actionLabel={bannerActionLabel.trim() || 'Listen Now'}
+                actionRoute={bannerActionRoute.trim() || '/discover'}
+                dismissible={bannerType !== 'maintenance'}
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={async () => {
+                  const ok = await exportAlertBannerPng({
+                    type: bannerType,
+                    title: bannerTitle.trim() || 'Fresh Sounds Live on LOWERVIBE',
+                    message:
+                      bannerMessage.trim() ||
+                      'Stream the latest Malawian Afro-Pop, Amapiano, and Hip-Hop drops free on any mobile network.',
+                    actionLabel: bannerActionLabel.trim() || 'Listen Now',
+                  });
+                  showToast(ok ? 'Social banner PNG downloaded.' : 'Could not export banner image.');
+                }}
+                className="px-4 py-2.5 rounded-xl bg-[var(--surface-2)] hover:bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] text-xs font-bold cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Download Social Banner (PNG)</span>
+              </button>
               <button
                 type="submit"
                 disabled={isSavingBanner}
-                className="px-5 py-2.5 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer disabled:opacity-50"
+                className="px-5 py-2.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer disabled:opacity-50"
               >
                 {isSavingBanner ? 'Publishing...' : 'Publish Banner'}
               </button>

@@ -2,6 +2,7 @@ import {
   Check,
   Code2,
   Copy,
+  Download,
   ExternalLink,
   MessageCircle,
   Send,
@@ -15,6 +16,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { Artist, Track } from '../types';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../utils/artworkFallback';
 import { translateGenreCategory } from '../utils/genreCategories';
+import { exportReleasePromoCard } from '../utils/promoBannerExport';
 import {
   getArtistShareUrl,
   getShortArtistShareUrl,
@@ -34,7 +36,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
   const [activeTab, setActiveTab] = useState<'card' | 'socials' | 'embed'>('card');
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedShortLink, setCopiedShortLink] = useState(false);
+  const [copiedCaption, setCopiedCaption] = useState(false);
   const [copiedEmbed, setCopiedEmbed] = useState(false);
+  const [exportingCard, setExportingCard] = useState<'square' | 'story' | null>(null);
 
   if (!track && !artist) return null;
 
@@ -86,6 +90,41 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
     } else {
       handleCopyLink();
     }
+  };
+
+  const viralCaption = track
+    ? isNy
+      ? `Nyimbo yatsopano pa LOWERVIBE! Mverani "${track.title}" ya ${track.artistName} kwaulere tsopano: ${shortUrl} #LOWERVIBE #MalawiMusic #AfricanMusic`
+      : `Out now on LOWERVIBE! Stream "${track.title}" by ${track.artistName} free on any phone: ${shortUrl} #LOWERVIBE #MalawiMusic #AfroPop`
+    : isNy
+    ? `Tsatirani ${artist!.name} pa LOWERVIBE ndikumvera nyimbo zawo zonse kwaulere: ${shortUrl} #LOWERVIBE #MalawiMusic`
+    : `Discover ${artist!.name} on LOWERVIBE — stream their latest tracks free: ${shortUrl} #LOWERVIBE #MalawiMusic`;
+
+  const handleCopyCaption = () => {
+    navigator.clipboard.writeText(viralCaption);
+    setCopiedCaption(true);
+    setTimeout(() => setCopiedCaption(false), 2200);
+  };
+
+  const handleDownloadPromoCard = async (aspect: 'square' | 'story') => {
+    setExportingCard(aspect);
+    await exportReleasePromoCard({
+      title: track ? track.title : artist!.name,
+      subtitle: track
+        ? `${track.artistName}${track.genre ? ` · ${translateGenreCategory(track.genre, language)}` : ''}`
+        : `${artist!.country || artist!.location || 'Malawi'} · Verified Artist`,
+      eyebrow: track
+        ? isNy
+          ? 'Nyimbo Yoyenera Kumvera'
+          : 'Now Streaming'
+        : isNy
+        ? 'Woimba wa LOWERVIBE'
+        : 'Artist Spotlight',
+      artworkUrl: track ? track.coverArt : artist!.avatar,
+      shortUrl,
+      aspect,
+    });
+    setExportingCard(null);
   };
 
   const encodedText = encodeURIComponent(shareDescription);
@@ -219,6 +258,49 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
                 >
                   <Share2 className="w-4 h-4" />
                   <span>{t('share')}</span>
+                </button>
+              </div>
+
+              {/* $0 Social Promo Kit: PNG Export + Ready-to-Post Caption */}
+              <div className="pt-3 border-t border-[var(--border)] space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[var(--text)]">
+                    {isNy ? 'Chithunzi & Mau Otsatsa (Zaulere)' : 'Free Social Promo Kit'}
+                  </span>
+                  <span className="text-[11px] text-[var(--text-muted)]">
+                    {isNy ? 'WhatsApp · TikTok · Facebook' : 'WhatsApp · TikTok · Facebook'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={exportingCard !== null}
+                    onClick={() => handleDownloadPromoCard('square')}
+                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-[var(--surface-2)] hover:bg-[var(--bg)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] transition cursor-pointer disabled:opacity-50"
+                  >
+                    <Download className="w-3.5 h-3.5 text-[var(--accent-text)]" />
+                    <span>{exportingCard === 'square' ? '...' : isNy ? 'Post Card (1:1)' : 'Post Card (1:1)'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={exportingCard !== null}
+                    onClick={() => handleDownloadPromoCard('story')}
+                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-[var(--surface-2)] hover:bg-[var(--bg)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] transition cursor-pointer disabled:opacity-50"
+                  >
+                    <Download className="w-3.5 h-3.5 text-[var(--violet)]" />
+                    <span>{exportingCard === 'story' ? '...' : isNy ? 'Status / Story (9:16)' : 'Story / Status (9:16)'}</span>
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopyCaption}
+                  className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] hover:bg-[var(--bg)] border border-[var(--border)] text-left transition cursor-pointer"
+                >
+                  <span className="text-[11px] text-[var(--text-muted)] truncate">{viralCaption}</span>
+                  <span className="text-[11px] font-bold text-[var(--accent-text)] shrink-0 inline-flex items-center gap-1">
+                    {copiedCaption ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedCaption ? (isNy ? 'Wakopedwa' : 'Copied') : (isNy ? 'Koperani mau' : 'Copy caption')}</span>
+                  </span>
                 </button>
               </div>
             </div>
