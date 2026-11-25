@@ -4,7 +4,7 @@
  * and native notification click navigation.
  */
 
-const CACHE_NAME = 'lowervibe-cache-v10';
+const CACHE_NAME = 'lowervibe-cache-v11';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',

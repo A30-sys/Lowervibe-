@@ -7,6 +7,7 @@ import { ReauthModal } from './components/auth/ReauthModal';
 import { AuthModal } from './components/AuthModal';
 import { CelebrationModal } from './components/CelebrationModal';
 import { CookieBanner } from './components/common/CookieBanner';
+import { ListeningBreakPrompt } from './components/common/ListeningBreakPrompt';
 import { LowervibeBanner } from './components/common/LowervibeBanner';
 import { PullToRefresh } from './components/common/PullToRefresh';
 import { StickyMobileCta } from './components/common/StickyMobileCta';
@@ -34,7 +35,7 @@ import { NotificationProvider, useNotifications } from './context/NotificationCo
 import { OfflineQueueProvider } from './context/OfflineQueueContext';
 import { RouterProvider, useRouter } from './context/RouterContext';
 import { ThemeProvider } from './context/ThemeContext';
-import { ToastProvider } from './context/ToastContext';
+import { ToastProvider, useToast } from './context/ToastContext';
 import {
   getCookieConsent,
   initFirebaseAnalytics,
@@ -78,13 +79,23 @@ function AppContent() {
   const { currentRoute, navigate, searchParams } = useRouter();
   const { language, t } = useLanguage();
   const { visibleBanners, dismissBanner } = useNotifications();
+  const { showToast } = useToast();
   const isNy = language === 'ny';
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isPageTransitioning, setIsPageTransitioning] = useState(false);
   const [tourDismissedInSession, setTourDismissedInSession] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [standaloneGateBypassed, setStandaloneGateBypassed] = useState(false);
+  const [isScrolledPastBannerSlot, setIsScrolledPastBannerSlot] = useState(false);
   const standaloneInitialRoutedRef = useRef(false);
+
+  // Continuous listening break timer (soft prompt after 2 hours = 7200s of active playback)
+  const CONTINUOUS_BREAK_INTERVAL_SECONDS = 7200;
+  const PAUSE_RESET_THRESHOLD_MS = 10 * 60 * 1000;
+  const [continuousPlaySeconds, setContinuousPlaySeconds] = useState(0);
+  const [nextBreakPromptAt, setNextBreakPromptAt] = useState(CONTINUOUS_BREAK_INTERVAL_SECONDS);
+  const [isBreakPromptOpen, setIsBreakPromptOpen] = useState(false);
+  const lastPausedAtRef = useRef<number | null>(null);
 
   const {
     tracks,
@@ -109,6 +120,7 @@ function AppContent() {
     dismissAllModals,
     setIsFullscreenPlayerOpen,
     clearActiveTrack,
+    togglePlayPause,
   } = useAudio();
 
   const pinnedSession = usePinnedPlayerSession();
@@ -178,6 +190,67 @@ function AppContent() {
   const handleOpenFullscreenPlayer = useCallback(() => {
     setIsFullscreenPlayerOpen(true);
   }, [setIsFullscreenPlayerOpen]);
+
+  const continuousPlaySecondsRef = useRef(0);
+  continuousPlaySecondsRef.current = continuousPlaySeconds;
+
+  // Track continuous listening duration and show soft break prompt at 2 hours (7,200 seconds)
+  useEffect(() => {
+    if (!isPlaying) {
+      if (lastPausedAtRef.current === null && continuousPlaySecondsRef.current > 0) {
+        lastPausedAtRef.current = Date.now();
+      }
+      return;
+    }
+
+    // If the listener rested (paused for >= 10 minutes), start a fresh continuous streak
+    if (
+      lastPausedAtRef.current !== null &&
+      Date.now() - lastPausedAtRef.current >= PAUSE_RESET_THRESHOLD_MS
+    ) {
+      setContinuousPlaySeconds(0);
+      setNextBreakPromptAt(CONTINUOUS_BREAK_INTERVAL_SECONDS);
+    }
+    lastPausedAtRef.current = null;
+
+    const intervalId = window.setInterval(() => {
+      setContinuousPlaySeconds((prev) => prev + 1);
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [isPlaying, PAUSE_RESET_THRESHOLD_MS, CONTINUOUS_BREAK_INTERVAL_SECONDS]);
+
+  useEffect(() => {
+    if (continuousPlaySeconds >= nextBreakPromptAt && !isBreakPromptOpen) {
+      setIsBreakPromptOpen(true);
+    }
+  }, [continuousPlaySeconds, nextBreakPromptAt, isBreakPromptOpen]);
+
+  const handleTakeListeningBreak = useCallback(() => {
+    setIsBreakPromptOpen(false);
+    setContinuousPlaySeconds(0);
+    setNextBreakPromptAt(CONTINUOUS_BREAK_INTERVAL_SECONDS);
+    lastPausedAtRef.current = null;
+    if (isPlaying) {
+      togglePlayPause();
+    }
+    showToast(t('break_taken_toast', 'Playback paused — enjoy a short break.'), 'info');
+  }, [isPlaying, togglePlayPause, showToast, t, CONTINUOUS_BREAK_INTERVAL_SECONDS]);
+
+  const handleContinueListening = useCallback(() => {
+    setIsBreakPromptOpen(false);
+    setNextBreakPromptAt(continuousPlaySeconds + CONTINUOUS_BREAK_INTERVAL_SECONDS);
+  }, [continuousPlaySeconds, CONTINUOUS_BREAK_INTERVAL_SECONDS]);
+
+  // Track scroll position so newly arrived or essential banners remain reachable in both Browser and installed WebApp
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolledPastBannerSlot(window.scrollY > 140);
+    };
+    handleScroll();
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const {
     currentUser,
@@ -720,6 +793,31 @@ function AppContent() {
 
           <OfflineBanner />
 
+          {/* Floating alert banner dock when user is scrolled past top banner slot (works identically in Browser & installed WebApp) */}
+          {isScrolledPastBannerSlot && visibleBanners.length > 0 && (
+            <div className="sticky top-[calc(4rem+env(safe-area-inset-top,0px))] z-30 px-3 sm:px-6 pt-2 pointer-events-none">
+              <div className="max-w-5xl mx-auto pointer-events-auto">
+                <LowervibeBanner
+                  key={`floating-${visibleBanners[0].id}`}
+                  id={visibleBanners[0].id}
+                  type={visibleBanners[0].type}
+                  title={visibleBanners[0].title}
+                  message={visibleBanners[0].message}
+                  artworkUrl={visibleBanners[0].artworkUrl}
+                  actionLabel={visibleBanners[0].actionLabel}
+                  actionRoute={visibleBanners[0].actionRoute}
+                  dismissible={visibleBanners[0].dismissible}
+                  tone={visibleBanners[0].tone}
+                  category={visibleBanners[0].category}
+                  compact
+                  onAction={visibleBanners[0].onAction}
+                  onDismiss={() => dismissBanner(visibleBanners[0].id)}
+                  onNavigate={navigate}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Standalone Artist WebApp quick switcher (Studio / Artist Page / Withdrawals) */}
           {isStandaloneArtistApp && isApprovedArtistAccount && (
             <div className="bg-[var(--surface)] border-b border-[var(--border)] px-4 py-2">
@@ -916,11 +1014,21 @@ function AppContent() {
 
       <CookieBanner hasPlayerOffset={isPlayerMounted && !isPlayerExiting} />
 
+      <ListeningBreakPrompt
+        isOpen={isBreakPromptOpen}
+        elapsedSeconds={continuousPlaySeconds}
+        hasPlayerOffset={isPlayerMounted && !isPlayerExiting}
+        onTakeBreak={handleTakeListeningBreak}
+        onContinueListening={handleContinueListening}
+      />
+
       {/* Active Offline Save Progress Toast */}
       {activeDownload && (
         <div
           className={`fixed right-4 sm:right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl bg-[var(--surface)] border border-[var(--border-strong)] text-[var(--text)] shadow-2xl animate-slideUp transition-all duration-200 ${
-            isPlayerMounted && !isPlayerExiting ? 'bottom-36 md:bottom-24' : 'bottom-20 md:bottom-6'
+            isPlayerMounted && !isPlayerExiting
+              ? 'bottom-[calc(154px+env(safe-area-inset-bottom,0px))] md:bottom-24'
+              : 'bottom-[calc(76px+env(safe-area-inset-bottom,0px))] md:bottom-6'
           }`}
         >
           <div className="w-9 h-9 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] flex items-center justify-center shrink-0">

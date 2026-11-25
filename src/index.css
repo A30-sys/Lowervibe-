@@ -448,6 +448,22 @@ html.light .stroke-numeral {
   animation: shimmer-sweep 1.6s infinite ease-in-out;
 }
 
+@keyframes lv-toast-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.animate-toast-countdown {
+  transform-origin: left center;
+  animation-name: lv-toast-countdown;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
 /* Reduced Motion Override (OS preference or user Settings toggle) */
 html.reduced-motion *,
 html.reduced-motion ::before,

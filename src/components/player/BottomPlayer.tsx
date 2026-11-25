@@ -1,13 +1,13 @@
 import {
   AlertCircle,
   Heart,
-  ListMusic,
   Maximize2,
   Pause,
   Play,
   RefreshCw,
   Repeat,
   Repeat1,
+  Share2,
   Shuffle,
   SkipBack,
   SkipForward,
@@ -271,6 +271,7 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
     retryPlayback,
     clearPlaybackError,
     clearActiveTrack,
+    setActiveShareTrack,
   } = useAudio();
 
   const pinnedSession = usePinnedPlayerSession();
@@ -482,7 +483,7 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
 
   return (
     <div
-      className="fixed bottom-[64px] md:bottom-3 left-0 right-0 z-30 px-2 sm:px-4 pb-[env(safe-area-inset-bottom,0px)] pointer-events-none"
+      className="fixed bottom-[calc(64px+env(safe-area-inset-bottom,0px))] md:bottom-3 left-0 right-0 z-30 px-2 sm:px-4 pointer-events-none"
       aria-label={isNy ? 'Choleretsa nyimbo' : 'Main audio player'}
     >
       <div className="relative max-w-5xl mx-auto">
@@ -868,13 +869,13 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
               type="button"
               onClick={() => {
                 triggerHaptic('tap');
-                onOpenFullscreen();
+                setActiveShareTrack(displayTrack);
               }}
-              className="min-h-[40px] min-w-[44px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] transition cursor-pointer"
-              title={`${t('up_next')} & ${t('lyrics')}`}
-              aria-label={`${t('up_next')} & ${t('lyrics')}`}
+              className="min-h-[40px] min-w-[44px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition cursor-pointer"
+              title={t('share', 'Share')}
+              aria-label={t('share', 'Share')}
             >
-              <ListMusic className="w-4 h-4" />
+              <Share2 className="w-4 h-4" />
             </button>
 
             <button
@@ -883,7 +884,7 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                 triggerHaptic('tap');
                 onOpenFullscreen();
               }}
-              className="min-h-[40px] min-w-[44px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] transition cursor-pointer"
+              className="min-h-[40px] min-w-[44px] rounded-lg flex items-center justify-center text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition cursor-pointer"
               title={t('expand_player')}
               aria-label={t('expand_player')}
             >

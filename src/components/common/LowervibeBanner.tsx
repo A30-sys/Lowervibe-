@@ -32,6 +32,7 @@ export interface LowervibeBannerProps {
   dismissible?: boolean;
   tone?: 'light' | 'dark';
   category?: 'essential' | 'promotional';
+  compact?: boolean;
   onAction?: () => void;
   onDismiss?: () => void;
   onNavigate?: (route: string) => void;
@@ -231,6 +232,7 @@ export const LowervibeBanner: React.FC<LowervibeBannerProps> = ({
   dismissible = true,
   tone,
   category,
+  compact = false,
   onAction,
   onDismiss,
   onNavigate,
@@ -281,10 +283,18 @@ export const LowervibeBanner: React.FC<LowervibeBannerProps> = ({
         className={`pointer-events-none absolute inset-x-0 top-0 h-[2px] ${visuals.topLineClass}`}
       />
 
-      <div className="relative z-10 px-4 py-3.5 sm:px-5 sm:py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5">
-        <div className="flex items-start gap-3.5 min-w-0 flex-1">
+      <div
+        className={`relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+          compact ? 'px-3.5 py-2.5 sm:px-4 sm:py-3' : 'px-4 py-3.5 sm:px-5 sm:py-4 gap-3.5'
+        }`}
+      >
+        <div className="flex items-start gap-3 min-w-0 flex-1">
           {artworkUrl ? (
-            <div className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 border border-white/15 shadow-sm bg-[#1b1e1b]">
+            <div
+              className={`relative rounded-xl overflow-hidden shrink-0 border border-white/15 shadow-sm bg-[#1b1e1b] ${
+                compact ? 'w-10 h-10' : 'w-12 h-12'
+              }`}
+            >
               <img
                 src={artworkUrl}
                 alt={title}
@@ -297,15 +307,17 @@ export const LowervibeBanner: React.FC<LowervibeBannerProps> = ({
             </div>
           ) : (
             <div
-              className={`w-11 h-11 rounded-xl border flex items-center justify-center shrink-0 ${visuals.iconBoxClass}`}
+              className={`rounded-xl border flex items-center justify-center shrink-0 ${
+                compact ? 'w-9 h-9' : 'w-11 h-11'
+              } ${visuals.iconBoxClass}`}
             >
-              <Icon className="w-5 h-5" />
+              <Icon className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
             </div>
           )}
 
           <div className="min-w-0 flex-1">
             {/* Clean unboxed eyebrow metadata */}
-            <div className="flex items-center justify-between gap-2 mb-1">
+            <div className="flex items-center justify-between gap-2 mb-0.5">
               <div className="flex items-center gap-2 min-w-0 text-[11px] font-semibold">
                 <span className="inline-flex items-center shrink-0 opacity-90">
                   <LowerVibeLogo size="sm" showTagline={false} />
@@ -327,7 +339,7 @@ export const LowervibeBanner: React.FC<LowervibeBannerProps> = ({
                   onClick={onDismiss}
                   aria-label={t('banner_dismiss', 'Dismiss')}
                   title={t('banner_dismiss', 'Dismiss')}
-                  className={`sm:hidden -mr-1.5 -mt-1 min-h-[40px] min-w-[40px] rounded-xl flex items-center justify-center transition cursor-pointer shrink-0 ${
+                  className={`sm:hidden -mr-1.5 -mt-1 min-h-[40px] min-w-[40px] rounded-xl flex items-center justify-center transition cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${
                     isDarkSurface
                       ? 'text-white/60 hover:text-white hover:bg-white/10'
                       : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)]'
@@ -339,16 +351,16 @@ export const LowervibeBanner: React.FC<LowervibeBannerProps> = ({
             </div>
 
             <h3
-              className={`text-[15px] font-bold leading-snug tracking-[-0.015em] ${
-                isDarkSurface ? 'text-[#f4f5f3]' : 'text-[var(--text)]'
-              }`}
+              className={`font-bold leading-snug tracking-[-0.015em] ${
+                compact ? 'text-[13.5px] line-clamp-1' : 'text-[15px]'
+              } ${isDarkSurface ? 'text-[#f4f5f3]' : 'text-[var(--text)]'}`}
             >
               {title}
             </h3>
             <p
-              className={`text-[13px] leading-relaxed mt-0.5 ${
-                isDarkSurface ? 'text-[#b5bbb4]' : 'text-[var(--text-muted)]'
-              }`}
+              className={`leading-relaxed mt-0.5 ${
+                compact ? 'text-xs line-clamp-2' : 'text-[13px]'
+              } ${isDarkSurface ? 'text-[#b5bbb4]' : 'text-[var(--text-muted)]'}`}
             >
               {message}
             </p>
@@ -361,7 +373,7 @@ export const LowervibeBanner: React.FC<LowervibeBannerProps> = ({
               <button
                 type="button"
                 onClick={handleAction}
-                className={`min-h-[44px] sm:min-h-[40px] px-4 py-2 rounded-xl text-xs font-bold transition active:scale-[0.98] cursor-pointer inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 shadow-sm ${ctaButtonClass}`}
+                className={`min-h-[44px] sm:min-h-[40px] px-4 py-2 rounded-xl text-xs font-bold transition active:scale-[0.98] cursor-pointer inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${ctaButtonClass}`}
               >
                 {type === 'upload_failed' && <RotateCcw className="w-3.5 h-3.5" />}
                 <span>
@@ -380,7 +392,7 @@ export const LowervibeBanner: React.FC<LowervibeBannerProps> = ({
                 onClick={onDismiss}
                 aria-label={t('banner_dismiss', 'Dismiss')}
                 title={t('banner_dismiss', 'Dismiss')}
-                className={`hidden sm:flex min-h-[40px] min-w-[40px] rounded-xl border items-center justify-center transition cursor-pointer ${
+                className={`hidden sm:flex min-h-[40px] min-w-[40px] rounded-xl border items-center justify-center transition cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${
                   isDarkSurface
                     ? 'border-white/15 bg-white/[0.06] text-white/70 hover:text-white hover:bg-white/12'
                     : 'border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-muted)] hover:text-[var(--text)]'

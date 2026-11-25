@@ -13,7 +13,7 @@ export const OfflineBanner: React.FC = () => {
   return (
     <div
       role="alert"
-      className="sticky top-16 z-30 w-full bg-[var(--lv-surface)]/95 backdrop-blur-md border-b border-amber-500/40 text-[var(--lv-text)] px-4 sm:px-6 py-2.5 text-xs shadow-sm"
+      className="sticky top-[calc(4rem+env(safe-area-inset-top,0px))] z-30 w-full bg-[var(--lv-surface)]/95 backdrop-blur-md border-b border-amber-500/40 text-[var(--lv-text)] px-4 sm:px-6 py-2.5 text-xs shadow-sm"
     >
       <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">

@@ -86,6 +86,14 @@ const TRANSLATIONS: Record<Language, Record<string, string>> = {
     just_now: 'Just now',
     minutes_ago: '{count}m ago',
     hours_ago: '{count}h ago',
+    active_alerts: 'Active platform alerts',
+    mark_read: 'Mark read',
+    listening_session_label: 'Listening wellness',
+    break_prompt_title: 'Time for a short listening break',
+    break_prompt_body: 'You have been listening continuously for {duration}. Rest your ears for a few minutes and grab some water when you are ready.',
+    take_short_break: 'Take a break',
+    continue_listening_btn: 'Keep listening',
+    break_taken_toast: 'Playback paused — enjoy a short break.',
 
     // Home & Discovery
     music_feed_for: 'Music feed for {country}',
@@ -426,6 +434,14 @@ const TRANSLATIONS: Record<Language, Record<string, string>> = {
     just_now: 'Tsopano lino',
     minutes_ago: 'Mphindi {count} zapitazo',
     hours_ago: 'Maola {count} apitazo',
+    active_alerts: 'Zidziwitso zofunikira tsopano',
+    mark_read: 'Chongani',
+    listening_session_label: 'Thanzi la makutu',
+    break_prompt_title: 'Nthawi yopuma pang\'ono',
+    break_prompt_body: 'Mwakhala mukumvera nyimbo mosalekeza kwa {duration}. Pumulitsani makutu kwa mphindi zochepa musanapitirize.',
+    take_short_break: 'Pumani pang\'ono',
+    continue_listening_btn: 'Pitilizani kumvera',
+    break_taken_toast: 'Nyimbo zaimitsidwa — pumulani pang\'ono.',
 
     // Home & Discovery
     music_feed_for: 'Nyimbo zochokera ku {country}',
