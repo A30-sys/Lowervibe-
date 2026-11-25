@@ -9,10 +9,12 @@ import {
   Clock,
   DollarSign,
   Download,
+  ExternalLink,
   FileAudio,
   FileCheck,
   HelpCircle,
   Image as ImageIcon,
+  Link2,
   Lock,
   LogOut,
   Music,
@@ -43,6 +45,7 @@ import {
   DEFAULT_MONETIZATION_CONFIG,
   FirestoreGenre,
   MonetizationConfig,
+  PlatformSocialLinks,
   Track,
   User,
 } from '../types';
@@ -60,6 +63,11 @@ import { LowervibeBanner } from './common/LowervibeBanner';
 import { MoodSelectOrCustom } from './common/MoodSelectOrCustom';
 import { RegionSelect } from './common/RegionSelect';
 import { exportAlertBannerPng } from '../utils/promoBannerExport';
+import {
+  PLATFORM_SOCIAL_FIELDS,
+  sanitizePlatformSocialLinks,
+  sanitizeSocialUrl,
+} from '../utils/socialLinks';
 
 interface AdminPortalProps {
   onBackToExplore: () => void;
@@ -146,10 +154,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
     ...DEFAULT_MONETIZATION_CONFIG,
     ...monetizationConfig,
   });
+  const [socialLinksForm, setSocialLinksForm] = useState<PlatformSocialLinks>(() => ({
+    ...(monetizationConfig.socialLinks || {}),
+  }));
   const [isSavingConfig, setIsSavingConfig] = useState(false);
+  const [isSavingSocials, setIsSavingSocials] = useState(false);
 
   useEffect(() => {
     setMonConfigForm({ ...DEFAULT_MONETIZATION_CONFIG, ...monetizationConfig });
+    setSocialLinksForm({ ...(monetizationConfig.socialLinks || {}) });
   }, [monetizationConfig]);
 
   useEffect(() => {
@@ -696,6 +709,28 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
     }
   };
 
+  const handleSaveSocialLinks = async (e: React.FormEvent) => {
+    e.preventDefault();
+    for (const field of PLATFORM_SOCIAL_FIELDS) {
+      const rawVal = (socialLinksForm[field.key] || '').trim();
+      if (rawVal && !sanitizeSocialUrl(rawVal)) {
+        showToast(`Please enter a valid https:// URL for ${field.label}.`);
+        return;
+      }
+    }
+    setIsSavingSocials(true);
+    try {
+      const cleaned = sanitizePlatformSocialLinks(socialLinksForm);
+      await updateMonetizationConfig({ socialLinks: cleaned });
+      setSocialLinksForm(cleaned);
+      showToast('Official LOWERVIBE social media links saved.');
+    } catch {
+      showToast('Failed to save social media links.');
+    } finally {
+      setIsSavingSocials(false);
+    }
+  };
+
   const handleAnswerTicket = async (ticketId: string) => {
     if (!ticketReplyText.trim()) return;
     try {
@@ -723,14 +758,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
       {/* Top Staff Header */}
       <div className="p-5 sm:p-6 rounded-3xl bg-[var(--surface)] border border-[var(--border)] flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="space-y-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase bg-[var(--accent)]/15 text-[var(--accent-text)] border border-[var(--accent)]/30">
-              Standalone Administration
-            </span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono text-[var(--text-muted)] bg-[var(--surface-2)] border border-[var(--border)]">
-              /administrationside
-            </span>
-            <span className="text-[11px] font-mono text-[var(--text-muted)]">
+          <div className="flex items-center gap-2 flex-wrap text-[11px] font-mono text-[var(--text-muted)]">
+            <span className="font-bold text-[var(--accent-text)]">Standalone Administration</span>
+            <span>·</span>
+            <span>/administrationside</span>
+            <span>·</span>
+            <span>
               Admin: <span className="text-[var(--text)] font-bold">{PRIMARY_ADMIN_EMAIL}</span>
             </span>
           </div>
@@ -850,7 +883,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
           { id: 'reports', label: `Reports (${pendingReportsCount})`, icon: ShieldAlert },
           { id: 'support', label: `Support (${openTicketsCount})`, icon: HelpCircle },
           { id: 'audit', label: `Activity Log (${auditLogs.length})`, icon: Clock },
-          { id: 'settings', label: 'Settings', icon: Settings },
+          { id: 'settings', label: 'Settings & Socials', icon: Settings },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -1155,7 +1188,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
                         </td>
 
                         <td className="p-3.5">
-                          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold uppercase bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)]">
+                          <span className="text-xs font-mono font-semibold text-[var(--text)] capitalize">
                             {user.role}
                           </span>
                         </td>
@@ -1249,14 +1282,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
                       <div className="space-y-0.5">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-base font-bold text-[var(--text)]">{app.stageName}</span>
-                          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold uppercase bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)]">
-                            {app.status}
+                          <span className="text-[11px] font-mono text-[var(--accent-text)] capitalize">
+                            · {app.status}
                           </span>
-                          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono bg-[var(--surface-2)] text-[var(--text-muted)]">
-                            {app.country}
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono bg-[var(--violet)]/15 text-[var(--violet)]">
-                            {app.primaryGenre}
+                          <span className="text-[11px] font-mono text-[var(--text-muted)]">
+                            · {app.country} · {app.primaryGenre}
                           </span>
                         </div>
                         <p className="text-xs text-[var(--text-muted)]">
@@ -1870,11 +1900,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
                     <div className="min-w-0 space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs font-bold text-[var(--text)]">{bn.title}</span>
-                        <span className="px-2 py-0.5 rounded-full text-[9px] font-mono uppercase bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)]">
-                          {bn.category} · {bn.audience}
+                        <span className="text-[11px] font-mono text-[var(--text-muted)]">
+                          · {bn.category} · {bn.audience}
                         </span>
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-mono uppercase ${bn.active ? 'bg-[var(--accent)]/15 text-[var(--accent-text)]' : 'bg-[var(--surface-2)] text-[var(--text-muted)]'}`}>
-                          {bn.active ? 'Active' : 'Paused'}
+                        <span className={`text-[11px] font-mono font-semibold ${bn.active ? 'text-[var(--accent-text)]' : 'text-[var(--text-muted)]'}`}>
+                          · {bn.active ? 'Active' : 'Paused'}
                         </span>
                       </div>
                       <p className="text-xs text-[var(--text-muted)]">{bn.message}</p>
@@ -1950,8 +1980,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-bold text-[var(--text)]">{req.artistName}</span>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono uppercase bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)]">
-                            {req.status === 'awaiting_review' ? 'Awaiting manual review' : req.status}
+                          <span className="text-[11px] font-mono font-semibold text-[var(--accent-text)] capitalize">
+                            · {req.status === 'awaiting_review' ? 'Awaiting manual review' : req.status}
                           </span>
                         </div>
                         <p className="text-xs text-[var(--text-muted)] mt-0.5">
@@ -2059,8 +2089,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-xs font-bold text-[var(--text)] truncate">{artist.name}</span>
-                              <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold uppercase bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)]">
-                                {status}
+                              <span className="text-[11px] font-mono font-semibold text-[var(--accent-text)] capitalize">
+                                · {status}
                               </span>
                               {artist.monetizationApprovalToken && (
                                 <span className="px-2 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--accent)]/40 text-[9px] font-mono text-[var(--accent-text)]">
@@ -2229,7 +2259,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
                         From: {rep.reporterEmail} · {new Date(rep.createdAt).toLocaleDateString()}
                       </p>
                     </div>
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-mono uppercase bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)]">
+                    <span className="text-xs font-mono font-semibold text-[var(--text)] capitalize">
                       {rep.status}
                     </span>
                   </div>
@@ -2308,7 +2338,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
                         {t.userName} ({t.userEmail}) · {new Date(t.createdAt).toLocaleDateString()}
                       </p>
                     </div>
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-mono uppercase bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)]">
+                    <span className="text-xs font-mono font-semibold text-[var(--text)] capitalize">
                       {t.status}
                     </span>
                   </div>
@@ -2384,139 +2414,231 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToExplore }) => 
         </div>
       )}
 
-      {/* TAB 9: PLATFORM SETTINGS */}
+      {/* TAB 9: PLATFORM SETTINGS & OFFICIAL SOCIAL LINKS */}
       {activeTab === 'settings' && (
-        <form onSubmit={handleSavePlatformSettings} className="p-6 rounded-3xl bg-[var(--surface)] border border-[var(--border)] space-y-5 max-w-2xl">
-          <div>
-            <h2 className="text-base font-bold font-heading text-[var(--text)]">Monetization &amp; Platform Settings</h2>
-            <p className="text-xs text-[var(--text-muted)]">
-              Configure real payout rates, eligibility thresholds, and payout provider mode.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono font-bold text-[var(--text)]">Rate per qualifying play (MWK)</label>
-              <input
-                type="number"
-                step="0.1"
-                min="0"
-                value={monConfigForm.ratePerPlayMwk}
-                onChange={(e) =>
-                  setMonConfigForm({ ...monConfigForm, ratePerPlayMwk: parseFloat(e.target.value) || 0 })
-                }
-                className="w-full px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono font-bold text-[var(--text)]">Minimum withdrawal (MWK)</label>
-              <input
-                type="number"
-                step="500"
-                min="1000"
-                value={monConfigForm.minWithdrawalMwk}
-                onChange={(e) =>
-                  setMonConfigForm({ ...monConfigForm, minWithdrawalMwk: parseInt(e.target.value, 10) || 20000 })
-                }
-                className="w-full px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono font-bold text-[var(--text)]">Payout processing fee (%)</label>
-              <input
-                type="number"
-                step="0.1"
-                min="0"
-                max="20"
-                value={monConfigForm.payoutFeePercent}
-                onChange={(e) =>
-                  setMonConfigForm({ ...monConfigForm, payoutFeePercent: parseFloat(e.target.value) || 0 })
-                }
-                className="w-full px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono font-bold text-[var(--text)]">Required published songs</label>
-              <input
-                type="number"
-                min="1"
-                value={monConfigForm.requiredPublishedTracks}
-                onChange={(e) =>
-                  setMonConfigForm({ ...monConfigForm, requiredPublishedTracks: parseInt(e.target.value, 10) || 3 })
-                }
-                className="w-full px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono font-bold text-[var(--text)]">Required plays (30 days)</label>
-              <input
-                type="number"
-                min="0"
-                value={monConfigForm.requiredPlays30d}
-                onChange={(e) =>
-                  setMonConfigForm({ ...monConfigForm, requiredPlays30d: parseInt(e.target.value, 10) || 500 })
-                }
-                className="w-full px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono font-bold text-[var(--text)]">Required followers</label>
-              <input
-                type="number"
-                min="0"
-                value={monConfigForm.requiredFollowers}
-                onChange={(e) =>
-                  setMonConfigForm({ ...monConfigForm, requiredFollowers: parseInt(e.target.value, 10) || 50 })
-                }
-                className="w-full px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
-              />
-            </div>
-          </div>
-
-          <label className="flex items-center justify-between p-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] cursor-pointer">
-            <div>
-              <div className="text-xs font-bold text-[var(--text)]">Automated Payout Provider Configured</div>
-              <div className="text-[11px] text-[var(--text-muted)]">
-                Enable only when Flutterwave/PayChangu/USDT keys are configured on Cloud Functions.
+        <div className="space-y-6 max-w-3xl">
+          <form onSubmit={handleSaveSocialLinks} className="p-6 rounded-3xl bg-[var(--surface)] border border-[var(--border)] space-y-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-base font-bold font-heading text-[var(--text)] flex items-center gap-2">
+                  <Link2 className="w-4 h-4 text-[var(--accent-text)]" />
+                  <span>Official LOWERVIBE Social Media Links</span>
+                </h2>
+                <p className="text-xs text-[var(--text-muted)] mt-1">
+                  Enter your real WhatsApp, Facebook, Instagram, TikTok, YouTube, and X links. Saved links appear live in the site footer for all listeners and artists.
+                </p>
               </div>
             </div>
-            <input
-              type="checkbox"
-              checked={monConfigForm.payoutProviderConfigured}
-              onChange={(e) =>
-                setMonConfigForm({ ...monConfigForm, payoutProviderConfigured: e.target.checked })
-              }
-              className="w-5 h-5 accent-[var(--accent)]"
-            />
-          </label>
 
-          <label className="flex items-center justify-between p-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] cursor-pointer">
-            <div>
-              <div className="text-xs font-bold text-[var(--text)]">Maintenance Mode</div>
-              <div className="text-[11px] text-[var(--text-muted)]">Pause new uploads during maintenance</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {PLATFORM_SOCIAL_FIELDS.map((field) => {
+                const rawValue = socialLinksForm[field.key] || '';
+                const verifiedHref = rawValue.trim() ? sanitizeSocialUrl(rawValue) : undefined;
+                const hasInvalidInput = Boolean(rawValue.trim() && !verifiedHref);
+                return (
+                  <div key={field.key} className="space-y-1.5">
+                    <label
+                      htmlFor={`admin-social-${field.key}`}
+                      className="text-xs font-mono font-bold text-[var(--text)] block"
+                    >
+                      {field.label}
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        id={`admin-social-${field.key}`}
+                        type="url"
+                        value={rawValue}
+                        onChange={(e) =>
+                          setSocialLinksForm((prev) => ({
+                            ...prev,
+                            [field.key]: e.target.value,
+                          }))
+                        }
+                        placeholder={field.placeholder}
+                        className={`flex-1 min-w-0 px-3.5 py-2.5 rounded-2xl bg-[var(--surface-2)] border text-xs text-[var(--text)] focus:outline-none ${
+                          hasInvalidInput
+                            ? 'border-red-500'
+                            : 'border-[var(--border)] focus:border-[var(--accent)]'
+                        }`}
+                      />
+                      {rawValue.trim() && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSocialLinksForm((prev) => {
+                              const next = { ...prev };
+                              delete next[field.key];
+                              return next;
+                            })
+                          }
+                          title={`Clear ${field.label}`}
+                          className="w-9 h-9 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-red-500 flex items-center justify-center shrink-0 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {verifiedHref && (
+                        <a
+                          href={verifiedHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={`Open ${field.label}`}
+                          className="w-9 h-9 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--accent-text)] flex items-center justify-center shrink-0"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      )}
+                    </div>
+                    <p className={`text-[11px] ${hasInvalidInput ? 'text-red-500' : 'text-[var(--text-muted)]'}`}>
+                      {hasInvalidInput ? 'Must be a valid https:// URL.' : field.helperText}
+                    </p>
+                  </div>
+                );
+              })}
             </div>
-            <input
-              type="checkbox"
-              checked={platformConfig.maintenanceMode}
-              onChange={(e) => setPlatformConfig({ ...platformConfig, maintenanceMode: e.target.checked })}
-              className="w-5 h-5 accent-[var(--accent)]"
-            />
-          </label>
 
-          <button
-            type="submit"
-            disabled={isSavingConfig}
-            className="px-6 py-3 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer flex items-center gap-2"
-          >
-            <Save className="w-4 h-4" />
-            <span>{isSavingConfig ? 'Saving...' : 'Save Settings'}</span>
-          </button>
-        </form>
+            <button
+              type="submit"
+              disabled={isSavingSocials}
+              className="px-6 py-3 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer flex items-center gap-2 disabled:opacity-60"
+            >
+              <Save className="w-4 h-4" />
+              <span>{isSavingSocials ? 'Saving Social Links...' : 'Save Social Links'}</span>
+            </button>
+          </form>
+
+          <form onSubmit={handleSavePlatformSettings} className="p-6 rounded-3xl bg-[var(--surface)] border border-[var(--border)] space-y-5">
+            <div>
+              <h2 className="text-base font-bold font-heading text-[var(--text)]">Monetization &amp; Platform Settings</h2>
+              <p className="text-xs text-[var(--text-muted)]">
+                Configure real payout rates, eligibility thresholds, and payout provider mode.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-mono font-bold text-[var(--text)]">Rate per qualifying play (MWK)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={monConfigForm.ratePerPlayMwk}
+                  onChange={(e) =>
+                    setMonConfigForm({ ...monConfigForm, ratePerPlayMwk: parseFloat(e.target.value) || 0 })
+                  }
+                  className="w-full px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-mono font-bold text-[var(--text)]">Minimum withdrawal (MWK)</label>
+                <input
+                  type="number"
+                  step="500"
+                  min="1000"
+                  value={monConfigForm.minWithdrawalMwk}
+                  onChange={(e) =>
+                    setMonConfigForm({ ...monConfigForm, minWithdrawalMwk: parseInt(e.target.value, 10) || 20000 })
+                  }
+                  className="w-full px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-mono font-bold text-[var(--text)]">Payout processing fee (%)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="20"
+                  value={monConfigForm.payoutFeePercent}
+                  onChange={(e) =>
+                    setMonConfigForm({ ...monConfigForm, payoutFeePercent: parseFloat(e.target.value) || 0 })
+                  }
+                  className="w-full px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-mono font-bold text-[var(--text)]">Required published songs</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={monConfigForm.requiredPublishedTracks}
+                  onChange={(e) =>
+                    setMonConfigForm({ ...monConfigForm, requiredPublishedTracks: parseInt(e.target.value, 10) || 3 })
+                  }
+                  className="w-full px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-mono font-bold text-[var(--text)]">Required plays (30 days)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={monConfigForm.requiredPlays30d}
+                  onChange={(e) =>
+                    setMonConfigForm({ ...monConfigForm, requiredPlays30d: parseInt(e.target.value, 10) || 500 })
+                  }
+                  className="w-full px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-mono font-bold text-[var(--text)]">Required followers</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={monConfigForm.requiredFollowers}
+                  onChange={(e) =>
+                    setMonConfigForm({ ...monConfigForm, requiredFollowers: parseInt(e.target.value, 10) || 50 })
+                  }
+                  className="w-full px-4 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+                />
+              </div>
+            </div>
+
+            <label className="flex items-center justify-between p-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] cursor-pointer">
+              <div>
+                <div className="text-xs font-bold text-[var(--text)]">Automated Payout Provider Configured</div>
+                <div className="text-[11px] text-[var(--text-muted)]">
+                  Enable only when Flutterwave/PayChangu/USDT keys are configured on Cloud Functions.
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={monConfigForm.payoutProviderConfigured}
+                onChange={(e) =>
+                  setMonConfigForm({ ...monConfigForm, payoutProviderConfigured: e.target.checked })
+                }
+                className="w-5 h-5 accent-[var(--accent)]"
+              />
+            </label>
+
+            <label className="flex items-center justify-between p-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] cursor-pointer">
+              <div>
+                <div className="text-xs font-bold text-[var(--text)]">Maintenance Mode</div>
+                <div className="text-[11px] text-[var(--text-muted)]">Pause new uploads during maintenance</div>
+              </div>
+              <input
+                type="checkbox"
+                checked={platformConfig.maintenanceMode}
+                onChange={(e) => setPlatformConfig({ ...platformConfig, maintenanceMode: e.target.checked })}
+                className="w-5 h-5 accent-[var(--accent)]"
+              />
+            </label>
+
+            <button
+              type="submit"
+              disabled={isSavingConfig}
+              className="px-6 py-3 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer flex items-center gap-2"
+            >
+              <Save className="w-4 h-4" />
+              <span>{isSavingConfig ? 'Saving...' : 'Save Settings'}</span>
+            </button>
+          </form>
+        </div>
       )}
 
       {/* MODAL: UPLOAD SONG */}

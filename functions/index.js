@@ -6,160 +6,425 @@
  *  2. Atomic like/follow synchronization
  *  3. Payout fulfillment boundary (Airtel Money / TNM Mpamba via PayChangu/Flutterwave + USDT TRC-20/BEP-20)
  *  4. Copyright / abuse report admin notification
+ *  5. Social OpenGraph preview metadata (shareMeta) & binary song/artist cover artwork (ogCover)
  */
 
 const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore');
+const { onRequest } = require('firebase-functions/v2/https');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
 initializeApp();
-const db = getFirestore();
+const FIRESTORE_DATABASE_ID = 'ai-studio-lowervibe-b2e45d28-38e1-4e03-bbe9-11eddd11a756';
+const db = getFirestore(FIRESTORE_DATABASE_ID);
 
 const PRIMARY_ADMIN_EMAIL = 'odulamw@gmail.com';
 const DEFAULT_RATE_PER_PLAY_MWK = 4.5;
+const PUBLIC_SITE_ORIGIN = 'https://lowervibemusic.web.app';
+const DEFAULT_FALLBACK_IMAGE = `${PUBLIC_SITE_ORIGIN}/icons/pwa-512x512.png`;
+
+function escapeHtmlAttr(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function isSafePublicHttpUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+    const host = parsed.hostname.toLowerCase();
+    if (
+      !host ||
+      host === 'localhost' ||
+      host === '0.0.0.0' ||
+      host === '::1' ||
+      host.endsWith('.local') ||
+      host.endsWith('.internal') ||
+      /^127\./.test(host) ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^169\.254\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+    ) {
+      return null;
+    }
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+function pickFirstValidArtworkCandidate(candidates) {
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if (
+      !trimmed ||
+      trimmed.startsWith('data:image/svg+xml') ||
+      trimmed.startsWith('blob:') ||
+      trimmed.includes('pwa-512x512.png')
+    ) {
+      continue;
+    }
+    return trimmed;
+  }
+  return null;
+}
 
 /**
  * 1. onPlayCreate: Validates >= 30s listen, enforces 30-min deduplication per (userId, trackId, windowKey),
  *    skips artist self-plays for payouts, and credits MWK ONLY if artist.monetizationStatus === 'approved'.
  */
-exports.onPlayCreate = onDocumentCreated('plays/{playId}', async (event) => {
-  const play = event.data?.data();
-  if (!play) return;
+exports.onPlayCreate = onDocumentCreated(
+  { document: 'plays/{playId}', database: FIRESTORE_DATABASE_ID },
+  async (event) => {
+    const play = event.data?.data();
+    if (!play) return;
 
-  if (typeof play.listenedSeconds !== 'number' || play.listenedSeconds < 30) {
-    return;
-  }
-
-  const dedupId = `${play.userId}_${play.trackId}_${play.windowKey}`;
-  const dedupRef = db.collection('play_dedup').doc(dedupId);
-
-  const trackRef = db.collection('tracks').doc(play.trackId);
-  const artistRef = db.collection('artists').doc(play.artistId);
-  const configRef = db.collection('config').doc('platform');
-
-  await db.runTransaction(async (tx) => {
-    const existingDedup = await tx.get(dedupRef);
-    if (existingDedup.exists) {
+    if (typeof play.listenedSeconds !== 'number' || play.listenedSeconds < 30) {
       return;
     }
 
-    const [trackSnap, artistSnap, configSnap] = await Promise.all([
-      tx.get(trackRef),
-      tx.get(artistRef),
-      tx.get(configRef),
-    ]);
+    const dedupId = `${play.userId}_${play.trackId}_${play.windowKey}`;
+    const dedupRef = db.collection('play_dedup').doc(dedupId);
 
-    if (!trackSnap.exists || !artistSnap.exists) return;
+    const trackRef = db.collection('tracks').doc(play.trackId);
+    const artistRef = db.collection('artists').doc(play.artistId);
+    const configRef = db.collection('config').doc('platform');
 
-    const artistData = artistSnap.data();
-    const ratePerPlayMwk = configSnap.exists
-      ? Number(configSnap.data().ratePerPlayMwk || DEFAULT_RATE_PER_PLAY_MWK)
-      : DEFAULT_RATE_PER_PLAY_MWK;
+    await db.runTransaction(async (tx) => {
+      const existingDedup = await tx.get(dedupRef);
+      if (existingDedup.exists) {
+        return;
+      }
 
-    const isSelfPlay =
-      Boolean(play.isArtistSelfPlay) ||
-      artistData.ownerId === play.userId ||
-      artistData.ownerUserId === play.userId ||
-      artistData.claimedByUserId === play.userId;
+      const [trackSnap, artistSnap, configSnap] = await Promise.all([
+        tx.get(trackRef),
+        tx.get(artistRef),
+        tx.get(configRef),
+      ]);
 
-    const isMonetizedApproved =
-      artistData.monetizationStatus === 'approved' && artistData.isMonetized === true;
+      if (!trackSnap.exists || !artistSnap.exists) return;
 
-    tx.set(dedupRef, {
-      playId: event.params.playId,
-      createdAt: new Date().toISOString(),
+      const artistData = artistSnap.data();
+      const ratePerPlayMwk = configSnap.exists
+        ? Number(configSnap.data().ratePerPlayMwk || DEFAULT_RATE_PER_PLAY_MWK)
+        : DEFAULT_RATE_PER_PLAY_MWK;
+
+      const isSelfPlay =
+        Boolean(play.isArtistSelfPlay) ||
+        artistData.ownerId === play.userId ||
+        artistData.ownerUserId === play.userId ||
+        artistData.claimedByUserId === play.userId;
+
+      const isMonetizedApproved =
+        artistData.monetizationStatus === 'approved' && artistData.isMonetized === true;
+
+      tx.set(dedupRef, {
+        playId: event.params.playId,
+        createdAt: new Date().toISOString(),
+      });
+
+      tx.update(trackRef, {
+        plays: FieldValue.increment(1),
+      });
+
+      const artistUpdate = {
+        totalStreams: FieldValue.increment(1),
+      };
+
+      if (!isSelfPlay && isMonetizedApproved && ratePerPlayMwk > 0) {
+        artistUpdate.earningsBalanceMwk = FieldValue.increment(ratePerPlayMwk);
+        artistUpdate.lifetimeEarningsMwk = FieldValue.increment(ratePerPlayMwk);
+      }
+
+      tx.update(artistRef, artistUpdate);
     });
-
-    tx.update(trackRef, {
-      plays: FieldValue.increment(1),
-    });
-
-    const artistUpdate = {
-      totalStreams: FieldValue.increment(1),
-    };
-
-    if (!isSelfPlay && isMonetizedApproved && ratePerPlayMwk > 0) {
-      artistUpdate.earningsBalanceMwk = FieldValue.increment(ratePerPlayMwk);
-      artistUpdate.lifetimeEarningsMwk = FieldValue.increment(ratePerPlayMwk);
-    }
-
-    tx.update(artistRef, artistUpdate);
-  });
-});
+  }
+);
 
 /**
  * 2. onLikeWrite: Synchronizes unique user likes across track documents.
  */
-exports.onLikeWrite = onDocumentWritten('tracks/{trackId}', async (event) => {
-  const after = event.data?.after?.data();
-  if (!after || !Array.isArray(after.likedByUserIds)) return;
+exports.onLikeWrite = onDocumentWritten(
+  { document: 'tracks/{trackId}', database: FIRESTORE_DATABASE_ID },
+  async (event) => {
+    const after = event.data?.after?.data();
+    if (!after || !Array.isArray(after.likedByUserIds)) return;
 
-  const uniqueLikes = Array.from(new Set(after.likedByUserIds));
-  if (after.likes !== uniqueLikes.length) {
-    await event.data.after.ref.update({
-      likes: uniqueLikes.length,
-      likedByUserIds: uniqueLikes,
-    });
+    const uniqueLikes = Array.from(new Set(after.likedByUserIds));
+    if (after.likes !== uniqueLikes.length) {
+      await event.data.after.ref.update({
+        likes: uniqueLikes.length,
+        likedByUserIds: uniqueLikes,
+      });
+    }
   }
-});
+);
 
 /**
  * 3. onPayoutRequestCreate: Checks whether Mobile Money or USDT provider credentials exist in env.
  *    If not configured, flags request as 'awaiting_review' for manual admin settlement.
  *    Re-validates artist approved status and net amount before processing.
  */
-exports.onPayoutRequestCreate = onDocumentCreated('payoutRequests/{requestId}', async (event) => {
-  const reqData = event.data?.data();
-  if (!reqData) return;
+exports.onPayoutRequestCreate = onDocumentCreated(
+  { document: 'payoutRequests/{requestId}', database: FIRESTORE_DATABASE_ID },
+  async (event) => {
+    const reqSnap = event.data;
+    const reqData = reqSnap?.data();
+    if (!reqSnap || !reqData) return;
 
-  const artistRef = db.collection('artists').doc(reqData.artistId);
-  const artistSnap = await artistRef.get();
-  if (!artistSnap.exists || artistSnap.data().monetizationStatus !== 'approved') {
-    await event.data.after.ref.update({
-      status: 'failed',
-      failureReason: 'Artist monetization is not approved.',
-      processedAt: new Date().toISOString(),
+    const artistRef = db.collection('artists').doc(reqData.artistId);
+    const artistSnap = await artistRef.get();
+    if (!artistSnap.exists || artistSnap.data().monetizationStatus !== 'approved') {
+      await reqSnap.ref.update({
+        status: 'failed',
+        failureReason: 'Artist monetization is not approved.',
+        processedAt: new Date().toISOString(),
+      });
+      return;
+    }
+
+    const hasMobileMoneyKeys = Boolean(process.env.PAYCHANGU_SECRET_KEY || process.env.FLUTTERWAVE_SECRET_KEY);
+    const hasUsdtKeys = Boolean(
+      process.env.USDT_TREASURY_PRIVATE_KEY && (process.env.TRONGRID_API_KEY || process.env.BSC_RPC_URL)
+    );
+
+    const isUsdt = String(reqData.payoutMethodLabel || '').includes('USDT');
+    const providerReady = isUsdt ? hasUsdtKeys : hasMobileMoneyKeys;
+
+    if (!providerReady) {
+      await reqSnap.ref.update({
+        status: 'awaiting_review',
+        providerConfigured: false,
+      });
+      return;
+    }
+
+    await reqSnap.ref.update({
+      status: 'processing',
+      providerConfigured: true,
     });
-    return;
   }
-
-  const hasMobileMoneyKeys = Boolean(process.env.PAYCHANGU_SECRET_KEY || process.env.FLUTTERWAVE_SECRET_KEY);
-  const hasUsdtKeys = Boolean(process.env.USDT_TREASURY_PRIVATE_KEY && (process.env.TRONGRID_API_KEY || process.env.BSC_RPC_URL));
-
-  const isUsdt = String(reqData.payoutMethodLabel || '').includes('USDT');
-  const providerReady = isUsdt ? hasUsdtKeys : hasMobileMoneyKeys;
-
-  if (!providerReady) {
-    await event.data.after.ref.update({
-      status: 'awaiting_review',
-      providerConfigured: false,
-    });
-    return;
-  }
-
-  // Provider API integration point when live environment secrets are attached:
-  // Call PayChangu / Flutterwave mobile money transfer API or broadcast signed TRC-20/BEP-20 transfer here.
-  await event.data.after.ref.update({
-    status: 'processing',
-    providerConfigured: true,
-  });
-});
+);
 
 /**
  * 4. onReportCreate: Immediately notifies the primary administrator when any copyright/DMCA or content report arrives.
  */
-exports.onReportCreate = onDocumentCreated('reports/{reportId}', async (event) => {
-  const report = event.data?.data();
-  if (!report) return;
+exports.onReportCreate = onDocumentCreated(
+  { document: 'reports/{reportId}', database: FIRESTORE_DATABASE_ID },
+  async (event) => {
+    const report = event.data?.data();
+    if (!report) return;
 
-  await db.collection('notifications').add({
-    userId: 'admin',
-    userEmail: PRIMARY_ADMIN_EMAIL,
-    type: 'system',
-    title: `New ${report.type || 'content'} report`,
-    message: `${report.reporterEmail || 'A user'} reported "${report.trackTitle || report.artistName || 'content'}": ${report.reason}`,
-    readBy: [],
-    createdAt: new Date().toISOString(),
-    actionRoute: '/admin/dashboard',
-  });
+    await db.collection('notifications').add({
+      userId: 'admin',
+      userEmail: PRIMARY_ADMIN_EMAIL,
+      type: 'system',
+      title: `New ${report.type || 'content'} report`,
+      message: `${report.reporterEmail || 'A user'} reported "${report.trackTitle || report.artistName || 'content'}": ${report.reason}`,
+      readBy: [],
+      createdAt: new Date().toISOString(),
+      actionRoute: '/administrationside',
+    });
+  }
+);
+
+/**
+ * 5. ogCover: Binary cover artwork responder for social share crawlers (/og/track/:id/cover & /og/artist/:slug/cover)
+ */
+exports.ogCover = onRequest({ cors: true }, async (req, res) => {
+  try {
+    const reqPath = String(req.path || '/').replace(/\/+$/, '');
+    const trackMatch = reqPath.match(/^\/(?:api\/)?og\/track\/([^/]+)\/cover$/);
+    const artistMatch = reqPath.match(/^\/(?:api\/)?og\/artist\/([^/]+)\/cover$/);
+
+    const candidates = [];
+    if (trackMatch) {
+      const trackId = decodeURIComponent(trackMatch[1]);
+      const trackSnap = await db.collection('tracks').doc(trackId).get();
+      if (trackSnap.exists) {
+        const track = trackSnap.data() || {};
+        if (!track.isDraft && !track.isDeranked) {
+          candidates.push(track.coverArt, track.artistAvatar);
+          if (track.artistId) {
+            const artistSnap = await db.collection('artists').doc(String(track.artistId)).get();
+            if (artistSnap.exists) {
+              const artist = artistSnap.data() || {};
+              candidates.push(artist.avatar, artist.banner);
+            }
+          }
+        }
+      }
+    } else if (artistMatch) {
+      const slugOrId = decodeURIComponent(artistMatch[1]);
+      let artistSnap = await db.collection('artists').doc(slugOrId).get();
+      if (!artistSnap.exists) {
+        const q = await db.collection('artists').where('slug', '==', slugOrId).limit(1).get();
+        if (!q.empty) artistSnap = q.docs[0];
+      }
+      if (artistSnap.exists) {
+        const artist = artistSnap.data() || {};
+        candidates.push(artist.avatar, artist.banner);
+      }
+    }
+
+    const raw = pickFirstValidArtworkCandidate(candidates);
+    if (raw) {
+      const dataMatch = /^data:(image\/(?:jpeg|jpg|png|webp|gif));base64,([A-Za-z0-9+/=\s]+)$/i.exec(raw);
+      if (dataMatch) {
+        const mimeType = dataMatch[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : dataMatch[1].toLowerCase();
+        const buffer = Buffer.from(dataMatch[2].replace(/\s+/g, ''), 'base64');
+        res.status(200).set({
+          'Content-Type': mimeType,
+          'Content-Length': String(buffer.length),
+          'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+        }).send(buffer);
+        return;
+      }
+
+      const mediaMatch = /\/api\/media\/([a-zA-Z0-9_-]{4,128})(?:\?.*)?$/.exec(raw);
+      if (mediaMatch) {
+        const assetId = mediaMatch[1];
+        const assetSnap = await db.collection('mediaAssets').doc(assetId).get();
+        if (assetSnap.exists) {
+          const asset = assetSnap.data() || {};
+          if (asset.dataBase64 && String(asset.contentType || '').startsWith('image/')) {
+            const buffer = Buffer.from(asset.dataBase64, 'base64');
+            res.status(200).set({
+              'Content-Type': asset.contentType,
+              'Content-Length': String(buffer.length),
+              'Cache-Control': 'public, max-age=86400, immutable',
+            }).send(buffer);
+            return;
+          }
+        }
+      }
+
+      if (raw.startsWith('http://') || raw.startsWith('https://')) {
+        const safeExternal = isSafePublicHttpUrl(raw);
+        if (safeExternal) {
+          res.redirect(302, safeExternal);
+          return;
+        }
+      }
+    }
+
+    res.redirect(302, DEFAULT_FALLBACK_IMAGE);
+  } catch {
+    res.redirect(302, DEFAULT_FALLBACK_IMAGE);
+  }
+});
+
+/**
+ * 6. shareMeta: OpenGraph metadata HTML responder for social crawlers (/s/:id, /tracks/:id, /a/:slug, /artists/:slug)
+ */
+exports.shareMeta = onRequest({ cors: true }, async (req, res) => {
+  const reqPath = String(req.path || '/');
+  const trackMatch = reqPath.match(/^\/(?:s|song|tracks)\/([^/?#]+)/);
+  const artistMatch = reqPath.match(/^\/(?:a|artist|artists)\/([^/?#]+)/);
+
+  let title = 'LOWERVIBE — African Independent Music Streaming';
+  let description = 'Stream independent African music from Malawi and beyond on LOWERVIBE.';
+  let image = DEFAULT_FALLBACK_IMAGE;
+  let canonicalUrl = `${PUBLIC_SITE_ORIGIN}${reqPath}`;
+  let ogType = 'website';
+
+  try {
+    if (trackMatch) {
+      const trackId = decodeURIComponent(trackMatch[1]);
+      const trackSnap = await db.collection('tracks').doc(trackId).get();
+      if (trackSnap.exists) {
+        const track = trackSnap.data() || {};
+        if (!track.isDraft && !track.isDeranked) {
+          const artistSnap = track.artistId
+            ? await db.collection('artists').doc(String(track.artistId)).get()
+            : null;
+          const artist = artistSnap?.exists ? artistSnap.data() : null;
+          const safeTrack = String(track.title || 'Track').trim();
+          const safeArtist = String(track.artistName || artist?.name || 'Independent Artist').trim();
+          title = `${safeTrack} by ${safeArtist} – LOWERVIBE`;
+          description = track.story
+            ? String(track.story).slice(0, 160)
+            : `Stream "${safeTrack}" by ${safeArtist} on LOWERVIBE.`;
+          const rawImg = pickFirstValidArtworkCandidate([
+            track.coverArt,
+            artist?.avatar,
+            track.artistAvatar,
+            artist?.banner,
+          ]);
+          if (rawImg) {
+            if (rawImg.startsWith('data:image/') || rawImg.startsWith('/api/media/')) {
+              image = `${PUBLIC_SITE_ORIGIN}/og/track/${encodeURIComponent(trackId)}/cover`;
+            } else {
+              image = isSafePublicHttpUrl(rawImg) || (rawImg.startsWith('/') ? `${PUBLIC_SITE_ORIGIN}${rawImg}` : DEFAULT_FALLBACK_IMAGE);
+            }
+          }
+          ogType = 'music.song';
+        }
+      }
+    } else if (artistMatch) {
+      const slugOrId = decodeURIComponent(artistMatch[1]);
+      let artistSnap = await db.collection('artists').doc(slugOrId).get();
+      if (!artistSnap.exists) {
+        const q = await db.collection('artists').where('slug', '==', slugOrId).limit(1).get();
+        if (!q.empty) artistSnap = q.docs[0];
+      }
+      if (artistSnap.exists) {
+        const artist = artistSnap.data() || {};
+        const safeName = String(artist.name || 'Independent Artist').trim();
+        title = `${safeName} – Listen on LOWERVIBE`;
+        description = artist.bio
+          ? String(artist.bio).slice(0, 160)
+          : `Listen to ${safeName} on LOWERVIBE. Stream songs and support independent African music.`;
+        const rawImg = pickFirstValidArtworkCandidate([artist.avatar, artist.banner]);
+        if (rawImg) {
+          if (rawImg.startsWith('data:image/') || rawImg.startsWith('/api/media/')) {
+            image = `${PUBLIC_SITE_ORIGIN}/og/artist/${encodeURIComponent(String(artist.slug || artistSnap.id))}/cover`;
+          } else {
+            image = isSafePublicHttpUrl(rawImg) || (rawImg.startsWith('/') ? `${PUBLIC_SITE_ORIGIN}${rawImg}` : DEFAULT_FALLBACK_IMAGE);
+          }
+        }
+        ogType = 'profile';
+      }
+    }
+  } catch {}
+
+  const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>${escapeHtmlAttr(title)}</title>
+    <link rel="canonical" href="${escapeHtmlAttr(canonicalUrl)}" />
+    <meta name="description" content="${escapeHtmlAttr(description)}" />
+    <meta property="og:type" content="${escapeHtmlAttr(ogType)}" />
+    <meta property="og:site_name" content="LOWERVIBE" />
+    <meta property="og:title" content="${escapeHtmlAttr(title)}" />
+    <meta property="og:description" content="${escapeHtmlAttr(description)}" />
+    <meta property="og:image" content="${escapeHtmlAttr(image)}" />
+    <meta property="og:image:secure_url" content="${escapeHtmlAttr(image)}" />
+    <meta property="og:image:width" content="512" />
+    <meta property="og:image:height" content="512" />
+    <meta property="og:url" content="${escapeHtmlAttr(canonicalUrl)}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${escapeHtmlAttr(title)}" />
+    <meta name="twitter:description" content="${escapeHtmlAttr(description)}" />
+    <meta name="twitter:image" content="${escapeHtmlAttr(image)}" />
+  </head>
+  <body>
+    <p>Opening <a href="${escapeHtmlAttr(canonicalUrl)}">${escapeHtmlAttr(title)}</a>…</p>
+  </body>
+</html>`;
+
+  res
+    .status(200)
+    .set({
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'public, max-age=60, stale-while-revalidate=300',
+    })
+    .send(html);
 });

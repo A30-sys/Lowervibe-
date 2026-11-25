@@ -21,6 +21,7 @@ import { Artist } from '../types';
 import { DEFAULT_AVATAR_SVG } from '../utils/artworkFallback';
 import { formatNumber, formatTime, getTrackDurationSeconds, getTrackLikeCount, isTrackLikedByUser } from '../utils/formatters';
 import { translateGenreCategory } from '../utils/genreCategories';
+import { getShortArtistShareUrl } from '../utils/shareLinks';
 
 interface ArtistProfileModalProps {
   artist: Artist | null;
@@ -175,7 +176,7 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
           <button
             type="button"
             onClick={async () => {
-              const url = `${window.location.origin}/artists/${artist.slug || artist.id}`;
+              const url = getShortArtistShareUrl(artist);
               await navigator.clipboard.writeText(url).catch(() => {});
               showToast(t('link_copied', 'Artist link copied'));
             }}

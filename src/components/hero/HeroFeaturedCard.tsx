@@ -133,6 +133,8 @@ export const HeroFeaturedCard: React.FC<HeroFeaturedCardProps> = ({
             alt={featuredTrack.title}
             containerClassName="w-full h-full"
             className="group-hover:scale-[1.03] transition-transform duration-300"
+            watermark
+            watermarkCompact={false}
           />
         </div>
 

@@ -115,6 +115,8 @@ const HorizontalTrackShelf: React.FC<ShelfSectionProps> = ({
                   alt={track.title}
                   containerClassName="w-full h-full"
                   className="group-hover:scale-105 transition-transform duration-300"
+                  watermark
+                  watermarkPosition="bottom-left"
                 />
                 <div
                   className={`absolute bottom-2 right-2 w-10 h-10 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] flex items-center justify-center shadow-lg transition-all duration-150 ${

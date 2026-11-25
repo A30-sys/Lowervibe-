@@ -108,11 +108,20 @@ function truncateText(text: string, maxLen: number): string {
   return `${(lastSpace > 40 ? sliced.slice(0, lastSpace) : sliced).trim()}…`;
 }
 
-export function resolvePublicImageUrl(rawUrl: string | undefined, origin: string): string {
+export function resolvePublicImageUrl(
+  rawUrl: string | undefined,
+  origin: string,
+  coverEndpointPath?: string
+): string {
   const fallback = `${origin}/icons/pwa-512x512.png`;
   if (!rawUrl) return fallback;
   const trimmed = rawUrl.trim();
-  if (!trimmed || trimmed.startsWith('data:')) return fallback;
+  if (!trimmed || trimmed.startsWith('data:image/svg+xml') || trimmed.startsWith('blob:')) {
+    return fallback;
+  }
+  if (trimmed.startsWith('data:image/') || trimmed.startsWith('/api/media/')) {
+    return coverEndpointPath ? `${origin}${coverEndpointPath}` : fallback;
+  }
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
   if (trimmed.startsWith('/')) return `${origin}${trimmed}`;
   return `${origin}/${trimmed}`;
@@ -182,7 +191,17 @@ export function buildArtistSeoPayload(
     : `Listen to ${safeName}${locClause} on LOWERVIBE. Stream ${trackLabel}, explore top songs, and support independent African music creators directly.`;
   const description = truncateText(baseDesc, 160);
 
-  const image = resolvePublicImageUrl(artist.avatar || artist.banner, options.origin);
+  const artistCoverPath = artist.id
+    ? `/og/artist/${encodeURIComponent(artist.id)}/cover`
+    : undefined;
+  const rawArtistImg = [artist.avatar, artist.banner].find(
+    (candidate) =>
+      typeof candidate === 'string' &&
+      candidate.trim().length > 0 &&
+      !candidate.includes('pwa-512x512.png') &&
+      !candidate.startsWith('data:image/svg+xml')
+  );
+  const image = resolvePublicImageUrl(rawArtistImg || artist.avatar || artist.banner, options.origin, artistCoverPath);
   const genres = Array.isArray(artist.genres)
     ? artist.genres.filter((g) => typeof g === 'string' && g.trim().length > 0)
     : [];
@@ -295,7 +314,17 @@ export function buildTrackSeoPayload(
       `Stream "${safeTrack}" by ${safeArtist} (${track.genre || 'Independent Music'}) on LOWERVIBE. Listen offline, share, and support creators directly.`,
     160
   );
-  const image = resolvePublicImageUrl(track.coverArt, options.origin);
+  const trackCoverPath = track.id
+    ? `/og/track/${encodeURIComponent(track.id)}/cover`
+    : undefined;
+  const rawTrackImg = [track.coverArt, options.artist?.avatar, track.artistAvatar].find(
+    (candidate) =>
+      typeof candidate === 'string' &&
+      candidate.trim().length > 0 &&
+      !candidate.includes('pwa-512x512.png') &&
+      !candidate.startsWith('data:image/svg+xml')
+  );
+  const image = resolvePublicImageUrl(rawTrackImg || track.coverArt, options.origin, trackCoverPath);
   const durationSeconds = Math.round(
     Number(track.durationSeconds || track.metadata?.duration || track.metadata?.Duration || 0)
   );

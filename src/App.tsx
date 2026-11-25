@@ -1,5 +1,5 @@
 import { CheckCircle2, Download, FileText, Lock } from 'lucide-react';
-import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { AdminAccessDeniedView } from './components/admin/AdminAccessDeniedView';
 import { AdminLoginView } from './components/admin/AdminLoginView';
 import { ArtistProfileModal } from './components/ArtistProfileModal';
@@ -13,8 +13,7 @@ import { StickyMobileCta } from './components/common/StickyMobileCta';
 import { CrashRecoveryHandler } from './components/CrashRecoveryHandler';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { FirstTimeTourModal } from './components/FirstTimeTourModal';
-import { FullscreenPlayerModal } from './components/FullscreenPlayerModal';
-import { InitialLoader } from './components/InitialLoader';
+import { InitialLoader, LowerVibeWaveLoader } from './components/InitialLoader';
 import { LegalModals } from './components/LegalModals';
 import { OfflineBanner } from './components/OfflineBanner';
 import { OnboardingModal } from './components/OnboardingModal';
@@ -26,16 +25,8 @@ import { Footer } from './components/layout/Footer';
 import { StickyHeader } from './components/layout/StickyHeader';
 import { BottomPlayer } from './components/player/BottomPlayer';
 import { GlobalSearchModal } from './components/search/GlobalSearchModal';
-import { AccountView } from './components/views/AccountView';
-import { ArtistsRosterView } from './components/views/ArtistsRosterView';
 import { AuthPortalView } from './components/views/AuthPortalView';
-import { DiscoverView } from './components/views/DiscoverView';
 import { HomeView } from './components/views/HomeView';
-import { LibraryView } from './components/views/LibraryView';
-import { NotFoundView } from './components/views/NotFoundView';
-import { SearchResultsView } from './components/views/SearchResultsView';
-import { ServerErrorView } from './components/views/ServerErrorView';
-import { ThankYouView } from './components/views/ThankYouView';
 import { AudioProvider, useAudio } from './context/AudioContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
@@ -51,23 +42,35 @@ import {
 } from './services/analyticsService';
 import { isVerifiedAdminGoogleSession, PRIMARY_ADMIN_EMAIL } from './services/authService';
 import { Track } from './types';
+import { lazyWithRetry } from './utils/lazyWithRetry';
 import { usePinnedPlayerSession } from './utils/playerSessionStore';
 import { setActivePwaManifest } from './utils/pwaManifest';
 import { applyArtistSeoMeta, applyRouteSeoMeta, applyTrackSeoMeta } from './utils/seoMeta';
 
-const AdminPortal = lazy(() => import('./components/AdminPortal').then((m) => ({ default: m.AdminPortal })));
-const StudioView = lazy(() => import('./components/views/StudioView').then((m) => ({ default: m.StudioView })));
-const LegalPageView = lazy(() => import('./components/views/LegalPageView').then((m) => ({ default: m.LegalPageView })));
-const ArtistPublicPageView = lazy(() =>
+const AdminPortal = lazyWithRetry(() => import('./components/AdminPortal').then((m) => ({ default: m.AdminPortal })));
+const StudioView = lazyWithRetry(() => import('./components/views/StudioView').then((m) => ({ default: m.StudioView })));
+const LegalPageView = lazyWithRetry(() => import('./components/views/LegalPageView').then((m) => ({ default: m.LegalPageView })));
+const ArtistPublicPageView = lazyWithRetry(() =>
   import('./components/views/ArtistPublicPageView').then((m) => ({ default: m.ArtistPublicPageView }))
 );
-const TrackPublicPageView = lazy(() =>
+const TrackPublicPageView = lazyWithRetry(() =>
   import('./components/views/TrackPublicPageView').then((m) => ({ default: m.TrackPublicPageView }))
+);
+const AccountView = lazyWithRetry(() => import('./components/views/AccountView').then((m) => ({ default: m.AccountView })));
+const DiscoverView = lazyWithRetry(() => import('./components/views/DiscoverView').then((m) => ({ default: m.DiscoverView })));
+const LibraryView = lazyWithRetry(() => import('./components/views/LibraryView').then((m) => ({ default: m.LibraryView })));
+const ArtistsRosterView = lazyWithRetry(() => import('./components/views/ArtistsRosterView').then((m) => ({ default: m.ArtistsRosterView })));
+const SearchResultsView = lazyWithRetry(() => import('./components/views/SearchResultsView').then((m) => ({ default: m.SearchResultsView })));
+const ThankYouView = lazyWithRetry(() => import('./components/views/ThankYouView').then((m) => ({ default: m.ThankYouView })));
+const NotFoundView = lazyWithRetry(() => import('./components/views/NotFoundView').then((m) => ({ default: m.NotFoundView })));
+const ServerErrorView = lazyWithRetry(() => import('./components/views/ServerErrorView').then((m) => ({ default: m.ServerErrorView })));
+const FullscreenPlayerModal = lazyWithRetry(() =>
+  import('./components/FullscreenPlayerModal').then((m) => ({ default: m.FullscreenPlayerModal }))
 );
 
 const PageLoader: React.FC = () => (
-  <div className="py-16 flex items-center justify-center">
-    <div className="w-8 h-8 rounded-full border-2 border-[var(--border-strong)] border-t-[var(--accent)] animate-spin" />
+  <div className="py-12 flex items-center justify-center">
+    <LowerVibeWaveLoader />
   </div>
 );
 
@@ -237,11 +240,22 @@ function AppContent() {
     isAdmin,
   ]);
 
-  // Keep URLs canonical: /studio -> /artistcreator, short links -> /tracks/:id or /artists/:slug, and /admin -> /administrationside
+  // Keep URLs canonical: /studio -> /artistcreator, short links / ?track= / ?artist= -> /tracks/:id or /artists/:slug, and /admin -> /administrationside
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const rawPath = window.location.pathname.replace(/\/+$/, '') || '/';
     const searchStr = window.location.search || '';
+    const params = new URLSearchParams(searchStr);
+    const legacyTrack = params.get('track')?.trim();
+    if (legacyTrack && (rawPath === '/' || rawPath === '/home')) {
+      navigate(`/tracks/${encodeURIComponent(legacyTrack)}`, { replace: true });
+      return;
+    }
+    const legacyArtist = params.get('artist')?.trim();
+    if (legacyArtist && (rawPath === '/' || rawPath === '/home')) {
+      navigate(`/artists/${encodeURIComponent(legacyArtist)}`, { replace: true });
+      return;
+    }
     const shortTrackMatch = rawPath.match(/^\/(?:s|song)\/([^/]+)$/);
     if (shortTrackMatch) {
       navigate(`/tracks/${encodeURIComponent(decodeURIComponent(shortTrackMatch[1]))}${searchStr}`, {
@@ -682,7 +696,9 @@ function AppContent() {
               <LegalPageView docType={currentRoute.route as 'terms' | 'privacy' | 'copyright' | 'about'} />
             </Suspense>
           ) : (
-            <ThankYouView />
+            <Suspense fallback={<PageLoader />}>
+              <ThankYouView />
+            </Suspense>
           )}
         </main>
       ) : (
@@ -830,58 +846,50 @@ function AppContent() {
               )}
 
               <div key={currentRoute.pathname} className="animate-fadeIn">
-                {currentRoute.route === 'home' && (
-                  <HomeView
-                    onSelectArtist={handleSelectArtist}
-                    onOpenTrackDetails={handleOpenTrackDetails}
-                    onOpenLegal={openLegalModal}
-                    onOpenStudio={() => handleSelectTab('upload')}
-                    onSelectCategory={handleSelectCategory}
-                  />
-                )}
+                <Suspense fallback={<PageLoader />}>
+                  {currentRoute.route === 'home' && (
+                    <HomeView
+                      onSelectArtist={handleSelectArtist}
+                      onOpenTrackDetails={handleOpenTrackDetails}
+                      onOpenLegal={openLegalModal}
+                      onOpenStudio={() => handleSelectTab('upload')}
+                      onSelectCategory={handleSelectCategory}
+                    />
+                  )}
 
-                {currentRoute.route === 'discover' && (
-                  <DiscoverView
-                    onSelectArtist={handleSelectArtist}
-                    onOpenTrackDetails={handleOpenTrackDetails}
-                  />
-                )}
+                  {currentRoute.route === 'discover' && (
+                    <DiscoverView
+                      onSelectArtist={handleSelectArtist}
+                      onOpenTrackDetails={handleOpenTrackDetails}
+                    />
+                  )}
 
-                {currentRoute.route === 'artists' && <ArtistsRosterView />}
+                  {currentRoute.route === 'artists' && <ArtistsRosterView />}
 
-                {currentRoute.route === 'artist_detail' && (
-                  <Suspense fallback={<PageLoader />}>
-                    <ArtistPublicPageView />
-                  </Suspense>
-                )}
+                  {currentRoute.route === 'artist_detail' && <ArtistPublicPageView />}
 
-                {currentRoute.route === 'track_detail' && (
-                  <Suspense fallback={<PageLoader />}>
-                    <TrackPublicPageView />
-                  </Suspense>
-                )}
+                  {currentRoute.route === 'track_detail' && <TrackPublicPageView />}
 
-                {currentRoute.route === 'library' && (
-                  <LibraryView onOpenTrackDetails={handleOpenTrackDetails} />
-                )}
+                  {currentRoute.route === 'library' && (
+                    <LibraryView onOpenTrackDetails={handleOpenTrackDetails} />
+                  )}
 
-                {currentRoute.route === 'studio' && (
-                  <Suspense fallback={<PageLoader />}>
+                  {currentRoute.route === 'studio' && (
                     <StudioView onOpenTrackDetails={handleOpenTrackDetails} />
-                  </Suspense>
-                )}
+                  )}
 
-                {currentRoute.route === 'account' && <AccountView />}
+                  {currentRoute.route === 'account' && <AccountView />}
 
-                {currentRoute.route === 'search' && (
-                  <SearchResultsView onOpenTrackDetails={handleOpenTrackDetails} />
-                )}
+                  {currentRoute.route === 'search' && (
+                    <SearchResultsView onOpenTrackDetails={handleOpenTrackDetails} />
+                  )}
 
-                {currentRoute.route === 'thank_you' && <ThankYouView />}
+                  {currentRoute.route === 'thank_you' && <ThankYouView />}
 
-                {currentRoute.route === 'not_found' && <NotFoundView />}
+                  {currentRoute.route === 'not_found' && <NotFoundView />}
 
-                {currentRoute.route === 'server_error' && <ServerErrorView />}
+                  {currentRoute.route === 'server_error' && <ServerErrorView />}
+                </Suspense>
               </div>
 
               <Footer onOpenLegal={openLegalModal} onNavigate={navigate} />
@@ -989,7 +997,9 @@ function AppContent() {
 
       <CelebrationModal onGoToStudio={() => navigate('/artistcreator')} />
 
-      <FullscreenPlayerModal />
+      <Suspense fallback={null}>
+        <FullscreenPlayerModal />
+      </Suspense>
 
       <FirstTimeTourModal
         isOpen={Boolean(

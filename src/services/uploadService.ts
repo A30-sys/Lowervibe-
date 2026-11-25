@@ -854,7 +854,10 @@ function createServerChunkedUploadController(params: {
 
     if (isTrackCover) {
       if (smallAssetMirrorPromise) {
-        void smallAssetMirrorPromise;
+        await Promise.race([
+          smallAssetMirrorPromise,
+          new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), 2500)),
+        ]);
       }
       const b64 = await blobToBase64(params.fileOrBlob);
       params.onProgress?.({

@@ -38,7 +38,7 @@ export const CookieBanner: React.FC<CookieBannerProps> = ({ hasPlayerOffset = fa
     <aside
       role="region"
       aria-label={isNy ? 'Zokonda za ma cookie' : 'Cookie consent'}
-      className={`fixed left-3 right-3 sm:left-6 sm:right-auto sm:max-w-md z-40 rounded-[22px] bg-[var(--surface)]/95 backdrop-blur-xl border border-[var(--border-strong)] shadow-2xl p-4 space-y-3 animate-slideUp ${
+      className={`fixed left-3 right-3 sm:left-6 sm:right-auto sm:max-w-md z-40 rounded-[22px] bg-[var(--surface)] border border-[var(--border-strong)] shadow-2xl p-4 space-y-3 animate-slideUp ${
         hasPlayerOffset ? 'bottom-36 md:bottom-24' : 'bottom-20 md:bottom-5'
       }`}
     >

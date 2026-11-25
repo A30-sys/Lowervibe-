@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { LOWERVIBE_ICON_ARTWORK } from '../utils/artworkFallback';
+import { resolveMediaAssetFallbackUrl } from '../utils/mediaRecovery';
 
 interface SafeImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   fallbackSrc?: string;
@@ -16,16 +17,26 @@ export const SafeImage: React.FC<SafeImageProps> = ({
 }) => {
   const [imgSrc, setImgSrc] = useState(src || fallbackSrc);
   const [hasError, setHasError] = useState(false);
+  const [triedMediaRecovery, setTriedMediaRecovery] = useState(false);
   const [isLoading, setIsLoading] = useState(Boolean(src && src !== fallbackSrc));
 
   useEffect(() => {
     const nextSrc = src || fallbackSrc;
     setImgSrc(nextSrc);
     setHasError(false);
+    setTriedMediaRecovery(false);
     setIsLoading(Boolean(src && src !== fallbackSrc));
   }, [src, fallbackSrc]);
 
-  const handleError = () => {
+  const handleError = async () => {
+    if (!triedMediaRecovery && typeof imgSrc === 'string' && imgSrc.startsWith('/api/media/')) {
+      setTriedMediaRecovery(true);
+      const recovered = await resolveMediaAssetFallbackUrl(imgSrc);
+      if (recovered) {
+        setImgSrc(recovered);
+        return;
+      }
+    }
     if (!hasError) {
       setHasError(true);
       setImgSrc(fallbackSrc);
@@ -44,7 +55,9 @@ export const SafeImage: React.FC<SafeImageProps> = ({
         {...props}
         src={imgSrc}
         alt={alt}
-        onError={handleError}
+        onError={() => {
+          void handleError();
+        }}
         onLoad={handleLoad}
         className={`${className} ${isLoading ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
       />

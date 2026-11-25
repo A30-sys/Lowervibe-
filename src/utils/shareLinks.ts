@@ -1,12 +1,19 @@
 const PRODUCTION_ORIGIN = 'https://lowervibemusic.web.app';
 
 export function getTrustedShareOrigin(): string {
-  if (typeof window === 'undefined') return PRODUCTION_ORIGIN;
-  const { origin, hostname } = window.location;
-  if (hostname === 'lowervibemusic.web.app' || hostname === 'lowervibemusic.firebaseapp.com') {
-    return PRODUCTION_ORIGIN;
+  const configured =
+    typeof import.meta !== 'undefined' &&
+    typeof import.meta.env?.VITE_PUBLIC_SITE_URL === 'string'
+      ? import.meta.env.VITE_PUBLIC_SITE_URL.trim().replace(/\/+$/, '')
+      : '';
+  if (configured.startsWith('https://')) {
+    return configured;
   }
-  return origin || PRODUCTION_ORIGIN;
+  return PRODUCTION_ORIGIN;
+}
+
+export function getPlatformShareUrl(): string {
+  return `${getTrustedShareOrigin()}/`;
 }
 
 export function getTrackShareUrl(trackId: string): string {

@@ -88,7 +88,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
         // User cancelled
       }
     } else {
-      handleCopyLink();
+      handleCopyShortLink();
     }
   };
 
@@ -131,7 +131,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
   const twitterUrl = `https://twitter.com/intent/tweet?text=${encodedText}&url=${encodeURIComponent(shortUrl)}`;
   const whatsappUrl = `https://api.whatsapp.com/send?text=${encodedText}%20${encodeURIComponent(shortUrl)}`;
   const telegramUrl = `https://t.me/share/url?url=${encodeURIComponent(shortUrl)}&text=${encodedText}`;
-  const redditUrl = `https://reddit.com/submit?url=${encodeURIComponent(shareUrl)}&title=${encodedText}`;
+  const redditUrl = `https://reddit.com/submit?url=${encodeURIComponent(shortUrl)}&title=${encodedText}`;
 
   return (
     <div

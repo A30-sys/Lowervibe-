@@ -263,6 +263,8 @@ export const AllTracksSection: React.FC<AllTracksSectionProps> = ({
                               alt={track.title}
                               containerClassName="w-full h-full"
                               className="group-hover:scale-105 transition-transform duration-300"
+                              watermark
+                              watermarkPosition="bottom-left"
                             />
                             <button
                               type="button"

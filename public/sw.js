@@ -4,7 +4,7 @@
  * and native notification click navigation.
  */
 
-const CACHE_NAME = 'lowervibe-cache-v8';
+const CACHE_NAME = 'lowervibe-cache-v10';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
@@ -94,10 +94,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Never intercept cross-origin traffic, /api/ routes, or live manifests
+  // Never intercept cross-origin traffic, /api/ routes, live manifests, or Vite dev source/module imports
   if (
     url.origin !== self.location.origin ||
     url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/src/') ||
+    url.pathname.startsWith('/@') ||
+    url.pathname.startsWith('/node_modules/') ||
     url.pathname === '/manifest.json' ||
     url.pathname === '/manifest-creator.json' ||
     (url.protocol !== 'http:' && url.protocol !== 'https:')

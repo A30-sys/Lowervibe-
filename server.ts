@@ -460,14 +460,82 @@ function resolveRequestOrigin(req: express.Request): string {
   return `${proto}://${host}`;
 }
 
-function resolveSeoPublicImage(rawUrl: unknown, origin: string): string {
+function isSafePublicHttpUrl(rawUrl: string): string | null {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      return null;
+    }
+    const host = parsed.hostname.toLowerCase();
+    if (
+      !host ||
+      host === 'localhost' ||
+      host === '0.0.0.0' ||
+      host === '::1' ||
+      host.endsWith('.local') ||
+      host.endsWith('.internal') ||
+      /^127\./.test(host) ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^169\.254\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+      /^fe80:/i.test(host) ||
+      /^fc00:/i.test(host) ||
+      /^fd00:/i.test(host)
+    ) {
+      return null;
+    }
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+function inferImageMimeType(imageUrl: string, fallback: string = 'image/jpeg'): string {
+  const lower = imageUrl.toLowerCase().split('?')[0];
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  return fallback;
+}
+
+function resolveSeoPublicImage(
+  rawUrl: unknown,
+  origin: string,
+  coverEndpointPath?: string
+): string {
   const fallback = `${origin}/icons/pwa-512x512.png`;
   if (typeof rawUrl !== 'string') return fallback;
   const trimmed = rawUrl.trim();
-  if (!trimmed || trimmed.startsWith('data:')) return fallback;
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+  if (!trimmed || trimmed.startsWith('data:image/svg+xml') || trimmed.startsWith('blob:')) {
+    return fallback;
+  }
+  if (trimmed.startsWith('data:image/') || trimmed.startsWith('/api/media/')) {
+    return coverEndpointPath ? `${origin}${coverEndpointPath}` : fallback;
+  }
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return isSafePublicHttpUrl(trimmed) || fallback;
+  }
   if (trimmed.startsWith('/')) return `${origin}${trimmed}`;
   return `${origin}/${trimmed}`;
+}
+
+function pickFirstValidArtworkCandidate(candidates: unknown[]): string | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if (
+      !trimmed ||
+      trimmed.startsWith('data:image/svg+xml') ||
+      trimmed.startsWith('blob:') ||
+      trimmed.includes('pwa-512x512.png')
+    ) {
+      continue;
+    }
+    return trimmed;
+  }
+  return undefined;
 }
 
 function truncateSeoText(text: string, maxLen: number): string {
@@ -566,7 +634,12 @@ function injectArtistSeoHtml(
     : `Listen to ${safeName}${locClause} on LOWERVIBE. Stream ${trackLabel}, explore top songs, and support independent African music creators directly.`;
   const description = truncateSeoText(rawDescription, 160);
 
-  const image = resolveSeoPublicImage(artist.avatar || artist.banner, origin);
+  const artistCoverPath = artist.id || artist.slug
+    ? `/og/artist/${encodeURIComponent(String(artist.slug || artist.id))}/cover`
+    : undefined;
+  const rawArtistImg = pickFirstValidArtworkCandidate([artist.avatar, artist.banner]);
+  const image = resolveSeoPublicImage(rawArtistImg, origin, artistCoverPath);
+  const imageMime = inferImageMimeType(image, image.includes('/og/') ? 'image/jpeg' : 'image/png');
   const genres = Array.isArray(artist.genres)
     ? artist.genres.filter((g): g is string => typeof g === 'string' && g.trim().length > 0)
     : [];
@@ -610,6 +683,10 @@ function injectArtistSeoHtml(
     `<meta property="og:title" content="${escapeHtmlAttr(title)}" />`,
     `<meta property="og:description" content="${escapeHtmlAttr(description)}" />`,
     `<meta property="og:image" content="${escapeHtmlAttr(image)}" />`,
+    `<meta property="og:image:secure_url" content="${escapeHtmlAttr(image)}" />`,
+    `<meta property="og:image:type" content="${escapeHtmlAttr(imageMime)}" />`,
+    `<meta property="og:image:width" content="512" />`,
+    `<meta property="og:image:height" content="512" />`,
     `<meta property="og:image:alt" content="${escapeHtmlAttr(imageAlt)}" />`,
     `<meta property="og:url" content="${escapeHtmlAttr(canonicalUrl)}" />`,
     `<meta property="profile:username" content="${escapeHtmlAttr(String(artist.slug || artist.id || safeName))}" />`,
@@ -617,6 +694,7 @@ function injectArtistSeoHtml(
     `<meta name="twitter:title" content="${escapeHtmlAttr(title)}" />`,
     `<meta name="twitter:description" content="${escapeHtmlAttr(description)}" />`,
     `<meta name="twitter:image" content="${escapeHtmlAttr(image)}" />`,
+    `<meta name="twitter:image:src" content="${escapeHtmlAttr(image)}" />`,
     `<meta name="twitter:image:alt" content="${escapeHtmlAttr(imageAlt)}" />`,
     `<script id="lv-structured-data" type="application/ld+json">${escapeJsonLd(structuredData)}</script>`,
   ].join('\n    ');
@@ -693,7 +771,17 @@ function injectTrackSeoHtml(
       `Stream "${safeTrack}" by ${safeArtist} (${track.genre || 'Independent Music'}) on LOWERVIBE. Listen offline, share, and support creators directly.`,
     160
   );
-  const image = resolveSeoPublicImage(track.coverArt, origin);
+  const trackCoverPath = track.id
+    ? `/og/track/${encodeURIComponent(String(track.id))}/cover`
+    : undefined;
+  const rawTrackImg = pickFirstValidArtworkCandidate([
+    track.coverArt,
+    artist?.avatar,
+    track.artistAvatar,
+    artist?.banner,
+  ]);
+  const image = resolveSeoPublicImage(rawTrackImg, origin, trackCoverPath);
+  const imageMime = inferImageMimeType(image, image.includes('/og/') ? 'image/jpeg' : 'image/png');
   const durationSeconds = Math.round(
     Number(track.durationSeconds || track.metadata?.duration || track.metadata?.Duration || 0)
   );
@@ -743,6 +831,10 @@ function injectTrackSeoHtml(
     `<meta property="og:title" content="${escapeHtmlAttr(title)}" />`,
     `<meta property="og:description" content="${escapeHtmlAttr(description)}" />`,
     `<meta property="og:image" content="${escapeHtmlAttr(image)}" />`,
+    `<meta property="og:image:secure_url" content="${escapeHtmlAttr(image)}" />`,
+    `<meta property="og:image:type" content="${escapeHtmlAttr(imageMime)}" />`,
+    `<meta property="og:image:width" content="512" />`,
+    `<meta property="og:image:height" content="512" />`,
     `<meta property="og:image:alt" content="${escapeHtmlAttr(imageAlt)}" />`,
     `<meta property="og:url" content="${escapeHtmlAttr(canonicalUrl)}" />`,
   ];
@@ -763,6 +855,7 @@ function injectTrackSeoHtml(
     `<meta name="twitter:title" content="${escapeHtmlAttr(title)}" />`,
     `<meta name="twitter:description" content="${escapeHtmlAttr(description)}" />`,
     `<meta name="twitter:image" content="${escapeHtmlAttr(image)}" />`,
+    `<meta name="twitter:image:src" content="${escapeHtmlAttr(image)}" />`,
     `<meta name="twitter:image:alt" content="${escapeHtmlAttr(imageAlt)}" />`,
     `<script id="lv-structured-data" type="application/ld+json">${escapeJsonLd(structuredData)}</script>`
   );
@@ -1877,7 +1970,101 @@ async function startServer() {
     }
   });
 
-  // 5. Dynamic SEO / OpenGraph SSR pre-injection for Artist Profile Pages + Vite / Production serving
+  // 4h. Binary Social OG Cover Artwork Endpoints (serves exact song/artist cover for WhatsApp, Facebook, X crawlers)
+  async function serveCoverFromCandidates(res: express.Response, candidates: unknown[]) {
+    const raw = pickFirstValidArtworkCandidate(candidates);
+
+    if (raw) {
+      const dataMatch = /^data:(image\/(?:jpeg|jpg|png|webp|gif));base64,([A-Za-z0-9+/=\s]+)$/i.exec(raw);
+      if (dataMatch) {
+        const mimeType = dataMatch[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : dataMatch[1].toLowerCase();
+        const buffer = Buffer.from(dataMatch[2].replace(/\s+/g, ''), 'base64');
+        if (buffer.length > 0) {
+          res
+            .status(200)
+            .set({
+              'Content-Type': mimeType,
+              'Content-Length': String(buffer.length),
+              'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+              'Access-Control-Allow-Origin': '*',
+            })
+            .send(buffer);
+          return;
+        }
+      }
+
+      const mediaMatch = /\/api\/media\/([a-zA-Z0-9_-]{4,128})(?:\?.*)?$/.exec(raw);
+      if (mediaMatch && isSafeMediaId(mediaMatch[1])) {
+        const assetId = mediaMatch[1];
+        const filePath = path.join(MEDIA_DIR, `${assetId}.bin`);
+        const metaPath = path.join(MEDIA_DIR, `${assetId}.meta.json`);
+        let meta: MediaMeta | null = null;
+        if (fs.existsSync(filePath) && fs.existsSync(metaPath)) {
+          try {
+            meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as MediaMeta;
+          } catch {}
+        }
+        if (!meta || !fs.existsSync(filePath)) {
+          const recovered = await fetchMediaFromFirestoreRest(assetId);
+          if (recovered) meta = recovered.meta;
+        }
+        if (meta && fs.existsSync(filePath) && String(meta.contentType || '').startsWith('image/')) {
+          res.setHeader('Content-Type', meta.contentType);
+          res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          fs.createReadStream(filePath).pipe(res);
+          return;
+        }
+      }
+
+      if (raw.startsWith('http://') || raw.startsWith('https://')) {
+        const safeExternal = isSafePublicHttpUrl(raw);
+        if (safeExternal) {
+          res.redirect(302, safeExternal);
+          return;
+        }
+      }
+    }
+
+    const fallbackPaths = [
+      path.resolve(__dirname, 'dist', 'icons', 'pwa-512x512.png'),
+      path.resolve(__dirname, 'public', 'icons', 'pwa-512x512.png'),
+    ];
+    for (const p of fallbackPaths) {
+      if (fs.existsSync(p)) {
+        res.status(200).set({ 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=3600' }).sendFile(p);
+        return;
+      }
+    }
+    res.status(404).send('Cover artwork not found.');
+  }
+
+  app.get(['/og/track/:id/cover', '/api/og/track/:id/cover'], async (req, res) => {
+    try {
+      const trackId = String(req.params.id || '').trim();
+      const { track, artist } = await lookupPublicTrackForSeo(trackId);
+      await serveCoverFromCandidates(res, [
+        track?.coverArt,
+        artist?.avatar,
+        track?.artistAvatar,
+        artist?.banner,
+      ]);
+    } catch {
+      await serveCoverFromCandidates(res, []);
+    }
+  });
+
+  app.get(['/og/artist/:slug/cover', '/api/og/artist/:slug/cover'], async (req, res) => {
+    try {
+      const slug = String(req.params.slug || '').trim();
+      const { artist } = await lookupPublicArtistForSeo(slug);
+      await serveCoverFromCandidates(res, [artist?.avatar, artist?.banner]);
+    } catch {
+      await serveCoverFromCandidates(res, []);
+    }
+  });
+
+  // 5. Dynamic SEO / OpenGraph SSR pre-injection for Track, Artist, Short & Legacy Query Pages + Vite / Production serving
   if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
@@ -1889,7 +2076,7 @@ async function startServer() {
       appType: 'spa',
     });
 
-    app.get('/artists/:slug', async (req, res, next) => {
+    app.get(['/artists/:slug', '/a/:slug', '/artist/:slug'], async (req, res, next) => {
       try {
         const slug = String(req.params.slug || '').trim();
         if (!slug || slug.includes('.')) {
@@ -1907,7 +2094,7 @@ async function startServer() {
       }
     });
 
-    app.get('/tracks/:id', async (req, res, next) => {
+    app.get(['/tracks/:id', '/s/:id', '/song/:id'], async (req, res, next) => {
       try {
         const trackId = String(req.params.id || '').trim();
         if (!trackId || trackId.includes('.')) {
@@ -1925,6 +2112,31 @@ async function startServer() {
       }
     });
 
+    app.get('/', async (req, res, next) => {
+      const legacyTrack = typeof req.query.track === 'string' ? req.query.track.trim() : '';
+      const legacyArtist = typeof req.query.artist === 'string' ? req.query.artist.trim() : '';
+      if (!legacyTrack && !legacyArtist) {
+        return next();
+      }
+      try {
+        const indexPath = path.resolve(__dirname, 'index.html');
+        const rawTemplate = fs.readFileSync(indexPath, 'utf8');
+        const transformed = await vite.transformIndexHtml(req.originalUrl, rawTemplate);
+        if (legacyTrack) {
+          const { track, artist } = await lookupPublicTrackForSeo(legacyTrack);
+          const seoHtml = injectTrackSeoHtml(transformed, track, artist, req);
+          res.status(200).set({ 'Content-Type': 'text/html' }).end(seoHtml);
+          return;
+        }
+        const { artist, tracksCount } = await lookupPublicArtistForSeo(legacyArtist);
+        const seoHtml = injectArtistSeoHtml(transformed, artist, tracksCount, req);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(seoHtml);
+      } catch (err) {
+        vite.ssrFixStacktrace(err as Error);
+        next(err);
+      }
+    });
+
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
@@ -1932,7 +2144,7 @@ async function startServer() {
     if (fs.existsSync(distPath)) {
       app.use(express.static(distPath, { index: false }));
 
-      app.get('/artists/:slug', async (req, res) => {
+      app.get(['/artists/:slug', '/a/:slug', '/artist/:slug'], async (req, res) => {
         try {
           const rawHtml = fs.readFileSync(distIndexPath, 'utf8');
           const slug = String(req.params.slug || '').trim();
@@ -1950,7 +2162,7 @@ async function startServer() {
         }
       });
 
-      app.get('/tracks/:id', async (req, res) => {
+      app.get(['/tracks/:id', '/s/:id', '/song/:id'], async (req, res) => {
         try {
           const rawHtml = fs.readFileSync(distIndexPath, 'utf8');
           const trackId = String(req.params.id || '').trim();
@@ -1966,6 +2178,39 @@ async function startServer() {
         } catch {
           res.sendFile(distIndexPath);
         }
+      });
+
+      app.get('/', async (req, res) => {
+        const legacyTrack = typeof req.query.track === 'string' ? req.query.track.trim() : '';
+        const legacyArtist = typeof req.query.artist === 'string' ? req.query.artist.trim() : '';
+        if (legacyTrack || legacyArtist) {
+          try {
+            const rawHtml = fs.readFileSync(distIndexPath, 'utf8');
+            if (legacyTrack) {
+              const { track, artist } = await lookupPublicTrackForSeo(legacyTrack);
+              const seoHtml = injectTrackSeoHtml(rawHtml, track, artist, req);
+              res
+                .status(200)
+                .set({
+                  'Content-Type': 'text/html',
+                  'Cache-Control': 'public, max-age=30, stale-while-revalidate=120',
+                })
+                .end(seoHtml);
+              return;
+            }
+            const { artist, tracksCount } = await lookupPublicArtistForSeo(legacyArtist);
+            const seoHtml = injectArtistSeoHtml(rawHtml, artist, tracksCount, req);
+            res
+              .status(200)
+              .set({
+                'Content-Type': 'text/html',
+                'Cache-Control': 'public, max-age=30, stale-while-revalidate=120',
+              })
+              .end(seoHtml);
+            return;
+          } catch {}
+        }
+        res.sendFile(distIndexPath);
       });
 
       app.get('*', (_req, res) => {

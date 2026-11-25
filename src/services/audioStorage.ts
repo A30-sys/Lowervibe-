@@ -5,6 +5,8 @@
  * Enforces square cover artwork >= 1400x1400px on upload.
  */
 
+import { stampLowervibeCoverWatermark } from '../utils/artworkWatermark';
+
 const DB_NAME = 'lowervibe_offline_cache';
 const DB_VERSION = 1;
 const AUDIO_STORE = 'audio_blobs';
@@ -367,11 +369,12 @@ async function decodeImageDimensionsAndDrawSource(
  */
 export async function optimizeCoverImageForStorage(
   file: File,
-  options?: { minDim?: number; requireSquare?: boolean; targetSize?: number }
+  options?: { minDim?: number; requireSquare?: boolean; targetSize?: number; watermark?: boolean }
 ): Promise<{ blob: Blob; previewUrl: string; contentType: string; width: number; height: number }> {
   const minDim = options?.minDim ?? 200;
   const requireSquare = options?.requireSquare ?? false;
   const targetSize = options?.targetSize ?? 1024;
+  const shouldWatermark = options?.watermark !== false;
 
   const decoded = await decodeImageDimensionsAndDrawSource(file);
   try {
@@ -418,6 +421,10 @@ export async function optimizeCoverImageForStorage(
     const sy = Math.max(0, (h - cropSize) / 2);
     decoded.draw(ctx, sx, sy, cropSize, cropSize, size, size);
 
+    if (shouldWatermark) {
+      stampLowervibeCoverWatermark(ctx, size, size);
+    }
+
     const encoded = await encodeCanvasFast(canvas, 0.85);
     const previewUrl = URL.createObjectURL(encoded.blob);
     return {
@@ -442,6 +449,7 @@ export async function optimizeArtistProfilePhoto(
     minDim: 48,
     requireSquare: false,
     targetSize: 512,
+    watermark: false,
   });
 }
 

@@ -87,10 +87,10 @@ export const ThankYouView: React.FC = () => {
           <CheckCircle2 className="w-8 h-8" />
         </div>
 
-        <div className="space-y-2.5">
-          <span className="inline-block px-3 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[10px] font-mono font-bold uppercase tracking-wider text-[var(--accent-text)]">
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-[var(--accent-text)]">
             {copy.badge}
-          </span>
+          </p>
           <h1 className="text-2xl sm:text-3xl font-extrabold font-heading text-[var(--text)] tracking-tight">
             {copy.heading}
           </h1>

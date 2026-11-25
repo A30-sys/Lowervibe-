@@ -38,7 +38,13 @@ export class ErrorBoundary extends Component<Props, State> {
     this.setState({ componentStack: errorInfo?.componentStack || '' });
   }
 
-  handleReload = () => {
+  handleReload = async () => {
+    if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator && 'caches' in window) {
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      } catch {}
+    }
     window.location.reload();
   };
 

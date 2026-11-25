@@ -1,44 +1,44 @@
-import React, { useEffect, useState } from 'react';
-import { LowerVibeLogo } from './brand/LowerVibeLogo';
+import React, { useEffect } from 'react';
+import { LowerVibeMark } from './brand/LowerVibeLogo';
 
+export const LowerVibeWaveLoader: React.FC<{ label?: string }> = ({ label }) => (
+  <div className="flex flex-col items-center justify-center gap-3 py-6 text-center">
+    <div className="relative w-12 h-12 rounded-2xl bg-[#0A0B0A] border border-[#C6FF3D]/35 flex items-center justify-center shadow-md">
+      <LowerVibeMark className="w-9 h-9" animated />
+    </div>
+    {label && <p className="text-xs font-medium text-[var(--text-muted)]">{label}</p>}
+  </div>
+);
+
+/**
+ * Coordinates the instant pre-React #lv-boot-splash in index.html so the app
+ * never flashes a blank white screen and fades smoothly into the live feed.
+ */
 export const InitialLoader: React.FC = () => {
-  const [loading, setLoading] = useState(() => {
-    try {
-      return !sessionStorage.getItem('lowervibe_session_booted');
-    } catch {
-      return false;
-    }
-  });
-  const [fade, setFade] = useState(false);
-
   useEffect(() => {
-    if (!loading) return;
+    const splash = document.getElementById('lv-boot-splash');
+    if (!splash) return;
 
+    let alreadyBooted = false;
     try {
+      alreadyBooted = sessionStorage.getItem('lowervibe_session_booted') === 'true';
       sessionStorage.setItem('lowervibe_session_booted', 'true');
     } catch {}
 
-    const timer1 = setTimeout(() => setFade(true), 220);
-    const timer2 = setTimeout(() => setLoading(false), 380);
+    const fadeDelay = alreadyBooted ? 80 : 280;
+    const timer1 = window.setTimeout(() => {
+      splash.classList.add('lv-boot-hide');
+    }, fadeDelay);
+
+    const timer2 = window.setTimeout(() => {
+      splash.remove();
+    }, fadeDelay + 300);
 
     return () => {
-      clearTimeout(timer1);
-      clearTimeout(timer2);
+      window.clearTimeout(timer1);
+      window.clearTimeout(timer2);
     };
-  }, [loading]);
+  }, []);
 
-  if (!loading) return null;
-
-  return (
-    <div
-      className={`fixed inset-0 z-50 flex flex-col items-center justify-center bg-[var(--lv-bg)] text-[var(--lv-text)] transition-opacity duration-200 pointer-events-none ${
-        fade ? 'opacity-0' : 'opacity-100 pointer-events-auto'
-      }`}
-    >
-      <div className="flex flex-col items-center space-y-4 text-center px-6">
-        <LowerVibeLogo size="lg" showTagline={false} isPlaying={true} />
-        <p className="text-xs text-[var(--lv-muted)]">Loading your music...</p>
-      </div>
-    </div>
-  );
+  return null;
 };

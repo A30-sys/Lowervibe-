@@ -1,9 +1,10 @@
-import { ArrowRight, Sparkles, X } from 'lucide-react';
+import { ArrowRight, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { useRouter } from '../../context/RouterContext';
 import { trackEvent } from '../../services/analyticsService';
+import { LowerVibeMark } from '../brand/LowerVibeLogo';
 
 const DISMISS_KEY = 'lowervibe_sticky_cta_dismissed_v1';
 
@@ -53,7 +54,7 @@ export const StickyMobileCta: React.FC<StickyMobileCtaProps> = ({ isPlayerVisibl
       role="region"
       aria-label={isNy ? 'Zochita mwachangu' : 'Quick action'}
     >
-      <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-2xl bg-[var(--surface)]/95 backdrop-blur-xl border border-[var(--accent)]/40 shadow-2xl">
+      <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-2xl bg-[var(--surface)] border border-[var(--accent)]/40 shadow-2xl">
         <button
           type="button"
           onClick={() => {
@@ -66,8 +67,8 @@ export const StickyMobileCta: React.FC<StickyMobileCtaProps> = ({ isPlayerVisibl
           }}
           className="flex-1 min-w-0 flex items-center gap-2.5 text-left cursor-pointer"
         >
-          <span className="w-8 h-8 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] flex items-center justify-center shrink-0">
-            <Sparkles className="w-4 h-4" />
+          <span className="w-8 h-8 rounded-xl bg-[#0A0B0A] border border-[var(--border)] flex items-center justify-center shrink-0">
+            <LowerVibeMark className="w-6 h-6" />
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-xs font-extrabold text-[var(--text)] truncate">{label}</span>

@@ -191,7 +191,8 @@
         "requiredFollowers": { "type": "number" },
         "maxActiveStrikes": { "type": "number" },
         "reapplyCooldownDays": { "type": "number" },
-        "payoutProviderConfigured": { "type": "boolean" }
+        "payoutProviderConfigured": { "type": "boolean" },
+        "socialLinks": { "type": "object" }
       }
     },
     "SupportTicket": {

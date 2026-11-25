@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  AlignLeft,
   ArrowDown,
   ArrowUp,
   ChevronDown,
@@ -11,8 +12,11 @@ import {
   Heart,
   ListMusic,
   ListPlus,
+  Loader2,
+  Maximize2,
   MessageCircle,
   MessageSquare,
+  Minimize2,
   Moon,
   Pause,
   Play,
@@ -35,12 +39,15 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useRouter } from '../context/RouterContext';
 import { useToast } from '../context/ToastContext';
+import { fetchTrackLyrics, ResolvedTrackLyrics } from '../services/lyricsService';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../utils/artworkFallback';
 import { ExtractedPalette, extractDominantColor } from '../utils/colorExtract';
 import { formatTime, getTrackLikeCount, isTrackLikedByUser } from '../utils/formatters';
 import { translateGenreCategory } from '../utils/genreCategories';
 import { triggerHaptic } from '../utils/haptics';
 import { parseLrc } from '../utils/lrcParser';
+import { getShortTrackShareUrl } from '../utils/shareLinks';
+import { LowervibeCornerWatermark } from './brand/LowerVibeLogo';
 
 export const FullscreenPlayerModal: React.FC = () => {
   const {
@@ -119,13 +126,31 @@ export const FullscreenPlayerModal: React.FC = () => {
     secondary: 'rgba(198, 255, 61, 0.14)',
   });
   const [openDrawer, setOpenDrawer] = useState<'sleep' | 'speed' | 'quality' | null>(null);
+  const [isLyricsExpanded, setIsLyricsExpanded] = useState(false);
+  const [resolvedLyrics, setResolvedLyrics] = useState<ResolvedTrackLyrics | null>(null);
+  const [isFetchingLyrics, setIsFetchingLyrics] = useState(false);
+  const [lyricsRetryTick, setLyricsRetryTick] = useState(0);
+  const [manualScrollPaused, setManualScrollPaused] = useState(false);
+  const activeLyricLineRef = useRef<HTMLButtonElement | null>(null);
+  const manualScrollTimerRef = useRef<number | null>(null);
 
-  const parsedLyrics = useMemo(() => parseLrc(currentTrack?.lyrics), [currentTrack?.lyrics]);
+  const localParsedLyrics = useMemo(() => parseLrc(currentTrack?.lyrics), [currentTrack?.lyrics]);
+  const parsedLyrics =
+    resolvedLyrics && resolvedLyrics.trackId === currentTrack?.id
+      ? resolvedLyrics.parsed
+      : localParsedLyrics;
+  const lyricsSource =
+    resolvedLyrics && resolvedLyrics.trackId === currentTrack?.id
+      ? resolvedLyrics.source
+      : localParsedLyrics.hasLyrics
+      ? 'track'
+      : 'none';
+
   const activeLyricIndex = useMemo(() => {
     if (!parsedLyrics.isSynced || parsedLyrics.lines.length === 0) return -1;
     let activeIdx = -1;
     for (let i = 0; i < parsedLyrics.lines.length; i++) {
-      if (currentTime >= parsedLyrics.lines[i].timeSeconds) {
+      if (currentTime + 0.15 >= parsedLyrics.lines[i].timeSeconds) {
         activeIdx = i;
       } else {
         break;
@@ -133,6 +158,42 @@ export const FullscreenPlayerModal: React.FC = () => {
     }
     return activeIdx;
   }, [parsedLyrics, currentTime]);
+
+  // Fetch synced lyrics whenever FullscreenPlayer is open for a track (with abort & cache)
+  useEffect(() => {
+    if (!isFullscreenPlayerOpen || !currentTrack) return;
+    if (!isLyricsExpanded && activeTab !== 'lyrics' && !currentTrack.lyrics) return;
+
+    const controller = new AbortController();
+    let active = true;
+    setIsFetchingLyrics(true);
+
+    fetchTrackLyrics(currentTrack, {
+      forceRefresh: lyricsRetryTick > 0,
+      signal: controller.signal,
+    })
+      .then((res) => {
+        if (active) setResolvedLyrics(res);
+      })
+      .finally(() => {
+        if (active) setIsFetchingLyrics(false);
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [isFullscreenPlayerOpen, currentTrack?.id, isLyricsExpanded, activeTab, lyricsRetryTick]);
+
+  // Auto-scroll active synced line into center view unless user just scrolled manually
+  useEffect(() => {
+    if (!isFullscreenPlayerOpen || (!isLyricsExpanded && activeTab !== 'lyrics')) return;
+    if (manualScrollPaused || activeLyricIndex < 0) return;
+    activeLyricLineRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    });
+  }, [activeLyricIndex, isFullscreenPlayerOpen, isLyricsExpanded, activeTab, manualScrollPaused]);
 
   // Extract dominant color from album cover for background tint
   useEffect(() => {
@@ -151,13 +212,6 @@ export const FullscreenPlayerModal: React.FC = () => {
       active = false;
     };
   }, [currentTrack?.coverArt]);
-
-  // If user switched to a track with no lyrics while on lyrics tab, fall back to playing
-  useEffect(() => {
-    if (activeTab === 'lyrics' && !parsedLyrics.hasLyrics) {
-      setActiveTab('playing');
-    }
-  }, [activeTab, parsedLyrics.hasLyrics]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -218,6 +272,9 @@ export const FullscreenPlayerModal: React.FC = () => {
     return () => {
       if (artCommitTimerRef.current !== null) {
         window.clearTimeout(artCommitTimerRef.current);
+      }
+      if (manualScrollTimerRef.current !== null) {
+        window.clearTimeout(manualScrollTimerRef.current);
       }
     };
   }, []);
@@ -399,7 +456,7 @@ export const FullscreenPlayerModal: React.FC = () => {
   };
 
   const handleWhatsAppShare = () => {
-    const shareUrl = `${window.location.origin}?track=${currentTrack.id}`;
+    const shareUrl = getShortTrackShareUrl(currentTrack.id);
     const text = isNy
       ? `Mverani "${currentTrack.title}" ya ${currentTrack.artistName} pa LOWERVIBE: ${shareUrl}`
       : `Listen to "${currentTrack.title}" by ${currentTrack.artistName} on LOWERVIBE: ${shareUrl}`;
@@ -436,7 +493,7 @@ export const FullscreenPlayerModal: React.FC = () => {
   const tabs: { id: 'playing' | 'queue' | 'lyrics' | 'comments'; label: string }[] = [
     { id: 'playing', label: isNy ? 'Ikulira' : 'Playing' },
     { id: 'queue', label: isNy ? `Mndandanda (${queue.length})` : `Queue (${queue.length})` },
-    ...(parsedLyrics.hasLyrics ? [{ id: 'lyrics' as const, label: t('lyrics') }] : []),
+    { id: 'lyrics', label: t('lyrics') },
     {
       id: 'comments',
       label: isNy
@@ -444,6 +501,34 @@ export const FullscreenPlayerModal: React.FC = () => {
         : `Comments (${visibleComments.length})`,
     },
   ];
+
+  const handleToggleExpandLyrics = () => {
+    triggerHaptic('tap');
+    setManualScrollPaused(false);
+    setIsLyricsExpanded((prev) => {
+      const next = !prev;
+      if (next && activeTab !== 'playing') {
+        setActiveTab('playing');
+      }
+      return next;
+    });
+  };
+
+  const handleLyricsWheelOrTouch = () => {
+    setManualScrollPaused(true);
+    if (manualScrollTimerRef.current !== null) {
+      window.clearTimeout(manualScrollTimerRef.current);
+    }
+    manualScrollTimerRef.current = window.setTimeout(() => {
+      setManualScrollPaused(false);
+    }, 3500);
+  };
+
+  const hasUploadedArtwork = Boolean(
+    currentTrack.coverArt &&
+      currentTrack.coverArt !== DEFAULT_ARTWORK_SVG &&
+      !currentTrack.coverArt.startsWith('data:image/svg+xml')
+  );
 
   const qualityOptions: { id: AudioQualityPreference; label: string; desc: string }[] = [
     {
@@ -636,6 +721,9 @@ export const FullscreenPlayerModal: React.FC = () => {
                       isPlaying ? 'scale-[1.02]' : 'scale-100'
                     }`}
                   />
+                  {hasUploadedArtwork && (
+                    <LowervibeCornerWatermark position="bottom-right" compact={false} />
+                  )}
                 </div>
 
                 {/* Next Song Artwork Slide (slides in from right when swiping left) */}
@@ -946,6 +1034,28 @@ export const FullscreenPlayerModal: React.FC = () => {
                     <span>{t('save')}</span>
                   </button>
                 )}
+
+                <button
+                  type="button"
+                  onClick={handleToggleExpandLyrics}
+                  aria-pressed={isLyricsExpanded}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-2xl text-xs font-semibold border transition cursor-pointer min-h-[44px] ${
+                    isLyricsExpanded
+                      ? 'bg-[#C6FF3D] border-[#C6FF3D] text-[#0A0B0A] font-bold'
+                      : 'bg-white/10 border-white/10 text-white/85 hover:text-white'
+                  }`}
+                >
+                  {isLyricsExpanded ? (
+                    <Minimize2 className="w-4 h-4" />
+                  ) : (
+                    <Maximize2 className="w-4 h-4" />
+                  )}
+                  <span>
+                    {isLyricsExpanded
+                      ? t('collapse_lyrics', 'Collapse Lyrics')
+                      : t('expand_lyrics', 'Expand Lyrics')}
+                  </span>
+                </button>
               </div>
 
               {/* Contextual Option Drawer (Sleep / Speed / Quality) */}
@@ -1197,17 +1307,270 @@ export const FullscreenPlayerModal: React.FC = () => {
           </div>
         )}
 
-        {/* SYNCED LYRICS TAB (Only mounted when track actually has lyrics) */}
-        {activeTab === 'lyrics' && parsedLyrics.hasLyrics && (
-          <div className="rounded-[24px] bg-[#131513] border border-white/10 p-5 max-h-[68vh] overflow-y-auto space-y-3">
-            {parsedLyrics.isSynced
-              ? parsedLyrics.lines.map((line, idx) => {
+        {/* EXPANDED TIME-SYNCED LYRICS OVERLAY IN PLAYING VIEW */}
+        {activeTab === 'playing' && isLyricsExpanded && (
+          <div className="fixed inset-0 z-30 bg-[#0A0B0A] flex flex-col p-4 sm:p-6 pt-[calc(16px+env(safe-area-inset-top,0px))] pb-[calc(18px+env(safe-area-inset-bottom,0px))] animate-fadeIn">
+            <div
+              className="fixed inset-0 pointer-events-none"
+              style={{
+                background: `radial-gradient(circle at 50% 12%, ${palette.primary} 0%, rgba(10, 11, 10, 0.96) 68%, #0A0B0A 100%)`,
+              }}
+            />
+
+            <div className="relative z-10 w-full max-w-lg mx-auto flex flex-col flex-1 min-h-0 gap-4">
+              {/* Top Mini Header */}
+              <div className="flex items-center justify-between gap-3 shrink-0 pb-3 border-b border-white/10">
+                <div className="flex items-center gap-3 min-w-0">
+                  <img
+                    src={currentTrack.coverArt || DEFAULT_ARTWORK_SVG}
+                    alt={currentTrack.title}
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src = DEFAULT_ARTWORK_SVG;
+                    }}
+                    className="w-11 h-11 rounded-xl object-cover border border-white/10 shrink-0"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-extrabold text-white truncate">{currentTrack.title}</p>
+                    <p className="text-xs text-white/70 truncate">
+                      {currentTrack.artistName}
+                      {parsedLyrics.isSynced
+                        ? ` · ${t('synced_lyrics', 'Synced Lyrics')}`
+                        : ''}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleToggleExpandLyrics}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-bold text-white cursor-pointer min-h-[44px] shrink-0"
+                >
+                  <Minimize2 className="w-4 h-4 text-[#C6FF3D]" />
+                  <span>{t('collapse_lyrics', 'Collapse Lyrics')}</span>
+                </button>
+              </div>
+
+              {/* Scrollable Time-Synced Lyrics Sheet */}
+              <div
+                onWheel={handleLyricsWheelOrTouch}
+                onTouchMove={handleLyricsWheelOrTouch}
+                className="flex-1 overflow-y-auto px-1 py-4 space-y-4 scrollbar-none"
+              >
+                {isFetchingLyrics && !parsedLyrics.hasLyrics ? (
+                  <div className="py-16 flex flex-col items-center justify-center gap-3 text-white/70 text-xs">
+                    <Loader2 className="w-6 h-6 animate-spin text-[#C6FF3D]" />
+                    <span>{t('loading_lyrics', 'Finding synced lyrics...')}</span>
+                  </div>
+                ) : !parsedLyrics.hasLyrics ? (
+                  <div className="py-16 text-center space-y-3">
+                    <AlignLeft className="w-8 h-8 text-white/35 mx-auto" />
+                    <p className="text-sm font-bold text-white">
+                      {t('no_lyrics_yet', 'No synced lyrics available for this song yet.')}
+                    </p>
+                    <p className="text-xs text-white/60 max-w-xs mx-auto">
+                      {isNy
+                        ? 'Mawu a nyimboyi akaikidwa ndi woimba kapena kupezeka pa intaneti adzaoneka apa.'
+                        : 'Once the artist adds lyrics or timed lyrics match this release, lines highlight in real time.'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setLyricsRetryTick((n) => n + 1)}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-semibold text-white cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>{t('try_again', 'Try again')}</span>
+                    </button>
+                  </div>
+                ) : parsedLyrics.isSynced ? (
+                  parsedLyrics.lines.map((line, idx) => {
+                    const isActiveLine = idx === activeLyricIndex;
+                    const isPast = activeLyricIndex >= 0 && idx < activeLyricIndex;
+                    return (
+                      <button
+                        key={`${idx}-${line.timeSeconds}`}
+                        ref={isActiveLine ? activeLyricLineRef : undefined}
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic('tap');
+                          setManualScrollPaused(false);
+                          seekTo(line.timeSeconds);
+                        }}
+                        className={`block w-full text-left transition-all duration-200 leading-snug cursor-pointer py-1 ${
+                          isActiveLine
+                            ? 'text-xl sm:text-2xl font-extrabold text-[#C6FF3D]'
+                            : isPast
+                            ? 'text-base sm:text-lg font-bold text-white/40 hover:text-white/75'
+                            : 'text-base sm:text-lg font-bold text-white/75 hover:text-white'
+                        }`}
+                      >
+                        {line.text}
+                      </button>
+                    );
+                  })
+                ) : (
+                  parsedLyrics.plainLines.map((line, idx) => (
+                    <p
+                      key={`${idx}-${line.slice(0, 12)}`}
+                      className="text-lg sm:text-xl font-bold text-white/85 leading-relaxed"
+                    >
+                      {line}
+                    </p>
+                  ))
+                )}
+              </div>
+
+              {manualScrollPaused && parsedLyrics.isSynced && activeLyricIndex >= 0 && (
+                <div className="flex justify-center shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualScrollPaused(false);
+                      activeLyricLineRef.current?.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'center',
+                      });
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl bg-[#C6FF3D] text-[#0A0B0A] text-xs font-bold shadow-lg cursor-pointer"
+                  >
+                    {t('sync_to_playing', 'Sync to current line')}
+                  </button>
+                </div>
+              )}
+
+              {/* Compact Bottom Scrubber & Play Control */}
+              <div className="shrink-0 pt-3 border-t border-white/10 space-y-2.5">
+                <div className="relative h-5 flex items-center">
+                  <div className="w-full h-1.5 rounded-full bg-white/15 overflow-hidden">
+                    <div
+                      className="h-full bg-[#C6FF3D] rounded-full transition-[width] duration-150 ease-linear"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="0.2"
+                    value={progressPercent}
+                    onChange={(e) => {
+                      if (duration > 0) seekTo((parseFloat(e.target.value) / 100) * duration);
+                    }}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    aria-label="Seek audio timeline"
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-xs font-mono text-white/65 tabular-nums">
+                    {formatTime(currentTime)}
+                  </span>
+                  <div className="flex items-center gap-4">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        pendingSlideDirRef.current = 'prev';
+                        playPrevTrack();
+                      }}
+                      className="text-white/85 hover:text-white min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
+                      aria-label={t('previous')}
+                    >
+                      <SkipBack className="w-5 h-5 fill-current" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={togglePlayPause}
+                      className="w-12 h-12 rounded-full bg-[#C6FF3D] text-[#0A0B0A] flex items-center justify-center cursor-pointer shadow-lg"
+                      aria-label={isPlaying ? t('pause') : t('play')}
+                    >
+                      {isPlaying ? (
+                        <Pause className="w-5 h-5 fill-[#0A0B0A]" />
+                      ) : (
+                        <Play className="w-5 h-5 fill-[#0A0B0A] ml-0.5" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        pendingSlideDirRef.current = 'next';
+                        playNextTrack();
+                      }}
+                      className="text-white/85 hover:text-white min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
+                      aria-label={t('next_track')}
+                    >
+                      <SkipForward className="w-5 h-5 fill-current" />
+                    </button>
+                  </div>
+                  <span className="text-xs font-mono text-white/65 tabular-nums">
+                    -{formatTime(Math.max(0, duration - currentTime))}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SYNCED LYRICS TAB */}
+        {activeTab === 'lyrics' && (
+          <div className="rounded-[24px] bg-[#131513] border border-white/10 p-5 max-h-[68vh] flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2 pb-2 border-b border-white/10 shrink-0">
+              <div className="flex items-center gap-2 text-xs font-bold text-white">
+                <AlignLeft className="w-4 h-4 text-[#C6FF3D]" />
+                <span>
+                  {parsedLyrics.isSynced
+                    ? t('synced_lyrics', 'Synced Lyrics')
+                    : t('lyrics', 'Lyrics')}
+                </span>
+                {lyricsSource === 'lrclib' && (
+                  <span className="text-[10px] font-mono text-white/50">· LRCLIB</span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleExpandLyrics}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-[#C6FF3D] cursor-pointer"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+                <span>{t('expand_lyrics', 'Expand Lyrics')}</span>
+              </button>
+            </div>
+
+            <div
+              onWheel={handleLyricsWheelOrTouch}
+              onTouchMove={handleLyricsWheelOrTouch}
+              className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-none"
+            >
+              {isFetchingLyrics && !parsedLyrics.hasLyrics ? (
+                <div className="py-14 flex flex-col items-center justify-center gap-3 text-white/70 text-xs">
+                  <Loader2 className="w-5 h-5 animate-spin text-[#C6FF3D]" />
+                  <span>{t('loading_lyrics', 'Finding synced lyrics...')}</span>
+                </div>
+              ) : !parsedLyrics.hasLyrics ? (
+                <div className="py-12 text-center space-y-2.5">
+                  <p className="text-sm font-bold text-white">
+                    {t('no_lyrics_yet', 'No synced lyrics available for this song yet.')}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setLyricsRetryTick((n) => n + 1)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-white cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>{t('try_again', 'Try again')}</span>
+                  </button>
+                </div>
+              ) : parsedLyrics.isSynced ? (
+                parsedLyrics.lines.map((line, idx) => {
                   const isActiveLine = idx === activeLyricIndex;
                   return (
                     <button
                       key={`${idx}-${line.timeSeconds}`}
+                      ref={isActiveLine ? activeLyricLineRef : undefined}
                       type="button"
-                      onClick={() => seekTo(line.timeSeconds)}
+                      onClick={() => {
+                        triggerHaptic('tap');
+                        setManualScrollPaused(false);
+                        seekTo(line.timeSeconds);
+                      }}
                       className={`block w-full text-left text-base sm:text-lg font-bold transition leading-relaxed cursor-pointer ${
                         isActiveLine ? 'text-[#C6FF3D]' : 'text-white/55 hover:text-white/85'
                       }`}
@@ -1216,14 +1579,17 @@ export const FullscreenPlayerModal: React.FC = () => {
                     </button>
                   );
                 })
-              : parsedLyrics.plainLines.map((line, idx) => (
+              ) : (
+                parsedLyrics.plainLines.map((line, idx) => (
                   <p
                     key={`${idx}-${line.slice(0, 12)}`}
                     className="text-base sm:text-lg font-semibold text-white/85 leading-relaxed"
                   >
                     {line}
                   </p>
-                ))}
+                ))
+              )}
+            </div>
           </div>
         )}
 

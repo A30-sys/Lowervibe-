@@ -184,6 +184,15 @@ export interface PayoutRecord {
   txRef?: string;
 }
 
+export interface PlatformSocialLinks {
+  whatsapp?: string;
+  facebook?: string;
+  instagram?: string;
+  tiktok?: string;
+  youtube?: string;
+  x?: string;
+}
+
 export interface MonetizationConfig {
   id?: string;
   ratePerPlayMwk: number; // Explicit configurable rate in MWK per qualifying play
@@ -196,6 +205,7 @@ export interface MonetizationConfig {
   maxActiveStrikes: number; // Default 0
   reapplyCooldownDays: number; // Default 14
   payoutProviderConfigured: boolean;
+  socialLinks?: PlatformSocialLinks;
   updatedAt?: string;
 }
 
@@ -210,6 +220,7 @@ export const DEFAULT_MONETIZATION_CONFIG: MonetizationConfig = {
   maxActiveStrikes: 0,
   reapplyCooldownDays: 14,
   payoutProviderConfigured: false,
+  socialLinks: {},
 };
 
 export interface PlatformPlaylist {

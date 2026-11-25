@@ -502,7 +502,7 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
         <div
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
-          className={`lv-player-surface rounded-2xl bg-[var(--lv-surface)]/95 backdrop-blur-2xl border border-[var(--lv-border-strong)] shadow-2xl ${
+          className={`lv-player-surface rounded-2xl bg-[var(--lv-surface)] border border-[var(--lv-border-strong)] shadow-2xl ${
             isExiting
               ? 'animate-player-slide-down pointer-events-none'
               : 'animate-player-pop-up pointer-events-auto'

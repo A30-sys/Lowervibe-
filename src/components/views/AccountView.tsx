@@ -63,6 +63,7 @@ import {
   uploadCompressedAvatar,
   uploadCompressedCoverBanner,
 } from '../../services/uploadService';
+import { getShortArtistShareUrl, getTrustedShareOrigin } from '../../utils/shareLinks';
 import { EqPreset } from '../../types';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG, DEFAULT_BANNER_SVG } from '../../utils/artworkFallback';
 import { playNotificationSound } from '../../utils/notificationSound';
@@ -658,8 +659,8 @@ export const AccountView: React.FC = () => {
   const handleShareProfile = () => {
     if (!currentUser) return;
     const shareUrl = currentUser.artistId
-      ? `${window.location.origin}/artists/${currentUser.artistId}`
-      : `${window.location.origin}/account`;
+      ? getShortArtistShareUrl({ id: currentUser.artistId })
+      : `${getTrustedShareOrigin()}/account`;
     if (navigator.share) {
       navigator.share({ title: `${currentUser.name} on LOWERVIBE`, url: shareUrl }).catch(() => {});
     } else {

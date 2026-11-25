@@ -42,7 +42,7 @@ export const BottomTabBar: React.FC<BottomTabBarProps> = ({ activeTab, onSelectT
 
   return (
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-40 backdrop-blur-2xl bg-[var(--bg)]/95 border-t border-[var(--border)] px-2 pt-1.5 pb-[calc(6px+env(safe-area-inset-bottom,0px))] transition-colors duration-200"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--bg)]/[0.98] border-t border-[var(--border)] px-2 pt-1.5 pb-[calc(6px+env(safe-area-inset-bottom,0px))] transition-colors duration-200"
       aria-label="Primary mobile navigation"
     >
       <div className="max-w-lg mx-auto grid grid-cols-5 gap-1">

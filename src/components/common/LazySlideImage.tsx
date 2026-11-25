@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { LOWERVIBE_ICON_ARTWORK } from '../../utils/artworkFallback';
+import { resolveMediaAssetFallbackUrl } from '../../utils/mediaRecovery';
+import { LowervibeCornerWatermark } from '../brand/LowerVibeLogo';
 
 interface LazySlideImageProps {
   src: string;
@@ -7,6 +9,9 @@ interface LazySlideImageProps {
   className?: string;
   containerClassName?: string;
   aspectRatio?: 'square' | 'video' | 'portrait' | 'auto';
+  watermark?: boolean;
+  watermarkPosition?: 'bottom-right' | 'bottom-left';
+  watermarkCompact?: boolean;
 }
 
 export const LazySlideImage: React.FC<LazySlideImageProps> = ({
@@ -15,13 +20,18 @@ export const LazySlideImage: React.FC<LazySlideImageProps> = ({
   className = '',
   containerClassName = '',
   aspectRatio = 'square',
+  watermark = false,
+  watermarkPosition = 'bottom-right',
+  watermarkCompact = true,
 }) => {
   const [resolvedSrc, setResolvedSrc] = useState(src || LOWERVIBE_ICON_ARTWORK);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [triedMediaRecovery, setTriedMediaRecovery] = useState(false);
 
   useEffect(() => {
     setResolvedSrc(src || LOWERVIBE_ICON_ARTWORK);
     setIsLoaded(false);
+    setTriedMediaRecovery(false);
   }, [src]);
 
   const aspectClass =
@@ -32,6 +42,29 @@ export const LazySlideImage: React.FC<LazySlideImageProps> = ({
       : aspectRatio === 'portrait'
       ? 'aspect-[3/4]'
       : '';
+
+  const showWatermarkOverlay =
+    watermark &&
+    isLoaded &&
+    Boolean(resolvedSrc) &&
+    resolvedSrc !== LOWERVIBE_ICON_ARTWORK &&
+    !resolvedSrc.startsWith('data:image/svg+xml');
+
+  const handleImageError = async () => {
+    if (!triedMediaRecovery && resolvedSrc.startsWith('/api/media/')) {
+      setTriedMediaRecovery(true);
+      const recovered = await resolveMediaAssetFallbackUrl(resolvedSrc);
+      if (recovered) {
+        setResolvedSrc(recovered);
+        return;
+      }
+    }
+    if (resolvedSrc !== LOWERVIBE_ICON_ARTWORK) {
+      setResolvedSrc(LOWERVIBE_ICON_ARTWORK);
+    } else {
+      setIsLoaded(true);
+    }
+  };
 
   return (
     <div
@@ -47,16 +80,15 @@ export const LazySlideImage: React.FC<LazySlideImageProps> = ({
         referrerPolicy="no-referrer"
         onLoad={() => setIsLoaded(true)}
         onError={() => {
-          if (resolvedSrc !== LOWERVIBE_ICON_ARTWORK) {
-            setResolvedSrc(LOWERVIBE_ICON_ARTWORK);
-          } else {
-            setIsLoaded(true);
-          }
+          void handleImageError();
         }}
         className={`w-full h-full object-cover transform-gpu transition-opacity duration-300 ease-out ${
           isLoaded ? 'opacity-100' : 'opacity-0'
         } ${className}`}
       />
+      {showWatermarkOverlay && (
+        <LowervibeCornerWatermark position={watermarkPosition} compact={watermarkCompact} />
+      )}
     </div>
   );
 };

@@ -60,6 +60,7 @@ import {
 import { useAuth } from './AuthContext';
 import { useRouter } from './RouterContext';
 import { isVerifiedAdminGoogleSession, PRIMARY_ADMIN_EMAIL } from '../services/authService';
+import { sanitizePlatformSocialLinks } from '../utils/socialLinks';
 
 export type RepeatMode = 'off' | 'all' | 'one';
 export type AudioQualityPreference = 'auto' | 'high' | 'saver' | 'lossless';
@@ -1336,7 +1337,12 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       doc(db, 'config', 'platform'),
       (snap) => {
         if (snap.exists()) {
-          setMonetizationConfig({ ...DEFAULT_MONETIZATION_CONFIG, ...(snap.data() as Partial<MonetizationConfig>) });
+          const data = snap.data() as Partial<MonetizationConfig>;
+          setMonetizationConfig({
+            ...DEFAULT_MONETIZATION_CONFIG,
+            ...data,
+            socialLinks: sanitizePlatformSocialLinks(data.socialLinks),
+          });
         }
       },
       () => {}
@@ -3130,14 +3136,26 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Monetization & Payouts
   const updateMonetizationConfig = async (updates: Partial<MonetizationConfig>) => {
-    const next = {
+    const nextSocials = updates.socialLinks !== undefined
+      ? sanitizePlatformSocialLinks(updates.socialLinks)
+      : sanitizePlatformSocialLinks(monetizationConfig.socialLinks);
+    const next: MonetizationConfig = {
+      ...DEFAULT_MONETIZATION_CONFIG,
       ...monetizationConfig,
       ...updates,
+      socialLinks: nextSocials,
       updatedAt: new Date().toISOString(),
     };
     setMonetizationConfig(next);
-    await setDoc(doc(db, 'config', 'platform'), next, { merge: true });
-    addAuditLog('UPDATE_MONETIZATION_CONFIG', 'system', 'platform', 'Updated monetization thresholds & rate');
+    await setDoc(doc(db, 'config', 'platform'), next);
+    addAuditLog(
+      'UPDATE_MONETIZATION_CONFIG',
+      'system',
+      'platform',
+      updates.socialLinks !== undefined
+        ? 'Updated platform settings and official social media links'
+        : 'Updated monetization thresholds & rate'
+    );
   };
 
   const isArtistEligibleForMonetization = (artist: Artist): boolean => {
