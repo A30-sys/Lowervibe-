@@ -17,7 +17,12 @@ import {
 } from 'firebase/firestore';
 import { auth, db, formatFirebaseError, handleFirestoreError, OperationType, testFirestoreConnection } from '../services/firebase';
 import { audioEngine } from '../services/audioEngine';
-import { getAudioBlobUrl, saveAudioBlob } from '../services/audioStorage';
+import {
+  getAudioBlobUrl,
+  isTrackCachedOffline,
+  removeTrackOfflineCache,
+  saveAudioBlob,
+} from '../services/audioStorage';
 import { upsertCustomGenre } from '../services/genresService';
 import { requestServerApprovalToken, requestServerPayoutToken } from '../services/payoutTokenService';
 import { durableDeleteDoc, durableSetDoc, durableUpdateDoc, flushPendingSyncOperations } from '../services/reliableSync';
@@ -66,6 +71,17 @@ export type RepeatMode = 'off' | 'all' | 'one';
 export type AudioQualityPreference = 'auto' | 'high' | 'saver' | 'lossless';
 export type PlaybackState = 'idle' | 'playing' | 'paused' | 'error';
 
+export interface BatchOfflineDownloadState {
+  id: string;
+  label: string;
+  completed: number;
+  total: number;
+  skippedAlreadySaved: number;
+  failed: number;
+  currentTrackTitle: string;
+  isComplete: boolean;
+}
+
 interface ResumePlaybackState {
   trackId: string;
   positionSeconds: number;
@@ -100,6 +116,7 @@ interface AudioContextType {
   playbackRate: number;
   audioQuality: AudioQualityPreference;
   effectiveAudioQuality: 'high' | 'saver' | 'lossless';
+  effectiveBitrateKbps: string;
   estimatedMbPerMinute: number;
   playbackError: string | null;
   catalogError: string | null;
@@ -190,6 +207,19 @@ interface AudioContextType {
   deleteArtistProfile: (artistId: string) => Promise<{ success: boolean; deletedTracks: number; error?: string }>;
   updateTrack: (trackId: string, updates: Partial<Track>) => Promise<void>;
   downloadTrack: (track: Track) => void;
+  downloadTrackBatch: (
+    tracksToSync: Track[],
+    label: string,
+    batchId?: string
+  ) => Promise<{ saved: number; skipped: number; failed: number; blockedReason?: string }>;
+  downloadPlaylistOffline: (
+    playlist: Playlist
+  ) => Promise<{ saved: number; skipped: number; failed: number; blockedReason?: string }>;
+  downloadArtistCatalogOffline: (
+    artist: Artist,
+    artistTracks: Track[]
+  ) => Promise<{ saved: number; skipped: number; failed: number; blockedReason?: string }>;
+  removeTracksOfflineBatch: (trackIds: string[]) => Promise<number>;
   deleteTrack: (trackId: string) => Promise<{ success: boolean; error?: string }>;
   setCertifiedStatus: (trackId: string, certified: boolean) => void;
   setTrackChartRank: (trackId: string, rank?: number) => void;
@@ -309,6 +339,7 @@ interface AudioContextType {
     progress: number;
     isComplete: boolean;
   } | null;
+  activeBatchDownload: BatchOfflineDownloadState | null;
 
   dismissAllModals: () => void;
 }
@@ -787,7 +818,11 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setCrossfadeSecondsState(Math.max(0, Math.min(12, p.crossfadeSeconds)));
     }
     if (p.streamingQuality) {
-      setAudioQualityState(userSettings.dataSaver.enabled ? 'saver' : p.streamingQuality);
+      setAudioQualityState((prev) => {
+        if (userSettings.dataSaver.enabled) return 'saver';
+        if (prev === 'lossless' && p.streamingQuality === 'high') return 'lossless';
+        return p.streamingQuality;
+      });
     }
     if (p.eqPreset) {
       setEqPresetState(p.eqPreset);
@@ -819,8 +854,12 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
       localStorage.setItem(QUALITY_PREF_KEY, q);
     } catch {}
-    if (q === 'auto' || q === 'high' || q === 'saver') {
-      updateUserSettings({ playback: { streamingQuality: q } });
+    if (q === 'saver') {
+      updateUserSettings({ playback: { streamingQuality: 'saver' }, dataSaver: { enabled: true } });
+    } else if (q === 'auto' || q === 'high') {
+      updateUserSettings({ playback: { streamingQuality: q }, dataSaver: { enabled: false } });
+    } else if (q === 'lossless') {
+      updateUserSettings({ playback: { streamingQuality: 'high' }, dataSaver: { enabled: false } });
     }
   };
 
@@ -848,8 +887,19 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return networkEffectiveQuality;
   })();
 
+  const effectiveBitrateKbps =
+    effectiveAudioQuality === 'lossless'
+      ? 'FLAC / WAV'
+      : effectiveAudioQuality === 'high'
+      ? '320 kbps'
+      : '96 kbps';
+
   const estimatedMbPerMinute =
     effectiveAudioQuality === 'lossless' ? 6.5 : effectiveAudioQuality === 'high' ? 1.8 : 0.6;
+
+  useEffect(() => {
+    audioEngine.setDataSaverMode(effectiveAudioQuality === 'saver');
+  }, [effectiveAudioQuality]);
 
   // Sleep Timer state
   const [sleepTimerMinutes, setSleepTimerMinutesState] = useState<number | null>(null);
@@ -966,6 +1016,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     progress: number;
     isComplete: boolean;
   } | null>(null);
+  const [activeBatchDownload, setActiveBatchDownload] = useState<BatchOfflineDownloadState | null>(null);
 
   const sessionListenedSeconds = useRef<number>(0);
   const hasStreamBeenValidated = useRef<boolean>(false);
@@ -2662,6 +2713,178 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
+  const downloadTrackBatch = async (
+    tracksToSync: Track[],
+    label: string,
+    batchId: string = `batch-${Date.now()}`
+  ): Promise<{ saved: number; skipped: number; failed: number; blockedReason?: string }> => {
+    if (!currentUser) {
+      requireAuth(
+        () => {
+          void downloadTrackBatch(tracksToSync, label, batchId);
+        },
+        `Sign in to save "${label}" offline`
+      );
+      return { saved: 0, skipped: 0, failed: 0, blockedReason: 'auth' };
+    }
+
+    if (userSettings.dataSaver.downloadWifiOnly) {
+      const conn = (navigator as Navigator & { connection?: { type?: string } }).connection;
+      if (conn?.type && conn.type === 'cellular') {
+        setPlaybackError('Download on Wi-Fi only is enabled in Settings > Data & Storage.');
+        return { saved: 0, skipped: 0, failed: 0, blockedReason: 'wifi_only' };
+      }
+    }
+
+    const uniqueEligible = dedupeTracksById(
+      tracksToSync.filter((t) => Boolean(t?.id) && t.downloadable !== false && Boolean(t.audioUrl))
+    );
+    if (uniqueEligible.length === 0) {
+      setPlaybackError(`No downloadable audio tracks available in "${label}".`);
+      return { saved: 0, skipped: 0, failed: 0, blockedReason: 'none_downloadable' };
+    }
+
+    const cacheChecks = await Promise.all(
+      uniqueEligible.map(async (t) => ({
+        track: t,
+        cached: await isTrackCachedOffline(t.id),
+      }))
+    );
+
+    const alreadySavedCount = cacheChecks.filter((c) => c.cached).length;
+    const pendingTracks = cacheChecks.filter((c) => !c.cached).map((c) => c.track);
+    const total = uniqueEligible.length;
+
+    if (pendingTracks.length === 0) {
+      setActiveBatchDownload({
+        id: batchId,
+        label,
+        completed: total,
+        total,
+        skippedAlreadySaved: alreadySavedCount,
+        failed: 0,
+        currentTrackTitle: uniqueEligible[uniqueEligible.length - 1].title,
+        isComplete: true,
+      });
+      window.setTimeout(() => {
+        setActiveBatchDownload((prev) => (prev?.id === batchId ? null : prev));
+      }, 2800);
+      return { saved: 0, skipped: alreadySavedCount, failed: 0 };
+    }
+
+    let completedCount = alreadySavedCount;
+    let savedCount = 0;
+    let failedCount = 0;
+
+    setActiveBatchDownload({
+      id: batchId,
+      label,
+      completed: completedCount,
+      total,
+      skippedAlreadySaved: alreadySavedCount,
+      failed: 0,
+      currentTrackTitle: pendingTracks[0].title,
+      isComplete: false,
+    });
+
+    let cursor = 0;
+    const workerCount = Math.min(2, pendingTracks.length);
+
+    const runWorker = async () => {
+      while (cursor < pendingTracks.length) {
+        const idx = cursor++;
+        const track = pendingTracks[idx];
+        if (!track) break;
+
+        setActiveBatchDownload((prev) =>
+          prev && prev.id === batchId
+            ? { ...prev, currentTrackTitle: track.title }
+            : prev
+        );
+
+        try {
+          const res = await fetch(track.audioUrl!);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+          const blob = await res.blob();
+          await saveAudioBlob(track.id, blob);
+          savedCount += 1;
+          setTracks((prev) =>
+            prev.map((t) =>
+              t.id === track.id ? { ...t, downloads: (t.downloads || 0) + 1 } : t
+            )
+          );
+          void durableUpdateDoc('tracks', track.id, {}, { increments: { downloads: 1 } });
+        } catch {
+          failedCount += 1;
+        } finally {
+          completedCount += 1;
+          setActiveBatchDownload((prev) =>
+            prev && prev.id === batchId
+              ? {
+                  ...prev,
+                  completed: completedCount,
+                  failed: failedCount,
+                }
+              : prev
+          );
+        }
+      }
+    };
+
+    await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+
+    setActiveBatchDownload((prev) =>
+      prev && prev.id === batchId
+        ? {
+            ...prev,
+            completed: total,
+            failed: failedCount,
+            isComplete: true,
+          }
+        : prev
+    );
+    window.setTimeout(() => {
+      setActiveBatchDownload((prev) => (prev?.id === batchId ? null : prev));
+    }, 3200);
+
+    return { saved: savedCount, skipped: alreadySavedCount, failed: failedCount };
+  };
+
+  const downloadPlaylistOffline = async (playlist: Playlist) => {
+    const trackMap = new Map(tracks.map((t) => [t.id, t]));
+    const playlistTracks = (playlist.trackIds || [])
+      .map((id) => trackMap.get(id))
+      .filter((t): t is Track => Boolean(t));
+    return downloadTrackBatch(
+      playlistTracks,
+      playlist.name || 'Playlist',
+      `playlist-${playlist.id}`
+    );
+  };
+
+  const downloadArtistCatalogOffline = async (artist: Artist, artistTracks: Track[]) => {
+    return downloadTrackBatch(
+      artistTracks,
+      `${artist.name} releases`,
+      `artist-${artist.id}`
+    );
+  };
+
+  const removeTracksOfflineBatch = async (trackIds: string[]): Promise<number> => {
+    const uniqueIds = Array.from(new Set(trackIds.filter((id) => typeof id === 'string' && id)));
+    let removed = 0;
+    for (const id of uniqueIds) {
+      const isCached = await isTrackCachedOffline(id);
+      if (isCached) {
+        await removeTrackOfflineCache(id);
+        removed += 1;
+      }
+    }
+    return removed;
+  };
+
   const buildNewTrackRecord = (
     trackData: Omit<Track, 'id' | 'plays' | 'likes' | 'reposts' | 'releaseDate' | 'comments'> &
       Partial<Pick<Track, 'id' | 'plays' | 'likes' | 'reposts' | 'releaseDate' | 'comments'>>
@@ -4259,6 +4482,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setCrossfadeSeconds,
         setPlaybackRate,
         setAudioQuality,
+        effectiveBitrateKbps,
         clearPlaybackError,
         retryPlayback,
         retryCatalogLoad,
@@ -4282,6 +4506,10 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         deleteArtistProfile,
         updateTrack,
         downloadTrack,
+        downloadTrackBatch,
+        downloadPlaylistOffline,
+        downloadArtistCatalogOffline,
+        removeTracksOfflineBatch,
         deleteTrack,
         setCertifiedStatus,
         setTrackChartRank,
@@ -4343,6 +4571,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         openLegalModal,
         closeLegalModal,
         activeDownload,
+        activeBatchDownload,
         dismissAllModals,
       }}
     >

@@ -13,10 +13,12 @@ const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/
 const { onRequest } = require('firebase-functions/v2/https');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { getMessaging } = require('firebase-admin/messaging');
 
 initializeApp();
 const FIRESTORE_DATABASE_ID = 'ai-studio-lowervibe-b2e45d28-38e1-4e03-bbe9-11eddd11a756';
 const db = getFirestore(FIRESTORE_DATABASE_ID);
+const messaging = getMessaging();
 
 const PRIMARY_ADMIN_EMAIL = 'odulamw@gmail.com';
 const DEFAULT_RATE_PER_PLAY_MWK = 4.5;
@@ -428,3 +430,220 @@ exports.shareMeta = onRequest({ cors: true }, async (req, res) => {
     })
     .send(html);
 });
+
+async function sendFcmMulticast(tokenDocs, payload) {
+  if (!Array.isArray(tokenDocs) || tokenDocs.length === 0) return;
+
+  const uniqueByToken = new Map();
+  for (const d of tokenDocs) {
+    if (d && typeof d.token === 'string' && d.token.length >= 20 && !uniqueByToken.has(d.token)) {
+      uniqueByToken.set(d.token, d);
+    }
+  }
+  const entries = Array.from(uniqueByToken.values());
+  if (entries.length === 0) return;
+
+  const safePath = String(payload.url || '/').startsWith('/') ? String(payload.url || '/') : '/';
+  const fullLink = `${PUBLIC_SITE_ORIGIN}${safePath}`;
+  const safeImage = isSafePublicHttpUrl(payload.artworkUrl || '') || undefined;
+
+  for (let i = 0; i < entries.length; i += 500) {
+    const chunk = entries.slice(i, i + 500);
+    const tokens = chunk.map((c) => c.token);
+    try {
+      const response = await messaging.sendEachForMulticast({
+        tokens,
+        notification: {
+          title: String(payload.title || 'LOWERVIBE').slice(0, 140),
+          body: String(payload.body || '').slice(0, 300),
+          ...(safeImage ? { imageUrl: safeImage } : {}),
+        },
+        data: {
+          title: String(payload.title || 'LOWERVIBE').slice(0, 140),
+          body: String(payload.body || '').slice(0, 300),
+          url: safePath,
+          tag: String(payload.tag || 'lowervibe-push'),
+          ...(safeImage ? { artworkUrl: safeImage } : {}),
+        },
+        webpush: {
+          headers: {
+            Urgency: 'high',
+          },
+          notification: {
+            title: String(payload.title || 'LOWERVIBE').slice(0, 140),
+            body: String(payload.body || '').slice(0, 300),
+            icon: `${PUBLIC_SITE_ORIGIN}/icons/pwa-192x192.png`,
+            badge: `${PUBLIC_SITE_ORIGIN}/icons/pwa-192x192.png`,
+            ...(safeImage ? { image: safeImage } : {}),
+            tag: String(payload.tag || 'lowervibe-push'),
+          },
+          fcmOptions: {
+            link: fullLink,
+          },
+        },
+      });
+
+      const staleDeletions = [];
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success && resp.error) {
+          const code = resp.error.code || '';
+          if (
+            code === 'messaging/registration-token-not-registered' ||
+            code === 'messaging/invalid-registration-token'
+          ) {
+            const docId = chunk[idx]?.docId;
+            if (docId) {
+              staleDeletions.push(db.collection('fcmTokens').doc(docId).delete().catch(() => {}));
+            }
+          }
+        }
+      });
+      if (staleDeletions.length > 0) {
+        await Promise.allSettled(staleDeletions);
+      }
+    } catch (err) {
+      console.error('FCM multicast send error:', err);
+    }
+  }
+}
+
+/**
+ * 7. onTrackPublishPush: Sends native lock-screen Web Push alerts to followers of an artist
+ *    whenever a new track is published (even when listeners' apps are closed).
+ */
+exports.onTrackPublishPush = onDocumentWritten(
+  { document: 'tracks/{trackId}', database: FIRESTORE_DATABASE_ID },
+  async (event) => {
+    const before = event.data?.before?.data();
+    const after = event.data?.after?.data();
+    if (!after) return;
+
+    const isAfterPublic =
+      !after.isDraft && !after.isDeranked && after.moderationStatus !== 'rejected';
+    const wasBeforePublic =
+      Boolean(before) &&
+      !before.isDraft &&
+      !before.isDeranked &&
+      before.moderationStatus !== 'rejected';
+
+    if (!isAfterPublic || wasBeforePublic) return;
+    if (!after.artistId) return;
+
+    const trackId = event.params.trackId;
+    const artistId = String(after.artistId);
+
+    const subscriberUserIds = new Set();
+    const tokenDocs = [];
+
+    try {
+      const [usersSnap, directTokenSnap] = await Promise.all([
+        db.collection('users').where('followingArtistIds', 'array-contains', artistId).limit(500).get(),
+        db
+          .collection('fcmTokens')
+          .where('followingArtistIds', 'array-contains', artistId)
+          .where('enabled', '==', true)
+          .limit(500)
+          .get(),
+      ]);
+
+      usersSnap.forEach((docSnap) => {
+        if (docSnap.id && docSnap.id !== after.uploadedByUserId) {
+          subscriberUserIds.add(docSnap.id);
+        }
+      });
+
+      directTokenSnap.forEach((docSnap) => {
+        const d = docSnap.data() || {};
+        if (d.userId !== after.uploadedByUserId && d.newReleasesPush !== false) {
+          tokenDocs.push({ docId: docSnap.id, token: d.token });
+        }
+      });
+
+      const uidList = Array.from(subscriberUserIds);
+      for (let i = 0; i < uidList.length; i += 30) {
+        const uidChunk = uidList.slice(i, i + 30);
+        const snap = await db
+          .collection('fcmTokens')
+          .where('userId', 'in', uidChunk)
+          .where('enabled', '==', true)
+          .get();
+        snap.forEach((docSnap) => {
+          const d = docSnap.data() || {};
+          if (d.newReleasesPush !== false) {
+            tokenDocs.push({ docId: docSnap.id, token: d.token });
+          }
+        });
+      }
+
+      if (tokenDocs.length === 0) return;
+
+      const coverArt = isSafePublicHttpUrl(after.coverArt || '')
+        ? after.coverArt
+        : `${PUBLIC_SITE_ORIGIN}/og/track/${encodeURIComponent(trackId)}/cover`;
+
+      await sendFcmMulticast(tokenDocs, {
+        title: `New drop from ${after.artistName || 'Artist'}`,
+        body: `"${after.title || 'New Release'}" is now streaming on LOWERVIBE.`,
+        artworkUrl: coverArt,
+        url: `/tracks/${encodeURIComponent(trackId)}`,
+        tag: `release-${trackId}`,
+      });
+    } catch (err) {
+      console.error('onTrackPublishPush failed:', err);
+    }
+  }
+);
+
+/**
+ * 8. onNotificationCreatedPush: Dispatches native FCM lock-screen push for targeted
+ *    creator/account notifications (approvals, payouts, upload completion, followers).
+ */
+exports.onNotificationCreatedPush = onDocumentCreated(
+  { document: 'notifications/{notificationId}', database: FIRESTORE_DATABASE_ID },
+  async (event) => {
+    const notif = event.data?.data();
+    if (!notif || !notif.userId || notif.userId === 'all' || notif.userId === 'admin') return;
+
+    const pushEligibleTypes = new Set([
+      'artist_approved',
+      'artist_rejected',
+      'withdrawal_status',
+      'upload_completed',
+      'upload_failed',
+      'account_security',
+      'new_follower',
+      'new_release',
+    ]);
+    if (!pushEligibleTypes.has(String(notif.type || ''))) return;
+
+    try {
+      const snap = await db
+        .collection('fcmTokens')
+        .where('userId', '==', String(notif.userId))
+        .where('enabled', '==', true)
+        .get();
+
+      const tokenDocs = [];
+      snap.forEach((docSnap) => {
+        const d = docSnap.data() || {};
+        if (notif.type === 'withdrawal_status' && d.payoutUpdatesPush === false) return;
+        if (notif.type === 'new_follower' && d.likesFollowsPush === false) return;
+        if (notif.type === 'new_release' && d.newReleasesPush === false) return;
+        tokenDocs.push({ docId: docSnap.id, token: d.token });
+      });
+
+      if (tokenDocs.length === 0) return;
+
+      await sendFcmMulticast(tokenDocs, {
+        title: notif.title || 'LOWERVIBE',
+        body: notif.message || 'Open LOWERVIBE to view your update.',
+        artworkUrl: notif.artworkUrl,
+        url: notif.actionRoute || '/',
+        tag: `notif-${event.params.notificationId}`,
+      });
+    } catch (err) {
+      console.error('onNotificationCreatedPush failed:', err);
+    }
+  }
+);
+

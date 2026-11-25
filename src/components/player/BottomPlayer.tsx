@@ -272,6 +272,9 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
     clearPlaybackError,
     clearActiveTrack,
     setActiveShareTrack,
+    audioQuality,
+    effectiveAudioQuality,
+    setAudioQuality,
   } = useAudio();
 
   const pinnedSession = usePinnedPlayerSession();
@@ -329,6 +332,48 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
     effectiveDuration > 0
       ? Math.min(100, Math.max(0, (activeTime / effectiveDuration) * 100))
       : 0;
+
+  const qualityCycleOrder: Array<'auto' | 'saver' | 'high'> = ['auto', 'saver', 'high'];
+  const currentCycleMode: 'auto' | 'saver' | 'high' =
+    effectiveAudioQuality === 'saver'
+      ? 'saver'
+      : audioQuality === 'high' || audioQuality === 'lossless'
+      ? 'high'
+      : 'auto';
+
+  const handleCycleQuickQuality = () => {
+    triggerHaptic('tap');
+    const idx = qualityCycleOrder.indexOf(currentCycleMode);
+    const next = qualityCycleOrder[(idx + 1) % qualityCycleOrder.length];
+    setAudioQuality(next);
+    const label =
+      next === 'saver'
+        ? t('quality_saver_96', 'Data Saver · 96 kbps')
+        : next === 'high'
+        ? t('quality_high_320', 'High · 320 kbps')
+        : isNy
+        ? 'Yokha (Auto 96–320 kbps)'
+        : 'Auto (96–320 kbps)';
+    showToast(t('switched_quality_toast', 'Audio quality set to {quality}', { quality: label }));
+  };
+
+  const quickQualityShortLabel =
+    effectiveAudioQuality === 'saver'
+      ? '96k'
+      : audioQuality === 'auto'
+      ? 'Auto'
+      : effectiveAudioQuality === 'lossless'
+      ? 'FLAC'
+      : '320k';
+
+  const quickQualityDesktopLabel =
+    effectiveAudioQuality === 'saver'
+      ? isNy ? '96k Deta' : '96k Saver'
+      : audioQuality === 'auto'
+      ? 'Auto'
+      : effectiveAudioQuality === 'lossless'
+      ? 'Lossless'
+      : '320k High';
 
   const computeTimeFromClientX = (clientX: number): number => {
     const el = scrubTrackRef.current;
@@ -795,6 +840,20 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
 
               <button
                 type="button"
+                onClick={handleCycleQuickQuality}
+                className={`hidden sm:flex items-center justify-center rounded-xl border px-2.5 min-h-[42px] text-[11px] font-mono font-bold transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0 ${
+                  effectiveAudioQuality === 'saver'
+                    ? 'bg-[var(--lv-accent)]/15 border-[var(--lv-accent)]/50 text-[var(--lv-accent-text)]'
+                    : 'bg-[var(--lv-elevated)]/65 border-[var(--lv-border)] text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
+                }`}
+                title={`${t('audio_quality')}: ${quickQualityDesktopLabel} (tap to switch Auto / 96k / 320k)`}
+                aria-label={`${t('audio_quality')}: ${quickQualityDesktopLabel}`}
+              >
+                {quickQualityDesktopLabel}
+              </button>
+
+              <button
+                type="button"
                 onClick={() => {
                   triggerHaptic('tap');
                   onOpenFullscreen();
@@ -863,6 +922,20 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
               ) : (
                 <Volume2 className="w-4 h-4" />
               )}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCycleQuickQuality}
+              className={`min-h-[40px] min-w-[44px] px-1.5 rounded-lg flex items-center justify-center text-[10px] font-mono font-bold transition cursor-pointer whitespace-nowrap shrink-0 ${
+                effectiveAudioQuality === 'saver'
+                  ? 'text-[var(--lv-accent-text)] bg-[var(--lv-accent)]/15'
+                  : 'text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
+              }`}
+              title={`${t('audio_quality')}: ${quickQualityDesktopLabel}`}
+              aria-label={`${t('audio_quality')}: ${quickQualityDesktopLabel}`}
+            >
+              {quickQualityShortLabel}
             </button>
 
             <button

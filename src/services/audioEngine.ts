@@ -39,6 +39,7 @@ class AudioEngine {
   private eqPreset: EqPreset = 'flat';
   private normalizeVolume: boolean = false;
   private monoAudio: boolean = false;
+  private dataSaverMode: boolean = false;
 
   private incomingFadeFactor: number = 1;
   private incomingFadeTimer: number | null = null;
@@ -497,8 +498,20 @@ class AudioEngine {
     this.incomingFadeTimer = window.setInterval(step, usesWebAudioEnvelope ? 120 : 50);
   }
 
+  public setDataSaverMode(enabled: boolean) {
+    this.dataSaverMode = enabled;
+    if (enabled && this.preloadedElement && this.preloadedElement !== this.activeElement) {
+      try {
+        this.preloadedElement.removeAttribute('src');
+        this.preloadedElement.load();
+      } catch {}
+      this.preloadedElement = null;
+      this.preloadedUrl = null;
+    }
+  }
+
   public preloadNext(url?: string, dataSaver: boolean = false) {
-    if (!url || typeof window === 'undefined' || dataSaver) return;
+    if (!url || typeof window === 'undefined' || dataSaver || this.dataSaverMode) return;
     if (this.preloadedUrl === url && this.preloadedElement) return;
 
     if (this.preloadedElement && this.preloadedElement !== this.activeElement) {
@@ -547,7 +560,7 @@ class AudioEngine {
       el = new Audio();
       el.setAttribute('playsinline', 'true');
       el.setAttribute('webkit-playsinline', 'true');
-      el.preload = 'auto';
+      el.preload = this.dataSaverMode ? 'metadata' : 'auto';
       if (url.includes('firebasestorage.googleapis.com')) {
         el.crossOrigin = 'anonymous';
       }

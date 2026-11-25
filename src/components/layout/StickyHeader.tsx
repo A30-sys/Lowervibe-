@@ -29,6 +29,7 @@ import { useAuth } from '../../context/AuthContext';
 import { formatLocalizedRelativeTime, useLanguage } from '../../context/LanguageContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { useRouter } from '../../context/RouterContext';
+import { useToast } from '../../context/ToastContext';
 import { NotificationItem } from '../../types';
 import { DEFAULT_ARTWORK_SVG } from '../../utils/artworkFallback';
 import { playNotificationSound, showDeviceNotification } from '../../utils/notificationSound';
@@ -60,7 +61,11 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
     markAllAsRead,
     activePlatformBanners,
     refreshBanners,
+    fcmStatus,
+    hasVapidKey,
+    enablePushNotifications,
   } = useNotifications();
+  const { showToast } = useToast();
   const { currentRoute, navigate, searchParams } = useRouter();
 
   const [isNotifOpen, setIsNotifOpen] = useState(false);
@@ -470,20 +475,30 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
                     </div>
                   </div>
 
-                  {/* OS Notification Permission Prompt Bar (when not yet granted) */}
-                  {notifPermission === 'default' && (
+                  {/* OS & FCM Lock-Screen Push Prompt Bar */}
+                  {(notifPermission === 'default' ||
+                    (notifPermission === 'granted' &&
+                      hasVapidKey &&
+                      Boolean(currentUser) &&
+                      fcmStatus !== 'registered')) && (
                     <div className="px-4 py-2.5 bg-[var(--accent)]/10 border-b border-[var(--border)] flex items-center justify-between gap-2.5 text-xs shrink-0">
                       <span className="text-[var(--text)] font-medium leading-snug">
-                        {t(
-                          'enable_alerts_banner',
-                          'Enable device sound & OS alerts for releases & admin updates'
-                        )}
+                        {notifPermission === 'granted'
+                          ? t('fcm_push_title', 'Connect lock-screen push alerts for closed-app releases')
+                          : t(
+                              'enable_alerts_banner',
+                              'Enable device sound & OS alerts for releases & admin updates'
+                            )}
                       </span>
                       <button
                         type="button"
+                        disabled={fcmStatus === 'registering'}
                         onClick={async () => {
                           try {
-                            const perm = await Notification.requestPermission();
+                            const perm =
+                              notifPermission === 'granted'
+                                ? 'granted'
+                                : await Notification.requestPermission();
                             setNotifPermission(perm);
                             if (perm === 'granted') {
                               await updateUserSettings({
@@ -494,6 +509,14 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
                                   soundEnabled: true,
                                 },
                               });
+                              if (currentUser && hasVapidKey) {
+                                const res = await enablePushNotifications();
+                                if (res.ok) {
+                                  showToast(t('fcm_push_active', 'Lock-screen alerts active'), 'success');
+                                } else if (res.error) {
+                                  showToast(res.error, 'info');
+                                }
+                              }
                               void playNotificationSound('artist');
                               void showDeviceNotification({
                                 title: 'LOWERVIBE alerts enabled',
@@ -504,9 +527,11 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
                             }
                           } catch {}
                         }}
-                        className="px-3.5 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold cursor-pointer shrink-0 min-h-[38px] text-xs"
+                        className="px-3.5 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold cursor-pointer shrink-0 min-h-[38px] text-xs whitespace-nowrap disabled:opacity-60"
                       >
-                        {t('enable', 'Enable')}
+                        {fcmStatus === 'registering'
+                          ? t('fcm_push_syncing', 'Connecting...')
+                          : t('enable', 'Enable')}
                       </button>
                     </div>
                   )}

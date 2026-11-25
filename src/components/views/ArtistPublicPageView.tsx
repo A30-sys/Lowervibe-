@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Check,
   CheckCircle2,
+  Download,
   ExternalLink,
   Flag,
   Heart,
@@ -23,6 +24,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
+import { getOfflineCacheStats } from '../../services/audioStorage';
 import { db } from '../../services/firebase';
 import { Artist } from '../../types';
 import {
@@ -53,6 +55,9 @@ export const ArtistPublicPageView: React.FC = () => {
     setActiveShareArtist,
     setActiveDetailTrack,
     submitContentReportRecord,
+    activeBatchDownload,
+    downloadArtistCatalogOffline,
+    removeTracksOfflineBatch,
   } = useAudio();
   const { currentUser, toggleFollowArtist, toggleLikeTrack } = useAuth();
   const { showToast } = useToast();
@@ -66,6 +71,17 @@ export const ArtistPublicPageView: React.FC = () => {
   const [reportSending, setReportSending] = useState(false);
   const [fetchedArtist, setFetchedArtist] = useState<Artist | null>(null);
   const [isResolvingArtist, setIsResolvingArtist] = useState(false);
+  const [cachedTrackIds, setCachedTrackIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    const syncCached = async () => {
+      const stats = await getOfflineCacheStats();
+      setCachedTrackIds(new Set(stats.entries.map((e) => e.trackId)));
+    };
+    void syncCached();
+    window.addEventListener('lowervibe:offline-cache-changed', syncCached);
+    return () => window.removeEventListener('lowervibe:offline-cache-changed', syncCached);
+  }, []);
 
   const normalizedSlug = (slug || '').trim().toLowerCase();
   const contextArtist = artists.find(
@@ -415,6 +431,89 @@ export const ArtistPublicPageView: React.FC = () => {
               {isFollowing ? <Check className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
               <span>{isFollowing ? t('following', 'Following') : t('follow', 'Follow')}</span>
             </button>
+
+            {(() => {
+              const downloadableCatalog = artistTracks.filter(
+                (tr) => tr.downloadable !== false && Boolean(tr.audioUrl)
+              );
+              if (downloadableCatalog.length === 0) return null;
+              const cachedCount = downloadableCatalog.filter((tr) => cachedTrackIds.has(tr.id)).length;
+              const remaining = downloadableCatalog.length - cachedCount;
+              const isSyncing = Boolean(
+                activeBatchDownload &&
+                  !activeBatchDownload.isComplete &&
+                  activeBatchDownload.id === `artist-${artist.id}`
+              );
+
+              if (isSyncing && activeBatchDownload) {
+                return (
+                  <button
+                    type="button"
+                    disabled
+                    className="px-4 h-11 rounded-xl bg-[var(--accent)]/15 border border-[var(--accent)]/50 text-xs font-bold text-[var(--accent-text)] flex items-center gap-2 tabular-nums whitespace-nowrap"
+                  >
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>
+                      {t('syncing_offline_progress', 'Saving offline {completed}/{total}', {
+                        completed: activeBatchDownload.completed,
+                        total: activeBatchDownload.total,
+                      })}
+                    </span>
+                  </button>
+                );
+              }
+
+              if (remaining === 0) {
+                return (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const removed = await removeTracksOfflineBatch(
+                        downloadableCatalog.map((tr) => tr.id)
+                      );
+                      if (removed > 0) {
+                        showToast(
+                          isNy
+                            ? `Nyimbo ${removed} zachotsedwa pafoni`
+                            : `Removed ${removed} offline releases`
+                        );
+                      }
+                    }}
+                    className="px-4 h-11 rounded-xl bg-[var(--surface-2)] border border-[var(--accent)]/50 hover:border-[var(--danger)] text-xs font-bold text-[var(--accent-text)] hover:text-[var(--danger)] flex items-center gap-2 transition cursor-pointer whitespace-nowrap"
+                    title={t('remove_offline_batch', 'Remove offline')}
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>
+                      {t('releases_saved_offline', 'Releases saved')} ({cachedCount})
+                    </span>
+                  </button>
+                );
+              }
+
+              return (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const res = await downloadArtistCatalogOffline(artist, downloadableCatalog);
+                    if (!res.blockedReason && res.saved > 0) {
+                      showToast(
+                        isNy
+                          ? `Nyimbo ${res.saved} za ${safeName} zasungidwa pafoni`
+                          : `Saved ${res.saved} release${res.saved === 1 ? '' : 's'} by ${safeName} offline`
+                      );
+                    }
+                  }}
+                  className="px-4 h-11 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--accent)] text-xs font-bold text-[var(--text)] flex items-center gap-2 transition cursor-pointer whitespace-nowrap"
+                >
+                  <Download className="w-4 h-4 text-[var(--accent-text)]" />
+                  <span>
+                    {cachedCount > 0
+                      ? t('sync_remaining_offline', 'Sync {count} offline', { count: remaining })
+                      : t('save_releases_offline', 'Save releases offline')}
+                  </span>
+                </button>
+              );
+            })()}
 
             <button
               type="button"

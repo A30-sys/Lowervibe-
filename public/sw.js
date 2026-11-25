@@ -4,7 +4,7 @@
  * and native notification click navigation.
  */
 
-const CACHE_NAME = 'lowervibe-cache-v11';
+const CACHE_NAME = 'lowervibe-cache-v12';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
@@ -42,6 +42,53 @@ self.addEventListener('activate', (event) => {
       )
       .then(() => self.clients.claim())
   );
+});
+
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+
+  let payload = {};
+  try {
+    payload = event.data.json();
+  } catch {
+    try {
+      payload = { notification: { title: 'LOWERVIBE', body: event.data.text() } };
+    } catch {
+      payload = {};
+    }
+  }
+
+  const notif = payload.notification || {};
+  const data = payload.data || {};
+  const title = notif.title || data.title || 'LOWERVIBE';
+  const body = notif.body || data.body || 'New update on LOWERVIBE';
+  const icon = notif.icon || '/icons/pwa-192x192.png';
+  const image = notif.image || data.artworkUrl || undefined;
+  const tag = data.tag || notif.tag || 'lowervibe-push';
+
+  let safeUrl = '/';
+  const rawUrl = data.url || data.actionRoute || (payload.fcmOptions && payload.fcmOptions.link) || '/';
+  try {
+    const parsed = new URL(String(rawUrl), self.location.origin);
+    if (parsed.origin === self.location.origin) {
+      safeUrl = `${parsed.pathname}${parsed.search}${parsed.hash}` || '/';
+    }
+  } catch {
+    safeUrl = '/';
+  }
+
+  const options = {
+    body,
+    icon,
+    badge: '/icons/pwa-192x192.png',
+    ...(image ? { image } : {}),
+    tag,
+    renotify: true,
+    vibrate: [120, 40, 120],
+    data: { url: safeUrl },
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
 });
 
 self.addEventListener('notificationclick', (event) => {

@@ -86,6 +86,7 @@ export const FullscreenPlayerModal: React.FC = () => {
     setPlaybackRate,
     audioQuality,
     effectiveAudioQuality,
+    effectiveBitrateKbps,
     estimatedMbPerMinute,
     setAudioQuality,
     playbackError,
@@ -535,11 +536,11 @@ export const FullscreenPlayerModal: React.FC = () => {
       id: 'auto',
       label: isNy ? 'Yokha (Auto)' : 'Auto',
       desc: isNy
-        ? `Imasintha malinga ndi intaneti (${effectiveAudioQuality})`
-        : `Adapts to network (${effectiveAudioQuality})`,
+        ? `Imasintha · ${effectiveAudioQuality === 'saver' ? '96 kbps' : '320 kbps'}`
+        : `Adapts 96–320 kbps (${effectiveAudioQuality === 'saver' ? '96 kbps' : '320 kbps'} now)`,
     },
-    { id: 'high', label: isNy ? 'Wapamwamba' : 'High', desc: '~1.8 MB/min' },
-    { id: 'saver', label: isNy ? 'Kusunga Deta' : 'Data Saver', desc: '~0.6 MB/min' },
+    { id: 'saver', label: isNy ? 'Sungani Deta · 96 kbps' : 'Data Saver · 96 kbps', desc: '~0.6 MB/min' },
+    { id: 'high', label: isNy ? 'Wapamwamba · 320 kbps' : 'High · 320 kbps', desc: '~1.8 MB/min' },
     ...(losslessAvailable
       ? [
           {
@@ -996,17 +997,21 @@ export const FullscreenPlayerModal: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setOpenDrawer(openDrawer === 'quality' ? null : 'quality')}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-2xl text-xs font-semibold bg-white/10 border border-white/10 text-white/80 hover:text-white transition cursor-pointer min-h-[44px]"
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-2xl text-xs font-semibold border transition cursor-pointer min-h-[44px] whitespace-nowrap shrink-0 ${
+                    effectiveAudioQuality === 'saver'
+                      ? 'bg-[#C6FF3D]/15 border-[#C6FF3D]/60 text-[#C6FF3D]'
+                      : 'bg-white/10 border-white/10 text-white/85 hover:text-white'
+                  }`}
                 >
-                  <SlidersHorizontal className="w-4 h-4" />
-                  <span className="capitalize">
-                    {audioQuality === 'saver'
-                      ? isNy ? 'Kusunga Deta' : 'Data Saver'
+                  <SlidersHorizontal className="w-4 h-4 shrink-0" />
+                  <span className="tabular-nums">
+                    {effectiveAudioQuality === 'saver'
+                      ? isNy ? 'Sungani Deta · 96k' : 'Data Saver · 96k'
+                      : effectiveAudioQuality === 'lossless'
+                      ? 'Lossless'
                       : audioQuality === 'auto'
-                      ? isNy ? 'Yokha' : 'Auto'
-                      : audioQuality === 'high'
-                      ? isNy ? 'Wapamwamba' : 'High'
-                      : audioQuality}
+                      ? isNy ? 'Yokha · 320k' : 'Auto · 320k'
+                      : isNy ? 'Wapamwamba · 320k' : 'High · 320k'}
                   </span>
                 </button>
 
@@ -1151,13 +1156,39 @@ export const FullscreenPlayerModal: React.FC = () => {
               )}
 
               {openDrawer === 'quality' && (
-                <div className="p-3.5 rounded-2xl bg-[#131513] border border-white/15 space-y-2 animate-slideUp">
-                  <div className="flex items-center justify-between">
+                <div className="p-3.5 rounded-2xl bg-[#131513] border border-white/15 space-y-2.5 animate-slideUp">
+                  <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-bold text-white">{t('audio_quality')}</span>
-                    <span className="text-[11px] font-mono text-white/60">
-                      ~{estimatedMbPerMinute.toFixed(1)} MB/min
+                    <span className="text-[11px] font-mono text-white/70 tabular-nums">
+                      {effectiveBitrateKbps} · ~{estimatedMbPerMinute.toFixed(1)} MB/min
                     </span>
                   </div>
+
+                  {/* Quick Mobile Data Saver Switch */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextMode = effectiveAudioQuality === 'saver' ? 'auto' : 'saver';
+                      setAudioQuality(nextMode);
+                      showToast(
+                        nextMode === 'saver'
+                          ? isNy ? 'Kusunga Deta (96 kbps) kwayatsidwa' : 'Data Saver enabled (96 kbps)'
+                          : isNy ? 'Kusunga Deta kwazimitsidwa (Yokha)' : 'Data Saver turned off (Auto)'
+                      );
+                    }}
+                    aria-pressed={effectiveAudioQuality === 'saver'}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl border text-xs transition cursor-pointer min-h-[44px] ${
+                      effectiveAudioQuality === 'saver'
+                        ? 'bg-[#C6FF3D]/15 border-[#C6FF3D]/60 text-[#C6FF3D] font-bold'
+                        : 'bg-white/5 border-white/10 text-white/85 hover:bg-white/10'
+                    }`}
+                  >
+                    <span>{t('data_saver_toggle', 'Mobile Data Saver (96 kbps)')}</span>
+                    <span className="font-mono text-[11px] uppercase">
+                      {effectiveAudioQuality === 'saver' ? (isNy ? 'Yayatsidwa' : 'On') : (isNy ? 'Yazimitsidwa' : 'Off')}
+                    </span>
+                  </button>
+
                   <div className="space-y-1.5">
                     {qualityOptions.map((opt) => (
                       <button
@@ -1176,7 +1207,7 @@ export const FullscreenPlayerModal: React.FC = () => {
                       >
                         <span>{opt.label}</span>
                         <span
-                          className={`font-mono text-[11px] ${
+                          className={`font-mono text-[11px] tabular-nums ${
                             audioQuality === opt.id ? 'text-[#0A0B0A]/80' : 'text-white/65'
                           }`}
                         >

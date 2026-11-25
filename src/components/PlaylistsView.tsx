@@ -1,8 +1,11 @@
 import {
+  CheckCircle2,
+  Download,
   FolderPlus,
   Globe,
   Heart,
   ListMusic,
+  Loader2,
   Lock,
   Play,
   Plus,
@@ -13,6 +16,7 @@ import { useAudio } from '../context/AudioContext';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { matchesLocationFilter } from '../data/regions';
+import { getOfflineCacheStats } from '../services/audioStorage';
 import { Playlist, Track } from '../types';
 import { DEFAULT_ARTWORK_SVG } from '../utils/artworkFallback';
 import { TrackRow } from './TrackRow';
@@ -29,9 +33,23 @@ export const PlaylistsView: React.FC = () => {
     toggleLikePlaylist,
     recordPlaylistPlay,
     upsertGenre,
+    activeBatchDownload,
+    downloadPlaylistOffline,
+    removeTracksOfflineBatch,
   } = useAudio();
   const { currentUser, createPlaylist } = useAuth();
   const { showToast } = useToast();
+  const [cachedTrackIds, setCachedTrackIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    const syncCached = async () => {
+      const stats = await getOfflineCacheStats();
+      setCachedTrackIds(new Set(stats.entries.map((e) => e.trackId)));
+    };
+    void syncCached();
+    window.addEventListener('lowervibe:offline-cache-changed', syncCached);
+    return () => window.removeEventListener('lowervibe:offline-cache-changed', syncCached);
+  }, []);
 
   // Deduplicated live playlists (Firestore public + current user's personal playlists)
   const allPlaylists: Playlist[] = useMemo(() => {
@@ -463,6 +481,70 @@ export const PlaylistsView: React.FC = () => {
                       />
                       <span className="font-mono tabular-nums">{getPlaylistLikeCount(selectedPlaylist)}</span>
                     </button>
+
+                    {(() => {
+                      const downloadableIds = currentPlTracks
+                        .filter((tr) => tr.downloadable !== false && Boolean(tr.audioUrl))
+                        .map((tr) => tr.id);
+                      if (downloadableIds.length === 0) return null;
+                      const cachedCount = downloadableIds.filter((id) => cachedTrackIds.has(id)).length;
+                      const remaining = downloadableIds.length - cachedCount;
+                      const isSyncing = Boolean(
+                        activeBatchDownload &&
+                          !activeBatchDownload.isComplete &&
+                          activeBatchDownload.id === `playlist-${selectedPlaylist.id}`
+                      );
+
+                      if (isSyncing && activeBatchDownload) {
+                        return (
+                          <button
+                            type="button"
+                            disabled
+                            className="flex items-center gap-1.5 px-4 py-2.5 rounded-full border border-[#C6FF4A]/40 bg-[#C6FF4A]/15 text-[#C6FF4A] text-xs font-bold tabular-nums"
+                          >
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>
+                              Saving {activeBatchDownload.completed}/{activeBatchDownload.total}
+                            </span>
+                          </button>
+                        );
+                      }
+
+                      if (remaining === 0) {
+                        return (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const removed = await removeTracksOfflineBatch(downloadableIds);
+                              if (removed > 0) showToast(`Removed ${removed} tracks from offline storage`);
+                            }}
+                            className="flex items-center gap-1.5 px-4 py-2.5 rounded-full border border-[#C6FF4A]/50 bg-[#C6FF4A]/15 text-[#C6FF4A] hover:border-rose-400 hover:text-rose-300 text-xs font-bold transition cursor-pointer"
+                            title="Tap to remove offline playlist"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Saved Offline</span>
+                          </button>
+                        );
+                      }
+
+                      return (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const res = await downloadPlaylistOffline(selectedPlaylist);
+                            if (!res.blockedReason && res.saved > 0) {
+                              showToast(`Saved ${res.saved} track${res.saved === 1 ? '' : 's'} offline`);
+                            }
+                          }}
+                          className="flex items-center gap-1.5 px-4 py-2.5 rounded-full border border-white/15 bg-white/5 hover:border-[#C6FF4A] text-white text-xs font-bold transition cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5 text-[#C6FF4A]" />
+                          <span>
+                            {cachedCount > 0 ? `Sync ${remaining} Offline` : 'Save Playlist Offline'}
+                          </span>
+                        </button>
+                      );
+                    })()}
 
                     <span className="text-xs font-mono text-[#A0A0A8] tabular-nums">
                       {currentPlTracks.length} tracks · {selectedPlaylist.plays || 0} plays

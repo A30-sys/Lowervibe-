@@ -57,9 +57,12 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
     currentTrack,
     isPlaying,
     activeDownload,
+    activeBatchDownload,
     playTrack,
     togglePlayPause,
     downloadTrack,
+    downloadPlaylistOffline,
+    removeTracksOfflineBatch,
     clearHistory,
     updatePublicPlaylist,
     deletePublicPlaylist,
@@ -552,6 +555,67 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
+                      {(() => {
+                        const plDownloadableIds = (activePlaylist.trackIds || []).filter((tid) => {
+                          const tr = tracks.find((t) => t.id === tid);
+                          return Boolean(tr && tr.downloadable !== false && tr.audioUrl);
+                        });
+                        const plCachedCount = plDownloadableIds.filter((tid) => downloadedIdSet.has(tid)).length;
+                        const plRemaining = plDownloadableIds.length - plCachedCount;
+                        const isPlSyncing = Boolean(
+                          activeBatchDownload &&
+                            !activeBatchDownload.isComplete &&
+                            activeBatchDownload.id === `playlist-${activePlaylist.id}`
+                        );
+                        if (plDownloadableIds.length === 0) return null;
+
+                        return isPlSyncing && activeBatchDownload ? (
+                          <button
+                            type="button"
+                            disabled
+                            className="px-3 py-1.5 rounded-xl bg-[var(--accent)]/15 border border-[var(--accent)]/40 text-xs font-bold text-[var(--accent-text)] flex items-center gap-1.5 tabular-nums"
+                          >
+                            <Download className="w-3.5 h-3.5 animate-pulse" />
+                            <span>
+                              {t('syncing_offline_progress', 'Saving offline {completed}/{total}', {
+                                completed: activeBatchDownload.completed,
+                                total: activeBatchDownload.total,
+                              })}
+                            </span>
+                          </button>
+                        ) : plRemaining === 0 ? (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await removeTracksOfflineBatch(plDownloadableIds);
+                              await loadOffline();
+                            }}
+                            className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--accent)]/40 hover:border-[var(--danger)] text-xs font-semibold text-[var(--accent-text)] hover:text-[var(--danger)] cursor-pointer flex items-center gap-1.5 transition"
+                            title={t('remove_offline_batch', 'Remove offline')}
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>{t('playlist_saved_offline', 'Saved offline')}</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void downloadPlaylistOffline(activePlaylist);
+                            }}
+                            className="px-3 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer flex items-center gap-1.5 hover:brightness-95 transition"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>
+                              {plCachedCount > 0
+                                ? t('sync_remaining_offline', 'Sync {count} offline', {
+                                    count: plRemaining,
+                                  })
+                                : t('save_playlist_offline', 'Save playlist offline')}
+                            </span>
+                          </button>
+                        );
+                      })()}
+
                       <button
                         type="button"
                         onClick={() => {
@@ -667,9 +731,16 @@ export const LibraryView: React.FC<{ onOpenTrackDetails: (track: Track) => void 
                         />
                         <div className="min-w-0">
                           <div className="text-sm font-bold text-[var(--text)] truncate">{pl.name}</div>
-                          <div className="text-xs text-[var(--text-muted)]">
+                          <div className="text-xs text-[var(--text-muted)] tabular-nums truncate">
                             {t('songs_count_label', undefined, { count: pl.trackIds.length })} ·{' '}
                             {pl.isPublic ? (isNy ? 'Wa aliyense' : 'Public') : (isNy ? 'Wachinsinsi' : 'Private')}
+                            {(() => {
+                              const cached = (pl.trackIds || []).filter((id) => downloadedIdSet.has(id)).length;
+                              if (cached === 0) return '';
+                              return cached >= pl.trackIds.length && pl.trackIds.length > 0
+                                ? ` · ${t('library_offline', 'Offline')}`
+                                : ` · ${cached}/${pl.trackIds.length} ${t('library_offline', 'Offline').toLowerCase()}`;
+                            })()}
                           </div>
                         </div>
                       </div>

@@ -269,6 +269,28 @@
         "createdAt": { "type": "string" }
       },
       "required": ["id", "type", "title", "message", "active"]
+    },
+    "FcmPushToken": {
+      "title": "FcmPushToken",
+      "description": "Firebase Cloud Messaging web push registration token linked to a user and followed artists",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "token": { "type": "string", "maxLength": 1024 },
+        "platform": { "type": "string", "enum": ["web", "pwa-main", "pwa-creator"] },
+        "enabled": { "type": "boolean" },
+        "followingArtistIds": { "type": "array" },
+        "newReleasesPush": { "type": "boolean" },
+        "payoutUpdatesPush": { "type": "boolean" },
+        "productNewsPush": { "type": "boolean" },
+        "likesFollowsPush": { "type": "boolean" },
+        "playlistUpdatesPush": { "type": "boolean" },
+        "userAgent": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "token", "enabled"]
     }
   },
   "firestore": {
@@ -284,6 +306,7 @@
     "/tickets/{ticketId}": { "schema": "SupportTicket", "description": "Support tickets" },
     "/banners/{bannerId}": { "schema": "PlatformBanner", "description": "Platform banners and maintenance announcements" },
     "/mediaAssets/{assetId}": { "schema": "MediaAsset", "description": "Uploaded audio and artwork metadata manifests" },
-    "/mediaAssets/{assetId}/chunks/{chunkId}": { "schema": "MediaChunk", "description": "Uploaded binary media chunks" }
+    "/mediaAssets/{assetId}/chunks/{chunkId}": { "schema": "MediaChunk", "description": "Uploaded binary media chunks" },
+    "/fcmTokens/{tokenId}": { "schema": "FcmPushToken", "description": "Registered Firebase Cloud Messaging push tokens" }
   }
 }

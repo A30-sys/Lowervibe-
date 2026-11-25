@@ -27,6 +27,14 @@ import {
   playNotificationSound,
   showDeviceNotification,
 } from '../utils/notificationSound';
+import {
+  FcmRegistrationStatus,
+  hasConfiguredVapidKey,
+  registerFcmPushToken,
+  subscribeForegroundFcmMessages,
+  syncRegisteredFcmTokenMetadata,
+  unregisterFcmPushToken,
+} from '../services/fcmService';
 import { useAuth } from './AuthContext';
 import { useRouter } from './RouterContext';
 import { useToast } from './ToastContext';
@@ -83,6 +91,11 @@ interface NotificationContextType {
   ) => Promise<{ success: boolean; error?: string }>;
   togglePlatformBanner: (bannerId: string, active: boolean) => Promise<void>;
   deletePlatformBanner: (bannerId: string) => Promise<void>;
+  fcmStatus: FcmRegistrationStatus;
+  fcmError: string | null;
+  hasVapidKey: boolean;
+  enablePushNotifications: () => Promise<{ ok: boolean; status: FcmRegistrationStatus; error?: string }>;
+  disablePushNotifications: () => Promise<void>;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
@@ -145,6 +158,13 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [firebaseAuthUid, setFirebaseAuthUid] = useState<string | null>(
     () => auth.currentUser?.uid || null
   );
+  const hasVapidKey = hasConfiguredVapidKey();
+  const [fcmStatus, setFcmStatus] = useState<FcmRegistrationStatus>(() => {
+    if (!hasVapidKey) return 'missing_vapid';
+    if (typeof Notification !== 'undefined' && Notification.permission === 'denied') return 'denied';
+    return 'idle';
+  });
+  const [fcmError, setFcmError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (fbUser) => {
@@ -209,6 +229,128 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   useEffect(() => {
     return initNotificationAudioUnlock();
   }, []);
+
+  const enablePushNotifications = useCallback(async () => {
+    if (!currentUser || !auth.currentUser || auth.currentUser.uid !== currentUser.id) {
+      return {
+        ok: false,
+        status: 'idle' as FcmRegistrationStatus,
+        error: 'Sign in to connect lock-screen push notifications.',
+      };
+    }
+    setFcmStatus('registering');
+    setFcmError(null);
+    const res = await registerFcmPushToken({
+      userId: currentUser.id,
+      followingArtistIds: currentUser.followingArtistIds || [],
+      notifications: userSettings.notifications,
+      requestPermission: true,
+    });
+    setFcmStatus(res.status);
+    setFcmError(res.error || null);
+    return { ok: res.ok, status: res.status, error: res.error };
+  }, [currentUser, userSettings.notifications]);
+
+  const disablePushNotifications = useCallback(async () => {
+    await unregisterFcmPushToken(currentUser?.id);
+    setFcmStatus(hasVapidKey ? 'idle' : 'missing_vapid');
+    setFcmError(null);
+  }, [currentUser?.id, hasVapidKey]);
+
+  // Silently register FCM push token when user has already granted OS permission
+  useEffect(() => {
+    const fbUser = auth.currentUser;
+    if (!authReady || !currentUser || !fbUser || fbUser.uid !== currentUser.id) {
+      return;
+    }
+    if (typeof Notification === 'undefined') {
+      setFcmStatus('unsupported');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      setFcmStatus('denied');
+      return;
+    }
+    if (!hasVapidKey) {
+      setFcmStatus('missing_vapid');
+      return;
+    }
+    const anyPushEnabled =
+      userSettings.notifications.newReleasesPush !== false ||
+      userSettings.notifications.payoutUpdatesPush !== false ||
+      Boolean(userSettings.notifications.productNewsPush) ||
+      Boolean(userSettings.notifications.likesFollowsPush) ||
+      Boolean(userSettings.notifications.playlistUpdatesPush);
+
+    if (Notification.permission === 'granted' && anyPushEnabled) {
+      let cancelled = false;
+      void registerFcmPushToken({
+        userId: currentUser.id,
+        followingArtistIds: currentUser.followingArtistIds || [],
+        notifications: userSettings.notifications,
+        requestPermission: false,
+      }).then((res) => {
+        if (!cancelled) {
+          setFcmStatus(res.status);
+          setFcmError(res.error || null);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, [authReady, firebaseAuthUid, currentUser?.id, hasVapidKey]);
+
+  // Keep followed artists and push notification preferences synchronized on the active FCM token
+  useEffect(() => {
+    if (fcmStatus !== 'registered' || !currentUser?.id) return;
+    void syncRegisteredFcmTokenMetadata({
+      userId: currentUser.id,
+      followingArtistIds: currentUser.followingArtistIds || [],
+      notifications: userSettings.notifications,
+    });
+  }, [fcmStatus, currentUser?.id, currentUser?.followingArtistIds, userSettings.notifications]);
+
+  // Listen for foreground FCM Web Push messages when app is open
+  useEffect(() => {
+    let cleanup: (() => void) | null = null;
+    let cancelled = false;
+    void subscribeForegroundFcmMessages((payload) => {
+      const title =
+        payload.notification?.title || String(payload.data?.title || 'LOWERVIBE');
+      const body =
+        payload.notification?.body || String(payload.data?.body || 'New update on LOWERVIBE');
+      const artworkUrl =
+        payload.notification?.image ||
+        (typeof payload.data?.artworkUrl === 'string' ? payload.data.artworkUrl : undefined);
+      const clickUrl = typeof payload.data?.url === 'string' ? payload.data.url : undefined;
+
+      showToast(body, 'info', {
+        title,
+        artworkUrl,
+        duration: 5400,
+        action: clickUrl
+          ? {
+              label: 'Open',
+              onClick: () => navigateRef.current(clickUrl),
+            }
+          : undefined,
+      });
+      if (soundEnabledRef.current) {
+        void playNotificationSound(payload.data?.type === 'new_release' ? 'artist' : 'admin');
+      }
+    }).then((unsub) => {
+      if (cancelled) {
+        unsub();
+      } else {
+        cleanup = unsub;
+      }
+    });
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [showToast]);
 
   useEffect(() => {
     try {
@@ -785,6 +927,11 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         savePlatformBanner,
         togglePlatformBanner,
         deletePlatformBanner,
+        fcmStatus,
+        fcmError,
+        hasVapidKey,
+        enablePushNotifications,
+        disablePushNotifications,
       }}
     >
       {children}

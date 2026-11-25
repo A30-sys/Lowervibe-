@@ -117,6 +117,7 @@ function AppContent() {
     authModalTab,
     openLegalModal,
     activeDownload,
+    activeBatchDownload,
     dismissAllModals,
     setIsFullscreenPlayerOpen,
     clearActiveTrack,
@@ -1022,47 +1023,95 @@ function AppContent() {
         onContinueListening={handleContinueListening}
       />
 
-      {/* Active Offline Save Progress Toast */}
-      {activeDownload && (
+      {/* Active Offline Save Progress Toast (Single or Batch Playlist/Catalog Sync) */}
+      {(activeBatchDownload || activeDownload) && (
         <div
-          className={`fixed right-4 sm:right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl bg-[var(--surface)] border border-[var(--border-strong)] text-[var(--text)] shadow-2xl animate-slideUp transition-all duration-200 ${
+          className={`fixed right-4 sm:right-6 z-50 flex flex-col gap-2 transition-all duration-200 ${
             isPlayerMounted && !isPlayerExiting
               ? 'bottom-[calc(154px+env(safe-area-inset-bottom,0px))] md:bottom-24'
               : 'bottom-[calc(76px+env(safe-area-inset-bottom,0px))] md:bottom-6'
           }`}
         >
-          <div className="w-9 h-9 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] flex items-center justify-center shrink-0">
-            {activeDownload.isComplete ? (
-              <CheckCircle2 className="w-5 h-5 stroke-[2.5]" />
-            ) : (
-              <Download className="w-5 h-5" />
-            )}
-          </div>
-          <div className="min-w-0 pr-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-[var(--text)] truncate max-w-[160px]">
-                {activeDownload.trackTitle}
-              </span>
-              <span className="text-[11px] font-mono font-bold text-[var(--accent-text)]">
-                {activeDownload.isComplete ? t('saved', 'Saved') : `${activeDownload.progress}%`}
-              </span>
+          {activeBatchDownload && (
+            <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-[var(--surface)] border border-[var(--border-strong)] text-[var(--text)] shadow-2xl animate-slideUp max-w-[300px]">
+              <div className="w-9 h-9 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] flex items-center justify-center shrink-0">
+                {activeBatchDownload.isComplete ? (
+                  <CheckCircle2 className="w-5 h-5 stroke-[2.5]" />
+                ) : (
+                  <Download className="w-5 h-5" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-[var(--text)] truncate">
+                    {activeBatchDownload.label}
+                  </span>
+                  <span className="text-[11px] font-mono font-bold text-[var(--accent-text)] tabular-nums shrink-0">
+                    {activeBatchDownload.completed}/{activeBatchDownload.total}
+                  </span>
+                </div>
+                <div className="text-[11px] text-[var(--text-muted)] truncate">
+                  {activeBatchDownload.isComplete
+                    ? activeBatchDownload.failed > 0
+                      ? `${activeBatchDownload.completed - activeBatchDownload.failed} saved · ${activeBatchDownload.failed} failed`
+                      : t('playlist_saved_offline', 'Saved offline')
+                    : activeBatchDownload.currentTrackTitle}
+                </div>
+                <div className="w-full bg-[var(--surface-2)] rounded-full h-1 mt-1.5 overflow-hidden">
+                  <div
+                    className="bg-[var(--accent)] h-1 rounded-full transition-all duration-200"
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        Math.round(
+                          (activeBatchDownload.completed /
+                            Math.max(1, activeBatchDownload.total)) *
+                            100
+                        )
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </div>
             </div>
-            <div className="text-[11px] text-[var(--text-muted)] truncate max-w-[180px]">
-              {activeDownload.isComplete
-                ? isNy
-                  ? 'Yakonzeka kumvera popanda intaneti'
-                  : 'Ready for offline listening'
-                : isNy
-                ? 'Ikusunga nyimbo popanda intaneti...'
-                : 'Saving track for offline play...'}
+          )}
+
+          {activeDownload && (
+            <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-[var(--surface)] border border-[var(--border-strong)] text-[var(--text)] shadow-2xl animate-slideUp">
+              <div className="w-9 h-9 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] flex items-center justify-center shrink-0">
+                {activeDownload.isComplete ? (
+                  <CheckCircle2 className="w-5 h-5 stroke-[2.5]" />
+                ) : (
+                  <Download className="w-5 h-5" />
+                )}
+              </div>
+              <div className="min-w-0 pr-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-[var(--text)] truncate max-w-[160px]">
+                    {activeDownload.trackTitle}
+                  </span>
+                  <span className="text-[11px] font-mono font-bold text-[var(--accent-text)] tabular-nums">
+                    {activeDownload.isComplete ? t('saved', 'Saved') : `${activeDownload.progress}%`}
+                  </span>
+                </div>
+                <div className="text-[11px] text-[var(--text-muted)] truncate max-w-[180px]">
+                  {activeDownload.isComplete
+                    ? isNy
+                      ? 'Yakonzeka kumvera popanda intaneti'
+                      : 'Ready for offline listening'
+                    : isNy
+                    ? 'Ikusunga nyimbo popanda intaneti...'
+                    : 'Saving track for offline play...'}
+                </div>
+                <div className="w-full bg-[var(--surface-2)] rounded-full h-1 mt-1.5 overflow-hidden">
+                  <div
+                    className="bg-[var(--accent)] h-1 rounded-full transition-all duration-200"
+                    style={{ width: `${activeDownload.progress}%` }}
+                  />
+                </div>
+              </div>
             </div>
-            <div className="w-full bg-[var(--surface-2)] rounded-full h-1 mt-1.5 overflow-hidden">
-              <div
-                className="bg-[var(--accent)] h-1 rounded-full transition-all duration-200"
-                style={{ width: `${activeDownload.progress}%` }}
-              />
-            </div>
-          </div>
+          )}
         </div>
       )}
 

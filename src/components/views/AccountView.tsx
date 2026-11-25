@@ -48,6 +48,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useAudio } from '../../context/AudioContext';
 import { useLanguage } from '../../context/LanguageContext';
+import { useNotifications } from '../../context/NotificationContext';
 import { useRouter } from '../../context/RouterContext';
 import { useTheme } from '../../context/ThemeContext';
 import { AudioQualityPreference } from '../../context/AudioContext';
@@ -218,6 +219,10 @@ export const AccountView: React.FC = () => {
     savedTrackIds,
     playHistory,
     clearHistory,
+    audioQuality,
+    effectiveAudioQuality,
+    effectiveBitrateKbps,
+    estimatedMbPerMinute,
     setAudioQuality,
     setCrossfadeSeconds,
     setEqPreset,
@@ -226,6 +231,14 @@ export const AccountView: React.FC = () => {
     setSelectedCountry,
     playTrack,
   } = useAudio();
+
+  const {
+    fcmStatus,
+    fcmError,
+    hasVapidKey,
+    enablePushNotifications,
+    disablePushNotifications,
+  } = useNotifications();
 
   const { navigate } = useRouter();
   const { themeMode, setThemeMode } = useTheme();
@@ -608,12 +621,15 @@ export const AccountView: React.FC = () => {
   };
 
   const handleRequestPushPermission = async (key: keyof typeof userSettings.notifications, nextVal: boolean) => {
-    if (nextVal && typeof Notification !== 'undefined' && Notification.permission === 'default') {
-      try {
-        await Notification.requestPermission();
-      } catch {}
-    }
     await updateUserSettings({ notifications: { [key]: nextVal } });
+    if (nextVal && fcmStatus !== 'registered') {
+      const res = await enablePushNotifications();
+      if (res.ok) {
+        showNotice(t('fcm_push_active', 'Lock-screen alerts active'));
+      } else if (res.error) {
+        showNotice(res.error, 'err');
+      }
+    }
   };
 
   const handleSendSupport = async (e: React.FormEvent) => {
@@ -1381,23 +1397,68 @@ export const AccountView: React.FC = () => {
           onToggle={() => setOpenSection(openSection === 'playback' ? '' : 'playback')}
         >
           <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-[var(--text)]">
-                  {isNy ? 'Ubwino wa phokoso poliza' : 'Streaming quality'}
-                </label>
-                <select
-                  value={userSettings.playback.streamingQuality}
-                  onChange={(e) => {
-                    const val = e.target.value as AudioQualityPreference;
-                    setAudioQuality(val);
-                  }}
-                  className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
-                >
-                  <option value="auto">{isNy ? 'Zokha (kutengera netiweki)' : 'Auto (adjusts to network)'}</option>
-                  <option value="high">{isNy ? 'Chokwera (~1.8 MB/min)' : 'High (~1.8 MB/min)'}</option>
-                  <option value="saver">{isNy ? 'Kusunga Deta (~0.6 MB/min)' : 'Data Saver (~0.6 MB/min)'}</option>
-                </select>
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-semibold text-[var(--text)]">
+                    {isNy ? 'Ubwino wa phokoso poliza' : 'Streaming quality & data saver'}
+                  </label>
+                  <span className="text-[11px] font-mono text-[var(--accent-text)] font-bold tabular-nums">
+                    {effectiveBitrateKbps} · ~{estimatedMbPerMinute.toFixed(1)} MB/min
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {[
+                    {
+                      id: 'auto' as const,
+                      title: isNy ? 'Yokha (Auto)' : 'Auto',
+                      sub: isNy ? '96–320 kbps malinga ndi intaneti' : '96–320 kbps adaptive',
+                    },
+                    {
+                      id: 'saver' as const,
+                      title: isNy ? 'Sungani Deta · 96k' : 'Data Saver · 96 kbps',
+                      sub: '~0.6 MB/min',
+                    },
+                    {
+                      id: 'high' as const,
+                      title: isNy ? 'Wapamwamba · 320k' : 'High · 320 kbps',
+                      sub: '~1.8 MB/min',
+                    },
+                  ].map((mode) => {
+                    const isSelected =
+                      mode.id === 'saver'
+                        ? effectiveAudioQuality === 'saver' && (audioQuality === 'saver' || userSettings.dataSaver.enabled)
+                        : !userSettings.dataSaver.enabled && audioQuality === mode.id;
+                    return (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() => {
+                          setAudioQuality(mode.id);
+                          showNotice(
+                            t('switched_quality_toast', 'Audio quality set to {quality}', {
+                              quality: mode.title,
+                            })
+                          );
+                        }}
+                        className={`p-2.5 rounded-xl border text-left transition cursor-pointer min-h-[48px] ${
+                          isSelected
+                            ? 'bg-[var(--accent)] text-[var(--accent-contrast)] border-transparent'
+                            : 'bg-[var(--surface-2)] text-[var(--text)] border-[var(--border)] hover:border-[var(--border-strong)]'
+                        }`}
+                      >
+                        <div className="text-xs font-bold">{mode.title}</div>
+                        <div
+                          className={`text-[11px] font-mono tabular-nums ${
+                            isSelected ? 'opacity-80' : 'text-[var(--text-muted)]'
+                          }`}
+                        >
+                          {mode.sub}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="space-y-1">
@@ -1412,7 +1473,7 @@ export const AccountView: React.FC = () => {
                   className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
                 >
                   <option value="high">{isNy ? 'Chokwera (Fayilo yeniyeni)' : 'High (Original file)'}</option>
-                  <option value="saver">{isNy ? 'Kusunga Deta' : 'Data Saver'}</option>
+                  <option value="saver">{isNy ? 'Kusunga Deta (96 kbps)' : 'Data Saver (96 kbps)'}</option>
                 </select>
               </div>
             </div>
@@ -1516,10 +1577,10 @@ export const AccountView: React.FC = () => {
         >
           <div className="space-y-3">
             <ToggleRow
-              label={isNy ? 'Kusunga Deta (Data Saver)' : 'Data Saver'}
-              description={isNy ? 'Kumachepetsa kugwiritsa ntchito ma bando (~0.6 MB/mphindi)' : 'Reduces streaming audio bitrate (~0.6 MB/min) to save bundles'}
+              label={isNy ? 'Kusunga Deta (Data Saver · 96 kbps)' : 'Data Saver (96 kbps)'}
+              description={isNy ? 'Kumachepetsa kugwiritsa ntchito ma bando (~0.6 MB/mphindi)' : 'Reduces streaming audio bitrate to 96 kbps (~0.6 MB/min) and limits background preloading'}
               checked={userSettings.dataSaver.enabled}
-              onChange={(v) => updateUserSettings({ dataSaver: { enabled: v } })}
+              onChange={(v) => setAudioQuality(v ? 'saver' : 'auto')}
             />
             <ToggleRow
               label={isNy ? 'Mverani pa Wi-Fi yokha' : 'Stream over Wi-Fi only'}
@@ -1629,53 +1690,107 @@ export const AccountView: React.FC = () => {
             </div>
 
             {typeof Notification !== 'undefined' && (
-              <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="space-y-0.5">
+              <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-1">
                   <div className="text-xs font-semibold text-[var(--text)]">
-                    {isNy ? 'Zidziwitso za pafoni:' : 'Device alerts:'}{' '}
+                    {t('fcm_push_title', 'Lock-Screen Push Notifications (FCM)')}{' '}
                     <span
                       className={
-                        Notification.permission === 'granted'
+                        fcmStatus === 'registered'
                           ? 'text-[var(--accent-text)] font-bold'
-                          : Notification.permission === 'denied'
+                          : fcmStatus === 'denied' || fcmStatus === 'error'
                           ? 'text-[var(--danger)] font-bold'
                           : 'text-[var(--text-muted)] font-bold'
                       }
                     >
-                      {Notification.permission === 'granted'
-                        ? isNy ? 'Zayatsidwa' : 'Enabled'
-                        : Notification.permission === 'denied'
-                        ? isNy ? 'Zatsekedwa mu bulawuza' : 'Blocked in browser'
+                      ·{' '}
+                      {fcmStatus === 'registered'
+                        ? t('fcm_push_active', 'Active')
+                        : fcmStatus === 'registering'
+                        ? t('fcm_push_syncing', 'Connecting...')
+                        : fcmStatus === 'denied'
+                        ? t('fcm_push_blocked', 'Blocked in browser')
+                        : fcmStatus === 'missing_vapid'
+                        ? isNy ? 'Ikufuna VAPID Key' : 'VAPID Key Needed'
+                        : fcmStatus === 'unsupported'
+                        ? isNy ? 'Sichigwira pa browser iyi' : 'Not supported'
                         : isNy ? 'Sizinayatsidwe' : 'Not enabled'}
                     </span>
                   </div>
-                  <p className="text-[11px] text-[var(--text-muted)]">
-                    {isNy
-                      ? 'Landirani mauthenga pafoni yanu oimba akatulutsa nyimbo kapena oyang\'anira akasintha akaunti yanu.'
-                      : 'Receive system banners on your phone or computer when artists drop music or admin updates your account.'}
+                  <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
+                    {!hasVapidKey
+                      ? t(
+                          'fcm_push_missing_vapid',
+                          'Add VITE_FIREBASE_VAPID_KEY in .env to enable native closed-app lock-screen release and creator alerts.'
+                        )
+                      : fcmError
+                      ? fcmError
+                      : isNy
+                      ? 'Landirani mauthenga pa lock screen yanu ngakhale pulogalamu itatsekedwa.'
+                      : 'Receive native lock-screen alerts when followed artists drop releases or studio status updates — even when LOWERVIBE is closed.'}
                   </p>
                 </div>
-                {Notification.permission !== 'granted' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      Notification.requestPermission()
-                        .then((perm) => {
-                          showNotice(
-                            perm === 'granted'
-                              ? isNy ? 'Zidziwitso za pafoni zayatsidwa!' : 'Device alerts enabled!'
-                              : isNy
-                              ? 'Yatsani zidziwitso mu zokonda za bulawuza yanu.'
-                              : 'Enable notifications in your browser/app settings to receive alerts.',
-                            perm === 'granted' ? 'ok' : 'err'
-                          );
-                        })
-                        .catch(() => {});
-                    }}
-                    className="px-3.5 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer self-start sm:self-auto shrink-0"
-                  >
-                    {isNy ? 'Yatsani Zidziwitso' : 'Enable Device Alerts'}
-                  </button>
+
+                {hasVapidKey && fcmStatus !== 'unsupported' && (
+                  <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+                    {fcmStatus === 'registered' ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const res = await enablePushNotifications();
+                            showNotice(
+                              res.ok
+                                ? isNy ? 'Chizindikiro cha push chakonzedwanso.' : 'Push token refreshed.'
+                                : res.error || 'Could not refresh push token.',
+                              res.ok ? 'ok' : 'err'
+                            );
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer min-h-[38px]"
+                        >
+                          {isNy ? 'Konzerani' : 'Sync'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await disablePushNotifications();
+                            showNotice(
+                              isNy
+                                ? 'Mauthenga a pa screen aimitsidwa pa foni iyi.'
+                                : 'Lock-screen push paused on this device.'
+                            );
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--danger)] text-xs font-semibold text-[var(--danger)] cursor-pointer min-h-[38px]"
+                        >
+                          {t('fcm_push_disable', 'Pause')}
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={fcmStatus === 'registering' || fcmStatus === 'denied'}
+                        onClick={async () => {
+                          const res = await enablePushNotifications();
+                          if (res.ok) {
+                            await updateUserSettings({
+                              notifications: {
+                                newReleasesPush: true,
+                                payoutUpdatesPush: true,
+                              },
+                            });
+                            showNotice(t('fcm_push_active', 'Lock-screen alerts active'));
+                          } else if (res.error) {
+                            showNotice(res.error, 'err');
+                          }
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] text-xs font-bold cursor-pointer min-h-[38px] disabled:opacity-50 whitespace-nowrap"
+                      >
+                        {fcmStatus === 'registering'
+                          ? t('fcm_push_syncing', 'Connecting...')
+                          : t('fcm_push_enable', 'Enable Lock-Screen Push')}
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             )}

@@ -20,7 +20,7 @@ import {
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 
 const FIRESTORE_CACHE_BYTES = 50 * 1024 * 1024;
 
