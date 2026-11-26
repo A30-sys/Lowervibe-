@@ -1,7 +1,8 @@
-import { ArrowDown, ArrowUp, Pause, Play } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, Pause, Play } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useLanguage } from '../../context/LanguageContext';
+import { useRouter } from '../../context/RouterContext';
 import { matchesLocationFilter } from '../../data/regions';
 import { Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG } from '../../utils/artworkFallback';
@@ -18,6 +19,7 @@ export const TopTenShelf: React.FC<TopTenShelfProps> = ({ onSelectArtist }) => {
   const { tracks, currentTrack, isPlaying, playTrack, togglePlayPause, selectedCountry } =
     useAudio();
   const { language, t } = useLanguage();
+  const { navigate } = useRouter();
   const [chartMode, setChartMode] = useState<ChartMode>('local');
 
   const hasCountryScope = Boolean(
@@ -72,32 +74,43 @@ export const TopTenShelf: React.FC<TopTenShelfProps> = ({ onSelectArtist }) => {
           </p>
         </div>
 
-        <div className="flex items-center gap-1.5 bg-[var(--lv-surface)] p-1 rounded-2xl border border-[var(--lv-border)] self-start">
-          {[
-            {
-              id: 'local' as const,
-              label: hasCountryScope
-                ? language === 'ny'
-                  ? `Zotchuka ku ${selectedCountry}`
-                  : `Top in ${selectedCountry}`
-                : 'Top 10',
-            },
-            { id: 'africa' as const, label: language === 'ny' ? 'Africa Yonse' : 'All Africa' },
-            { id: 'rising' as const, label: language === 'ny' ? 'Zokwera' : 'New & Rising' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setChartMode(tab.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer min-h-[36px] whitespace-nowrap ${
-                chartMode === tab.id
-                  ? 'bg-[var(--lv-accent)] text-[#0A0B0A] font-bold'
-                  : 'text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2 self-start">
+          <div className="flex items-center gap-1.5 bg-[var(--lv-surface)] p-1 rounded-2xl border border-[var(--lv-border)]">
+            {[
+              {
+                id: 'local' as const,
+                label: hasCountryScope
+                  ? language === 'ny'
+                    ? `Zotchuka ku ${selectedCountry}`
+                    : `Top in ${selectedCountry}`
+                  : t('top_10', 'Top 10'),
+              },
+              { id: 'africa' as const, label: language === 'ny' ? 'Africa Yonse' : 'All Africa' },
+              { id: 'rising' as const, label: language === 'ny' ? 'Zokwera' : 'New & Rising' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setChartMode(tab.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer min-h-[36px] whitespace-nowrap ${
+                  chartMode === tab.id
+                    ? 'bg-[var(--lv-accent)] text-[#0A0B0A] font-bold'
+                    : 'text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => navigate('/charts')}
+            className="px-3.5 py-2 rounded-2xl bg-[var(--lv-surface)] hover:bg-[var(--lv-elevated)] border border-[var(--lv-border)] text-xs font-bold text-[var(--lv-accent-text)] inline-flex items-center gap-1 transition cursor-pointer min-h-[42px] whitespace-nowrap"
+          >
+            <span>{language === 'ny' ? 'Tchati & Kutsatsa' : 'Charts & Share'}</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
@@ -161,9 +174,16 @@ export const TopTenShelf: React.FC<TopTenShelfProps> = ({ onSelectArtist }) => {
               </div>
 
               <div className="min-w-0 flex-1">
-                <h3 className="text-sm font-bold text-[var(--lv-text)] line-clamp-2 leading-snug">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/tracks/${track.id}`);
+                  }}
+                  className="text-sm font-bold text-[var(--lv-text)] hover:text-[var(--lv-accent-text)] hover:underline line-clamp-2 leading-snug text-left block w-full cursor-pointer"
+                >
                   {track.title}
-                </h3>
+                </button>
                 <button
                   type="button"
                   onClick={(e) => {

@@ -62,6 +62,7 @@ import {
 import { DEFAULT_AVATAR_SVG, DEFAULT_ARTWORK_SVG, DEFAULT_BANNER_SVG } from '../utils/artworkFallback';
 import { LANG_STORAGE_KEY, useLanguage } from './LanguageContext';
 import { THEME_MODE_KEY, useTheme } from './ThemeContext';
+import { useToast } from './ToastContext';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -1200,6 +1201,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     pendingActionRef.current = null;
   };
 
+  const { showToast } = useToast();
   const likeInFlightRef = useRef<Set<string>>(new Set());
   const toggleLikeTrack = (trackId: string) => {
     if (!currentUser) {
@@ -1208,6 +1210,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     if (likeInFlightRef.current.has(trackId)) return;
 
+    const prevUser = currentUser;
     const exists = currentUser.likedTrackIds.includes(trackId);
     const updated = exists
       ? currentUser.likedTrackIds.filter((id) => id !== trackId)
@@ -1215,25 +1218,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const updatedUser = { ...currentUser, likedTrackIds: updated };
     setCurrentUser(updatedUser);
-    updateUserProfileFields(currentUser.id, { likedTrackIds: updated });
 
     likeInFlightRef.current.add(trackId);
     const trackRef = doc(db, 'tracks', trackId);
-    runTransaction(db, async (tx) => {
-      const snap = await tx.get(trackRef);
-      if (!snap.exists()) return;
-      const data = snap.data() as { likedByUserIds?: string[]; likes?: number };
-      const existingIds = Array.isArray(data.likedByUserIds) ? data.likedByUserIds.filter(Boolean) : [];
-      const nextSet = new Set(existingIds);
-      if (exists) nextSet.delete(currentUser.id);
-      else nextSet.add(currentUser.id);
-      const nextLikedBy = Array.from(nextSet);
-      tx.update(trackRef, {
-        likedByUserIds: nextLikedBy,
-        likes: nextLikedBy.length,
-      });
-    })
-      .catch(() => {})
+    const userRef = doc(db, 'users', currentUser.id);
+    Promise.all([
+      updateDoc(userRef, { likedTrackIds: updated, updatedAt: new Date().toISOString() }),
+      runTransaction(db, async (tx) => {
+        const snap = await tx.get(trackRef);
+        if (!snap.exists()) return;
+        const data = snap.data() as { likedByUserIds?: string[]; likes?: number };
+        const existingIds = Array.isArray(data.likedByUserIds) ? data.likedByUserIds.filter(Boolean) : [];
+        const nextSet = new Set(existingIds);
+        if (exists) nextSet.delete(prevUser.id);
+        else nextSet.add(prevUser.id);
+        const nextLikedBy = Array.from(nextSet);
+        tx.update(trackRef, {
+          likedByUserIds: nextLikedBy,
+          likes: nextLikedBy.length,
+        });
+      }),
+    ])
+      .catch((err) => {
+        console.warn('toggleLikeTrack failed, rolling back:', formatFirebaseError(err, 'Like failed'));
+        setCurrentUser((cur) => (cur && cur.id === prevUser.id ? { ...cur, likedTrackIds: prevUser.likedTrackIds } : cur));
+        void updateUserProfileFields(prevUser.id, { likedTrackIds: prevUser.likedTrackIds });
+        showToast('Could not update like. Reverted.', 'error');
+      })
       .finally(() => {
         likeInFlightRef.current.delete(trackId);
       });
@@ -1247,41 +1258,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     if (artistLikeInFlightRef.current.has(artistId)) return;
 
+    const prevUser = currentUser;
     const currentLiked = currentUser.likedArtistIds || [];
     const exists = currentLiked.includes(artistId);
     const updated = exists ? currentLiked.filter((id) => id !== artistId) : Array.from(new Set([...currentLiked, artistId]));
 
     const updatedUser = { ...currentUser, likedArtistIds: updated };
     setCurrentUser(updatedUser);
-    updateUserProfileFields(currentUser.id, { likedArtistIds: updated });
 
     artistLikeInFlightRef.current.add(artistId);
     const artistRef = doc(db, 'artists', artistId);
-    runTransaction(db, async (tx) => {
-      const snap = await tx.get(artistRef);
-      if (!snap.exists()) return;
-      const data = snap.data() as { likedByUserIds?: string[] };
-      const existingIds = Array.isArray(data.likedByUserIds) ? data.likedByUserIds.filter(Boolean) : [];
-      const nextSet = new Set(existingIds);
-      if (exists) nextSet.delete(currentUser.id);
-      else nextSet.add(currentUser.id);
-      const nextLikedBy = Array.from(nextSet);
-      tx.update(artistRef, {
-        likedByUserIds: nextLikedBy,
-        likesCount: nextLikedBy.length,
-      });
-    })
-      .catch(() => {})
+    const userRef = doc(db, 'users', currentUser.id);
+    Promise.all([
+      updateDoc(userRef, { likedArtistIds: updated, updatedAt: new Date().toISOString() }),
+      runTransaction(db, async (tx) => {
+        const snap = await tx.get(artistRef);
+        if (!snap.exists()) return;
+        const data = snap.data() as { likedByUserIds?: string[] };
+        const existingIds = Array.isArray(data.likedByUserIds) ? data.likedByUserIds.filter(Boolean) : [];
+        const nextSet = new Set(existingIds);
+        if (exists) nextSet.delete(prevUser.id);
+        else nextSet.add(prevUser.id);
+        const nextLikedBy = Array.from(nextSet);
+        tx.update(artistRef, {
+          likedByUserIds: nextLikedBy,
+          likesCount: nextLikedBy.length,
+        });
+      }),
+    ])
+      .catch((err) => {
+        console.warn('toggleLikeArtist failed, rolling back:', formatFirebaseError(err, 'Artist like failed'));
+        setCurrentUser((cur) => (cur && cur.id === prevUser.id ? { ...cur, likedArtistIds: prevUser.likedArtistIds || [] } : cur));
+        void updateUserProfileFields(prevUser.id, { likedArtistIds: prevUser.likedArtistIds || [] });
+        showToast('Could not update artist like. Reverted.', 'error');
+      })
       .finally(() => {
         artistLikeInFlightRef.current.delete(artistId);
       });
   };
 
+  const followInFlightRef = useRef<Set<string>>(new Set());
   const toggleFollowArtist = (artistId: string) => {
     if (!currentUser) {
       requireAuth(() => toggleFollowArtist(artistId), 'Sign in to follow this artist');
       return;
     }
+    if (followInFlightRef.current.has(artistId)) return;
+
+    const prevUser = currentUser;
     const exists = currentUser.followingArtistIds.includes(artistId);
     const updated = exists
       ? currentUser.followingArtistIds.filter((id) => id !== artistId)
@@ -1289,41 +1313,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const updatedUser = { ...currentUser, followingArtistIds: updated };
     setCurrentUser(updatedUser);
-    updateUserProfileFields(currentUser.id, { followingArtistIds: updated });
+    followInFlightRef.current.add(artistId);
 
     // Sync follower count atomically & notify artist owner on follow
-    runTransaction(db, async (tx) => {
-      const aRef = doc(db, 'artists', artistId);
-      const snap = await tx.get(aRef);
-      if (!snap.exists()) return;
-      const data = snap.data() as {
-        followersCount?: number;
-        ownerId?: string;
-        ownerUserId?: string;
-        claimedByUserId?: string;
-        name?: string;
-      };
-      const prevCount = typeof data.followersCount === 'number' ? data.followersCount : 0;
-      tx.update(aRef, {
-        followersCount: Math.max(0, prevCount + (exists ? -1 : 1)),
+    Promise.all([
+      updateDoc(doc(db, 'users', currentUser.id), {
+        followingArtistIds: updated,
+        updatedAt: new Date().toISOString(),
+      }),
+      runTransaction(db, async (tx) => {
+        const aRef = doc(db, 'artists', artistId);
+        const snap = await tx.get(aRef);
+        if (!snap.exists()) return;
+        const data = snap.data() as {
+          followersCount?: number;
+          ownerId?: string;
+          ownerUserId?: string;
+          claimedByUserId?: string;
+          name?: string;
+        };
+        const prevCount = typeof data.followersCount === 'number' ? data.followersCount : 0;
+        tx.update(aRef, {
+          followersCount: Math.max(0, prevCount + (exists ? -1 : 1)),
+        });
+        const targetOwnerId = data.ownerId || data.ownerUserId || data.claimedByUserId;
+        if (!exists && targetOwnerId && targetOwnerId !== prevUser.id) {
+          const notifId = `notif-follow-${artistId}-${prevUser.id}-${Date.now()}`;
+          void setDoc(doc(db, 'notifications', notifId), {
+            id: notifId,
+            userId: targetOwnerId,
+            type: 'new_follower',
+            category: 'promotional',
+            title: `New follower for ${data.name || 'your artist page'}`,
+            message: `${prevUser.name || 'A listener'} started following you on LOWERVIBE.`,
+            readBy: [],
+            createdAt: new Date().toISOString(),
+            createdBy: prevUser.id,
+            actionRoute: `/artists/${artistId}`,
+          }).catch(() => {});
+        }
+      }),
+    ])
+      .catch((err) => {
+        console.warn('toggleFollowArtist failed, rolling back:', formatFirebaseError(err, 'Follow failed'));
+        setCurrentUser((cur) =>
+          cur && cur.id === prevUser.id ? { ...cur, followingArtistIds: prevUser.followingArtistIds } : cur
+        );
+        void updateUserProfileFields(prevUser.id, { followingArtistIds: prevUser.followingArtistIds });
+        showToast('Could not update follow status. Reverted.', 'error');
+      })
+      .finally(() => {
+        followInFlightRef.current.delete(artistId);
       });
-      const targetOwnerId = data.ownerId || data.ownerUserId || data.claimedByUserId;
-      if (!exists && targetOwnerId && targetOwnerId !== currentUser.id) {
-        const notifId = `notif-follow-${artistId}-${currentUser.id}-${Date.now()}`;
-        void setDoc(doc(db, 'notifications', notifId), {
-          id: notifId,
-          userId: targetOwnerId,
-          type: 'new_follower',
-          category: 'promotional',
-          title: `New follower for ${data.name || 'your artist page'}`,
-          message: `${currentUser.name || 'A listener'} started following you on LOWERVIBE.`,
-          readBy: [],
-          createdAt: new Date().toISOString(),
-          createdBy: currentUser.id,
-          actionRoute: `/artists/${artistId}`,
-        }).catch(() => {});
-      }
-    }).catch(() => {});
   };
 
   const createPlaylist = (

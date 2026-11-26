@@ -24,13 +24,31 @@ import {
   getTrackShareUrl,
 } from '../utils/shareLinks';
 
+export interface PromoSharePayload {
+  title: string;
+  subtitle: string;
+  eyebrow: string;
+  artworkUrl?: string;
+  shareUrl: string;
+  shortUrl: string;
+  caption: string;
+  badgeText?: string;
+  ctaLabel?: string;
+}
+
 interface ShareModalProps {
   track: Track | null;
   artist?: Artist | null;
+  promoShare?: PromoSharePayload | null;
   onClose: () => void;
 }
 
-export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }) => {
+export const ShareModal: React.FC<ShareModalProps> = ({
+  track,
+  artist,
+  promoShare,
+  onClose,
+}) => {
   const { language, t } = useLanguage();
   const isNy = language === 'ny';
   const [activeTab, setActiveTab] = useState<'card' | 'socials' | 'embed'>('card');
@@ -40,13 +58,20 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
   const [copiedEmbed, setCopiedEmbed] = useState(false);
   const [exportingCard, setExportingCard] = useState<'square' | 'story' | null>(null);
 
-  if (!track && !artist) return null;
+  if (!track && !artist && !promoShare) return null;
 
+  const isPromoShare = Boolean(promoShare);
   const isTrackShare = Boolean(track);
-  const shareTitle = track
-    ? `${track.title} — ${track.artistName} | LOWERVIBE`
+
+  const shareTitle = promoShare
+    ? `${promoShare.title} | LOWERVIBE`
+    : track
+    ? `${track.title} by ${track.artistName} | LOWERVIBE`
     : `${artist!.name} | LOWERVIBE`;
-  const shareDescription = track
+
+  const shareDescription = promoShare
+    ? promoShare.caption
+    : track
     ? isNy
       ? `Mverani "${track.title}" ya ${track.artistName} pa LOWERVIBE`
       : `Listen to "${track.title}" by ${track.artistName} on LOWERVIBE`
@@ -54,9 +79,19 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
     ? `Pezani ${artist!.name} ndikutsitsa nyimbo zawo pa LOWERVIBE`
     : `Discover ${artist!.name} and stream their tracks on LOWERVIBE`;
 
-  const shareUrl = track ? getTrackShareUrl(track.id) : getArtistShareUrl(artist!);
-  const shortUrl = track ? getShortTrackShareUrl(track.id) : getShortArtistShareUrl(artist!);
-  const embedCode = `<iframe src="${shareUrl}" width="100%" height="${isTrackShare ? 160 : 220}" frameborder="0" allow="autoplay; encrypted-media"></iframe>`;
+  const shareUrl = promoShare
+    ? promoShare.shareUrl
+    : track
+    ? getTrackShareUrl(track.id)
+    : getArtistShareUrl(artist!);
+
+  const shortUrl = promoShare
+    ? promoShare.shortUrl
+    : track
+    ? getShortTrackShareUrl(track.id)
+    : getShortArtistShareUrl(artist!);
+
+  const embedCode = `<iframe src="${shareUrl}" width="100%" height="${isTrackShare ? 160 : 240}" frameborder="0" allow="autoplay; encrypted-media"></iframe>`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(shareUrl);
@@ -92,7 +127,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
     }
   };
 
-  const viralCaption = track
+  const viralCaption = promoShare
+    ? promoShare.caption
+    : track
     ? isNy
       ? `Nyimbo yatsopano pa LOWERVIBE! Mverani "${track.title}" ya ${track.artistName} kwaulere tsopano: ${shortUrl} #LOWERVIBE #MalawiMusic #AfricanMusic`
       : `Out now on LOWERVIBE! Stream "${track.title}" by ${track.artistName} free on any phone: ${shortUrl} #LOWERVIBE #MalawiMusic #AfroPop`
@@ -109,20 +146,25 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
   const handleDownloadPromoCard = async (aspect: 'square' | 'story') => {
     setExportingCard(aspect);
     await exportReleasePromoCard({
-      title: track ? track.title : artist!.name,
-      subtitle: track
+      title: promoShare ? promoShare.title : track ? track.title : artist!.name,
+      subtitle: promoShare
+        ? promoShare.subtitle
+        : track
         ? `${track.artistName}${track.genre ? ` · ${translateGenreCategory(track.genre, language)}` : ''}`
         : `${artist!.country || artist!.location || 'Malawi'} · Verified Artist`,
-      eyebrow: track
+      eyebrow: promoShare
+        ? promoShare.eyebrow
+        : track
         ? isNy
           ? 'Nyimbo Yoyenera Kumvera'
           : 'Now Streaming'
         : isNy
         ? 'Woimba wa LOWERVIBE'
         : 'Artist Spotlight',
-      artworkUrl: track ? track.coverArt : artist!.avatar,
+      artworkUrl: promoShare ? promoShare.artworkUrl : track ? track.coverArt : artist!.avatar,
       shortUrl,
       aspect,
+      ctaLabel: promoShare?.ctaLabel,
     });
     setExportingCard(null);
   };
@@ -132,6 +174,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
   const whatsappUrl = `https://api.whatsapp.com/send?text=${encodedText}%20${encodeURIComponent(shortUrl)}`;
   const telegramUrl = `https://t.me/share/url?url=${encodeURIComponent(shortUrl)}&text=${encodedText}`;
   const redditUrl = `https://reddit.com/submit?url=${encodeURIComponent(shortUrl)}&title=${encodedText}`;
+
+  const previewImage = promoShare
+    ? promoShare.artworkUrl || DEFAULT_ARTWORK_SVG
+    : track
+    ? track.coverArt || DEFAULT_ARTWORK_SVG
+    : artist!.avatar || DEFAULT_AVATAR_SVG;
 
   return (
     <div
@@ -146,7 +194,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
           <div className="flex items-center gap-2">
             <Share2 className="w-5 h-5 text-[var(--accent-text)]" />
             <h3 className="text-base font-bold text-[var(--text)] font-heading">
-              {isTrackShare
+              {isPromoShare
+                ? isNy
+                  ? 'Gawani Tchati & Kutsatsa'
+                  : 'Share Chart & Promo'
+                : isTrackShare
                 ? isNy
                   ? 'Gawani nyimbo'
                   : 'Share song'
@@ -190,13 +242,15 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
           {activeTab === 'card' && (
             <div className="space-y-4">
               <div className="rounded-2xl border border-[var(--border-strong)] bg-[var(--surface-2)] p-5 space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--accent-text)] inline-flex items-center gap-1">
                     <ShieldCheck className="w-3.5 h-3.5" />
                     <span>{isNy ? 'Ulalo Wovomerezeka wa LOWERVIBE' : 'Official LOWERVIBE Link'}</span>
                   </span>
-                  <span className="text-[11px] font-mono text-[var(--text-muted)]">
-                    {track
+                  <span className="text-[11px] font-mono text-[var(--text-muted)] truncate">
+                    {promoShare
+                      ? promoShare.badgeText || promoShare.eyebrow
+                      : track
                       ? `${translateGenreCategory(track.genre, language)}${track.region ? ` · ${track.region}` : ''}`
                       : artist!.country || artist!.location || t('artist')}
                   </span>
@@ -205,12 +259,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
                 <div className="flex gap-4 items-center">
                   <div className="w-24 h-24 rounded-2xl overflow-hidden shrink-0 border border-[var(--border)] bg-[var(--surface)]">
                     <img
-                      src={
-                        track
-                          ? track.coverArt || DEFAULT_ARTWORK_SVG
-                          : artist!.avatar || DEFAULT_AVATAR_SVG
-                      }
-                      alt={track ? track.title : artist!.name}
+                      src={previewImage}
+                      alt={promoShare ? promoShare.title : track ? track.title : artist!.name}
                       referrerPolicy="no-referrer"
                       className="w-full h-full object-cover"
                     />
@@ -218,10 +268,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
 
                   <div className="flex-1 min-w-0">
                     <h4 className="text-base font-bold text-[var(--text)] truncate font-heading">
-                      {track ? track.title : artist!.name}
+                      {promoShare ? promoShare.title : track ? track.title : artist!.name}
                     </h4>
                     <p className="text-sm text-[var(--text-muted)] font-medium truncate mt-0.5">
-                      {track
+                      {promoShare
+                        ? promoShare.subtitle
+                        : track
                         ? track.artistName
                         : `${artist!.followersCount || 0} ${
                             (artist!.followersCount || 0) === 1
@@ -268,7 +320,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
                     {isNy ? 'Chithunzi & Mau Otsatsa (Zaulere)' : 'Free Social Promo Kit'}
                   </span>
                   <span className="text-[11px] text-[var(--text-muted)]">
-                    {isNy ? 'WhatsApp · TikTok · Facebook' : 'WhatsApp · TikTok · Facebook'}
+                    WhatsApp · TikTok · Facebook
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -279,7 +331,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
                     className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-[var(--surface-2)] hover:bg-[var(--bg)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] transition cursor-pointer disabled:opacity-50"
                   >
                     <Download className="w-3.5 h-3.5 text-[var(--accent-text)]" />
-                    <span>{exportingCard === 'square' ? '...' : isNy ? 'Post Card (1:1)' : 'Post Card (1:1)'}</span>
+                    <span>{exportingCard === 'square' ? '...' : 'Post Card (1:1)'}</span>
                   </button>
                   <button
                     type="button"
@@ -288,7 +340,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
                     className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-[var(--surface-2)] hover:bg-[var(--bg)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] transition cursor-pointer disabled:opacity-50"
                   >
                     <Download className="w-3.5 h-3.5 text-[var(--violet)]" />
-                    <span>{exportingCard === 'story' ? '...' : isNy ? 'Status / Story (9:16)' : 'Story / Status (9:16)'}</span>
+                    <span>
+                      {exportingCard === 'story'
+                        ? '...'
+                        : isNy
+                        ? 'Status / Story (9:16)'
+                        : 'Story / Status (9:16)'}
+                    </span>
                   </button>
                 </div>
                 <button
@@ -311,7 +369,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
               <div>
                 <label className="block text-xs font-semibold text-[var(--text-dim)] mb-1.5">
                   {isNy
-                    ? `Ulalo wachidule (umatsegula mwachindunji ${isTrackShare ? 'nyimboyi' : 'woimbayu'})`
+                    ? 'Ulalo wachidule wodalirika'
+                    : isPromoShare
+                    ? 'Short promo link (opens straight to chart)'
                     : `Short direct link (opens straight to ${isTrackShare ? 'song' : 'artist'})`}
                 </label>
                 <div className="flex items-center gap-2">
@@ -404,7 +464,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, artist, onClose }
             <div className="space-y-4">
               <p className="text-xs text-[var(--text-muted)] leading-relaxed">
                 {isNy
-                  ? 'Koperani code iyi ya HTML kuti muike nyimbo kapena woimba wa LOWERVIBE pa tsamba lanu.'
+                  ? 'Koperani code iyi ya HTML kuti muike nyimbo kapena tchati cha LOWERVIBE pa tsamba lanu.'
                   : 'Copy this HTML snippet to embed this verified LOWERVIBE link on your website or blog.'}
               </p>
               <div className="relative">

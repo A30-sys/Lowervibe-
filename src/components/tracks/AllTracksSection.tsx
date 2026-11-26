@@ -1,8 +1,9 @@
-import { ChevronRight, Heart, ListPlus, Music, Pause, Play } from 'lucide-react';
+import { ArrowRight, ChevronRight, Heart, ListPlus, Music, Pause, Play, Trophy } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
+import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
 import { Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG } from '../../utils/artworkFallback';
@@ -12,6 +13,7 @@ import {
   normalizeGenreCategory,
   translateGenreCategory,
 } from '../../utils/genreCategories';
+import { getVisitMixSeed, mixTracksForVisit } from '../../utils/mixEngine';
 import { LazySlideImage } from '../common/LazySlideImage';
 
 interface AllTracksSectionProps {
@@ -46,10 +48,12 @@ export const AllTracksSection: React.FC<AllTracksSectionProps> = ({
 
   const { currentUser, toggleLikeTrack } = useAuth();
   const { language, t } = useLanguage();
+  const { navigate } = useRouter();
   const { showToast } = useToast();
   const [filter, setFilter] = useState<FilterChip>('categories');
   const [visibleLimit, setVisibleLimit] = useState<number>(PAGE_SIZE);
   const [animatingHeartTrackId, setAnimatingHeartTrackId] = useState<string | null>(null);
+  const [visitSeed] = useState<number>(() => getVisitMixSeed());
 
   const publicTracks = useMemo(
     () => tracks.filter((tr) => !tr.isDraft && !tr.isDeranked),
@@ -187,13 +191,27 @@ export const AllTracksSection: React.FC<AllTracksSectionProps> = ({
               {chip.label}
             </button>
           ))}
+          {filter === 'top' && (
+            <button
+              type="button"
+              onClick={() => navigate('/charts')}
+              className="px-3.5 py-2 rounded-2xl bg-[var(--surface)] hover:bg-[var(--surface-2)] border border-[var(--border)] text-xs font-bold text-[var(--accent-text)] inline-flex items-center gap-1 shrink-0 cursor-pointer min-h-[44px] whitespace-nowrap"
+            >
+              <Trophy className="w-3.5 h-3.5" />
+              <span>{language === 'ny' ? 'Tchati & Kutsatsa' : 'Full Charts & Share'}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
       {isCategoryBrowseMode ? (
         <div className="space-y-6">
-          {categorizedGroups.map((group) => {
-            const shelfTracks = group.tracks.slice(0, SHELF_MAX_ITEMS);
+          {categorizedGroups.map((group, groupIdx) => {
+            const mixedGroupTracks = mixTracksForVisit(group.tracks, visitSeed, {
+              salt: 600 + groupIdx,
+            });
+            const shelfTracks = mixedGroupTracks.slice(0, SHELF_MAX_ITEMS);
             const displayGenre = translateGenreCategory(group.category, language);
 
             return (
@@ -201,7 +219,17 @@ export const AllTracksSection: React.FC<AllTracksSectionProps> = ({
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <h3 className="text-base sm:text-lg font-extrabold font-heading text-[var(--text)] truncate">
-                      {displayGenre}
+                      {onSelectCategory ? (
+                        <button
+                          type="button"
+                          onClick={() => onSelectCategory(group.category)}
+                          className="hover:text-[var(--accent-text)] hover:underline text-left cursor-pointer truncate max-w-full"
+                        >
+                          {displayGenre}
+                        </button>
+                      ) : (
+                        displayGenre
+                      )}
                     </h3>
                     <p className="text-xs font-mono text-[var(--text-muted)] tabular-nums">
                       {t('songs_count_label', '{count} songs', {
@@ -218,7 +246,7 @@ export const AllTracksSection: React.FC<AllTracksSectionProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        playTrackList(group.tracks, 0);
+                        playTrackList(mixedGroupTracks, 0);
                         showToast(displayGenre);
                       }}
                       className="px-3.5 py-2 rounded-2xl bg-[var(--surface)] hover:bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] text-xs font-bold text-[var(--text)] inline-flex items-center gap-1.5 transition active:scale-95 cursor-pointer min-h-[44px] whitespace-nowrap"
@@ -404,9 +432,17 @@ export const AllTracksSection: React.FC<AllTracksSectionProps> = ({
                           {track.artistName}
                         </button>
                         <span>·</span>
-                        <span className="truncate">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onSelectCategory) onSelectCategory(track.genre);
+                            else navigate(`/discover?genre=${encodeURIComponent(track.genre)}`);
+                          }}
+                          className="truncate hover:text-[var(--text)] hover:underline cursor-pointer"
+                        >
                           {translateGenreCategory(track.genre, language)}
-                        </span>
+                        </button>
                       </div>
 
                       <div className="flex items-center gap-2 mt-0.5 text-[11px] font-mono text-[var(--text-muted)]">

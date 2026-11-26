@@ -7,6 +7,7 @@ import { useRouter } from '../../context/RouterContext';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../../utils/artworkFallback';
 import { formatTime } from '../../utils/formatters';
 import { normalizeGenreCategory, translateGenreCategory } from '../../utils/genreCategories';
+import { extractCatalogTags } from '../../utils/tags';
 
 interface GlobalSearchModalProps {
   isOpen: boolean;
@@ -104,6 +105,11 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
       .slice(0, 8);
   }, [publicTracks]);
 
+  const catalogTags = useMemo(
+    () => extractCatalogTags(publicTracks, artists).slice(0, 14),
+    [publicTracks, artists]
+  );
+
   const recordSearch = (term: string) => {
     const clean = term.trim();
     if (clean.length < 2) return;
@@ -125,26 +131,50 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
 
   const results = useMemo(() => {
     const q = query.trim();
-    if (!q) return { tracks: [], artists: [], playlists: [], genres: [] as { name: string; count: number }[] };
+    if (!q) {
+      return {
+        tracks: [],
+        artists: [],
+        playlists: [],
+        genres: [] as { name: string; count: number }[],
+        tags: [] as ReturnType<typeof extractCatalogTags>,
+      };
+    }
     return {
       tracks: publicTracks
-        .filter((tItem) => fuzzyMatch(q, `${tItem.title} ${tItem.artistName} ${tItem.genre}`))
+        .filter((tItem) =>
+          fuzzyMatch(
+            q,
+            `${tItem.title} ${tItem.artistName} ${tItem.genre} ${tItem.mood || ''} ${(tItem.vibeTags || []).join(' ')} ${tItem.region || ''}`
+          )
+        )
         .slice(0, 6),
-      artists: artists.filter((a) => fuzzyMatch(q, `${a.name} ${a.handle} ${(a.genres || []).join(' ')}`)).slice(0, 4),
+      artists: artists
+        .filter((a) =>
+          fuzzyMatch(
+            q,
+            `${a.name} ${a.handle} ${a.country || ''} ${a.location || ''} ${(a.genres || []).join(' ')}`
+          )
+        )
+        .slice(0, 4),
       playlists: playlists
         .filter((p) => p.isPublic !== false && fuzzyMatch(q, `${p.name} ${p.genre || ''}`))
         .slice(0, 4),
       genres: catalogGenres.filter(
         (g) => fuzzyMatch(q, g.name) || fuzzyMatch(q, translateGenreCategory(g.name, language))
       ),
+      tags: catalogTags.filter(
+        (tg) => fuzzyMatch(q, tg.tag) || fuzzyMatch(q, translateGenreCategory(tg.tag, language))
+      ),
     };
-  }, [query, publicTracks, artists, playlists, catalogGenres, language]);
+  }, [query, publicTracks, artists, playlists, catalogGenres, catalogTags, language]);
 
   const hasAnyResult =
     results.tracks.length > 0 ||
     results.artists.length > 0 ||
     results.playlists.length > 0 ||
-    results.genres.length > 0;
+    results.genres.length > 0 ||
+    results.tags.length > 0;
 
   if (!isOpen) return null;
 
@@ -221,23 +251,25 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                 </div>
               )}
 
-              {catalogGenres.length > 0 && (
+              {catalogTags.length > 0 && (
                 <div className="space-y-2">
                   <div className="text-xs font-bold text-[var(--text-muted)]">
-                    {t('search_suggestions_heading', 'Try searching for')}
+                    {isNy ? 'Mitundu & Ma Tag Otchuka' : 'Browse sub-genres & mood tags'}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {catalogGenres.slice(0, 6).map((g) => (
+                    {catalogTags.slice(0, 10).map((tg) => (
                       <button
-                        key={g.name}
+                        key={tg.key}
                         type="button"
                         onClick={() => {
-                          setRawQuery(g.name);
-                          setQuery(g.name);
+                          onClose();
+                          navigate(`/search?tag=${encodeURIComponent(tg.tag)}`);
                         }}
-                        className="px-3 py-1.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer hover:border-[var(--accent)]"
+                        className="px-3 py-1.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
                       >
-                        {translateGenreCategory(g.name, language)}
+                        {tg.kind === 'genre'
+                          ? translateGenreCategory(tg.tag, language)
+                          : `#${tg.tag}`}
                       </button>
                     ))}
                   </div>
@@ -308,24 +340,27 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                 </div>
               ) : (
                 <>
-                  {results.genres.length > 0 && (
+                  {(results.genres.length > 0 || results.tags.length > 0) && (
                     <div className="space-y-2">
                       <div className="text-xs font-bold text-[var(--text-muted)]">
-                        {isNy ? 'Mitundu' : 'Genres'}
+                        {isNy ? 'Mitundu & Ma Tag' : 'Genres & mood tags'}
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {results.genres.map((g) => (
+                        {results.tags.slice(0, 8).map((tg) => (
                           <button
-                            key={g.name}
+                            key={tg.key}
                             type="button"
                             onClick={() => {
-                              recordSearch(g.name);
+                              recordSearch(tg.tag);
                               onClose();
-                              navigate(`/discover?genre=${encodeURIComponent(g.name)}`);
+                              navigate(`/search?tag=${encodeURIComponent(tg.tag)}`);
                             }}
-                            className="px-3 py-1.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-xs font-bold text-[var(--text)] cursor-pointer hover:border-[var(--accent)]"
+                            className="px-3 py-1.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-xs font-bold text-[var(--text)] cursor-pointer hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
                           >
-                            {translateGenreCategory(g.name, language)} ({g.count})
+                            {tg.kind === 'genre'
+                              ? translateGenreCategory(tg.tag, language)
+                              : `#${tg.tag}`}{' '}
+                            ({tg.count || tg.artistCount})
                           </button>
                         ))}
                       </div>

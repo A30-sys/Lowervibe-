@@ -14,15 +14,11 @@ import {
   getFirestore,
   initializeFirestore,
   memoryLocalCache,
-  persistentLocalCache,
-  persistentMultipleTabManager,
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 export const app = initializeApp(firebaseConfig);
-
-const FIRESTORE_CACHE_BYTES = 50 * 1024 * 1024;
 
 function createFirestoreInstance(): Firestore {
   const databaseId = firebaseConfig.firestoreDatabaseId;
@@ -32,27 +28,12 @@ function createFirestoreInstance(): Firestore {
       {
         experimentalForceLongPolling: true,
         ignoreUndefinedProperties: true,
-        localCache: persistentLocalCache({
-          cacheSizeBytes: FIRESTORE_CACHE_BYTES,
-          tabManager: persistentMultipleTabManager(),
-        }),
+        localCache: memoryLocalCache(),
       },
       databaseId
     );
   } catch {
-    try {
-      return initializeFirestore(
-        app,
-        {
-          experimentalForceLongPolling: true,
-          ignoreUndefinedProperties: true,
-          localCache: memoryLocalCache(),
-        },
-        databaseId
-      );
-    } catch {
-      return getFirestore(app, databaseId);
-    }
+    return getFirestore(app, databaseId);
   }
 }
 
@@ -168,27 +149,50 @@ export function handleFirestoreError(
 }
 
 /**
- * Automatically re-enables Firestore network transport when browser connectivity recovers
+ * Re-enables Firestore network transport only when recovering from an offline state
  */
 if (typeof window !== 'undefined') {
+  let wasOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+  window.addEventListener('offline', () => {
+    wasOffline = true;
+  });
   window.addEventListener('online', () => {
-    enableNetwork(db).catch(() => {});
+    if (wasOffline) {
+      wasOffline = false;
+      enableNetwork(db).catch(() => {});
+    }
   });
 }
+
+let connectionCheckInFlight: Promise<boolean> | null = null;
 
 /**
  * Validates connection to the provisioned Firestore database on boot
  */
 export async function testFirestoreConnection(): Promise<boolean> {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-    return true;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Please check your Firebase configuration or network connection.');
-      return false;
-    }
-    // Expected permission denial on /test/connection still proves the server is reachable
-    return true;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return false;
   }
+  if (connectionCheckInFlight) {
+    return connectionCheckInFlight;
+  }
+
+  connectionCheckInFlight = (async () => {
+    try {
+      await getDocFromServer(doc(db, 'test', 'connection'));
+      return true;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message.toLowerCase() : '';
+      const code = ((error as { code?: string })?.code || '').toLowerCase();
+      if (msg.includes('the client is offline') || code === 'unavailable') {
+        return false;
+      }
+      // Expected permission denial on /test/connection still proves the server is reachable
+      return true;
+    } finally {
+      connectionCheckInFlight = null;
+    }
+  })();
+
+  return connectionCheckInFlight;
 }

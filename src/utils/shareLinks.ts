@@ -33,3 +33,22 @@ export function getShortArtistShareUrl(artist: { id: string; slug?: string }): s
   const handleOrId = (artist.slug || artist.id).trim();
   return `${getTrustedShareOrigin()}/a/${encodeURIComponent(handleOrId)}`;
 }
+
+export function getChartsShareUrl(options?: { tab?: string; genre?: string }): string {
+  const params = new URLSearchParams();
+  if (options?.tab && options.tab !== 'most-played') {
+    params.set('tab', options.tab);
+  }
+  if (options?.genre && options.genre.trim()) {
+    params.set('genre', options.genre.trim());
+  }
+  const qs = params.toString();
+  return `${getTrustedShareOrigin()}/charts${qs ? `?${qs}` : ''}`;
+}
+
+export function getShortChartsShareUrl(genre?: string): string {
+  if (genre && genre.trim()) {
+    return `${getTrustedShareOrigin()}/charts?genre=${encodeURIComponent(genre.trim())}`;
+  }
+  return `${getTrustedShareOrigin()}/charts`;
+}

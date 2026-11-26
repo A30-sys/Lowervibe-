@@ -2,9 +2,15 @@ import React, { useEffect } from 'react';
 import { LowerVibeMark } from './brand/LowerVibeLogo';
 
 export const LowerVibeWaveLoader: React.FC<{ label?: string }> = ({ label }) => (
-  <div className="flex flex-col items-center justify-center gap-3 py-6 text-center">
-    <div className="relative w-12 h-12 rounded-2xl bg-[#0A0B0A] border border-[#C6FF3D]/35 flex items-center justify-center shadow-md">
-      <LowerVibeMark className="w-9 h-9" animated />
+  <div className="flex flex-col items-center justify-center gap-3.5 py-8 text-center" role="status" aria-live="polite">
+    <div className="relative flex items-center justify-center w-16 h-16">
+      <span
+        aria-hidden="true"
+        className="absolute inset-0 rounded-2xl border border-[#C6FF3D]/35 animate-ping [animation-duration:1.8s]"
+      />
+      <div className="relative w-14 h-14 rounded-2xl bg-[#0A0B0A] border border-[#C6FF3D]/40 flex items-center justify-center shadow-lg">
+        <LowerVibeMark className="w-11 h-11" animated />
+      </div>
     </div>
     {label && <p className="text-xs font-medium text-[var(--text-muted)]">{label}</p>}
   </div>
@@ -25,14 +31,14 @@ export const InitialLoader: React.FC = () => {
       sessionStorage.setItem('lowervibe_session_booted', 'true');
     } catch {}
 
-    const fadeDelay = alreadyBooted ? 80 : 280;
+    const fadeDelay = alreadyBooted ? 120 : 480;
     const timer1 = window.setTimeout(() => {
       splash.classList.add('lv-boot-hide');
     }, fadeDelay);
 
     const timer2 = window.setTimeout(() => {
       splash.remove();
-    }, fadeDelay + 300);
+    }, fadeDelay + 340);
 
     return () => {
       window.clearTimeout(timer1);

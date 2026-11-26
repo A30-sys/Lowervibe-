@@ -77,6 +77,70 @@ function pickFirstValidArtworkCandidate(candidates) {
   return null;
 }
 
+function formatTrackShareTitle(trackTitle, artistName) {
+  const safeTrack = String(trackTitle || 'Track').replace(/\s+/g, ' ').trim();
+  const safeArtist = String(artistName || 'Independent Artist').replace(/\s+/g, ' ').trim();
+  const full = `${safeTrack} by ${safeArtist} – LOWERVIBE`;
+  if (full.length <= 70) return full;
+
+  const trimmedTrack = safeTrack.length > 28 ? `${safeTrack.slice(0, 27).trim()}…` : safeTrack;
+  const trimmedArtist = safeArtist.length > 22 ? `${safeArtist.slice(0, 21).trim()}…` : safeArtist;
+  return `${trimmedTrack} by ${trimmedArtist} – LOWERVIBE`;
+}
+
+async function readTopChartTrackForShare() {
+  const snap = await db.collection('tracks').limit(150).get();
+  const tracks = [];
+  snap.forEach((docSnap) => {
+    const data = docSnap.data() || {};
+    if (!data.isDraft && !data.isDeranked) {
+      tracks.push({ id: docSnap.id, ...data });
+    }
+  });
+  tracks.sort((a, b) => Number(b.plays || 0) - Number(a.plays || 0));
+  const topTrack = tracks[0] || null;
+  let artist = null;
+  if (topTrack && topTrack.artistId) {
+    const artistSnap = await db.collection('artists').doc(String(topTrack.artistId)).get();
+    if (artistSnap.exists) artist = artistSnap.data() || null;
+  }
+  return { topTrack, artist, totalCount: tracks.length };
+}
+
+async function readMediaAssetBuffer(assetId) {
+  const assetSnap = await db.collection('mediaAssets').doc(assetId).get();
+  if (!assetSnap.exists) return null;
+  const asset = assetSnap.data() || {};
+  const contentType = String(asset.contentType || '');
+  if (!contentType.startsWith('image/')) return null;
+
+  if (asset.dataBase64) {
+    return { contentType, buffer: Buffer.from(asset.dataBase64, 'base64') };
+  }
+
+  const chunkCount = Number(asset.chunkCount || 0);
+  if (chunkCount > 0) {
+    const chunkIndices = Array.from({ length: chunkCount }, (_, i) => i);
+    const parts = await Promise.all(
+      chunkIndices.map(async (idx) => {
+        const chunkSnap = await db
+          .collection('mediaAssets')
+          .doc(assetId)
+          .collection('chunks')
+          .doc(String(idx))
+          .get();
+        if (!chunkSnap.exists) return null;
+        const b64 = chunkSnap.data()?.dataBase64;
+        return typeof b64 === 'string' && b64.length > 0 ? Buffer.from(b64, 'base64') : null;
+      })
+    );
+    if (parts.some((p) => !p)) return null;
+    return { contentType, buffer: Buffer.concat(parts) };
+  }
+
+  return null;
+}
+
 /**
  * 1. onPlayCreate: Validates >= 30s listen, enforces 30-min deduplication per (userId, trackId, windowKey),
  *    skips artist self-plays for payouts, and credits MWK ONLY if artist.monetizationStatus === 'approved'.
@@ -237,13 +301,14 @@ exports.onReportCreate = onDocumentCreated(
 );
 
 /**
- * 5. ogCover: Binary cover artwork responder for social share crawlers (/og/track/:id/cover & /og/artist/:slug/cover)
+ * 5. ogCover: Binary cover artwork responder for social share crawlers (/og/track/:id/cover, /og/artist/:slug/cover, /og/charts/cover)
  */
 exports.ogCover = onRequest({ cors: true }, async (req, res) => {
   try {
     const reqPath = String(req.path || '/').replace(/\/+$/, '');
     const trackMatch = reqPath.match(/^\/(?:api\/)?og\/track\/([^/]+)\/cover$/);
     const artistMatch = reqPath.match(/^\/(?:api\/)?og\/artist\/([^/]+)\/cover$/);
+    const chartsMatch = /^\/(?:api\/)?og\/charts\/cover$/.test(reqPath);
 
     const candidates = [];
     if (trackMatch) {
@@ -273,6 +338,11 @@ exports.ogCover = onRequest({ cors: true }, async (req, res) => {
         const artist = artistSnap.data() || {};
         candidates.push(artist.avatar, artist.banner);
       }
+    } else if (chartsMatch) {
+      const { topTrack, artist } = await readTopChartTrackForShare();
+      if (topTrack) {
+        candidates.push(topTrack.coverArt, artist?.avatar, topTrack.artistAvatar, artist?.banner);
+      }
     }
 
     const raw = pickFirstValidArtworkCandidate(candidates);
@@ -291,19 +361,14 @@ exports.ogCover = onRequest({ cors: true }, async (req, res) => {
 
       const mediaMatch = /\/api\/media\/([a-zA-Z0-9_-]{4,128})(?:\?.*)?$/.exec(raw);
       if (mediaMatch) {
-        const assetId = mediaMatch[1];
-        const assetSnap = await db.collection('mediaAssets').doc(assetId).get();
-        if (assetSnap.exists) {
-          const asset = assetSnap.data() || {};
-          if (asset.dataBase64 && String(asset.contentType || '').startsWith('image/')) {
-            const buffer = Buffer.from(asset.dataBase64, 'base64');
-            res.status(200).set({
-              'Content-Type': asset.contentType,
-              'Content-Length': String(buffer.length),
-              'Cache-Control': 'public, max-age=86400, immutable',
-            }).send(buffer);
-            return;
-          }
+        const media = await readMediaAssetBuffer(mediaMatch[1]);
+        if (media && media.buffer.length > 0) {
+          res.status(200).set({
+            'Content-Type': media.contentType,
+            'Content-Length': String(media.buffer.length),
+            'Cache-Control': 'public, max-age=86400, immutable',
+          }).send(media.buffer);
+          return;
         }
       }
 
@@ -323,16 +388,18 @@ exports.ogCover = onRequest({ cors: true }, async (req, res) => {
 });
 
 /**
- * 6. shareMeta: OpenGraph metadata HTML responder for social crawlers (/s/:id, /tracks/:id, /a/:slug, /artists/:slug)
+ * 6. shareMeta: OpenGraph metadata HTML responder for social crawlers (/s/:id, /tracks/:id, /a/:slug, /artists/:slug, /charts)
  */
 exports.shareMeta = onRequest({ cors: true }, async (req, res) => {
-  const reqPath = String(req.path || '/');
+  const reqPath = String(req.path || '/').replace(/\/+$/, '') || '/';
   const trackMatch = reqPath.match(/^\/(?:s|song|tracks)\/([^/?#]+)/);
   const artistMatch = reqPath.match(/^\/(?:a|artist|artists)\/([^/?#]+)/);
+  const chartsMatch = /^\/(?:charts|trending|promo)$/.test(reqPath);
 
   let title = 'LOWERVIBE — African Independent Music Streaming';
   let description = 'Stream independent African music from Malawi and beyond on LOWERVIBE.';
   let image = DEFAULT_FALLBACK_IMAGE;
+  let imageAlt = 'LOWERVIBE';
   let canonicalUrl = `${PUBLIC_SITE_ORIGIN}${reqPath}`;
   let ogType = 'website';
 
@@ -349,10 +416,11 @@ exports.shareMeta = onRequest({ cors: true }, async (req, res) => {
           const artist = artistSnap?.exists ? artistSnap.data() : null;
           const safeTrack = String(track.title || 'Track').trim();
           const safeArtist = String(track.artistName || artist?.name || 'Independent Artist').trim();
-          title = `${safeTrack} by ${safeArtist} – LOWERVIBE`;
+          title = formatTrackShareTitle(safeTrack, safeArtist);
+          imageAlt = `${safeTrack} by ${safeArtist} cover artwork`;
           description = track.story
             ? String(track.story).slice(0, 160)
-            : `Stream "${safeTrack}" by ${safeArtist} on LOWERVIBE.`;
+            : `Stream "${safeTrack}" by ${safeArtist} (${track.genre || 'Independent Music'}) on LOWERVIBE.`;
           const rawImg = pickFirstValidArtworkCandidate([
             track.coverArt,
             artist?.avatar,
@@ -380,6 +448,7 @@ exports.shareMeta = onRequest({ cors: true }, async (req, res) => {
         const artist = artistSnap.data() || {};
         const safeName = String(artist.name || 'Independent Artist').trim();
         title = `${safeName} – Listen on LOWERVIBE`;
+        imageAlt = `${safeName} on LOWERVIBE`;
         description = artist.bio
           ? String(artist.bio).slice(0, 160)
           : `Listen to ${safeName} on LOWERVIBE. Stream songs and support independent African music.`;
@@ -392,6 +461,28 @@ exports.shareMeta = onRequest({ cors: true }, async (req, res) => {
           }
         }
         ogType = 'profile';
+      }
+    } else if (chartsMatch) {
+      canonicalUrl = `${PUBLIC_SITE_ORIGIN}/charts`;
+      const { topTrack, artist, totalCount } = await readTopChartTrackForShare();
+      if (topTrack) {
+        const safeTrack = String(topTrack.title || 'Top Track').trim();
+        const safeArtist = String(topTrack.artistName || artist?.name || 'Independent Artist').trim();
+        title = `Most Played & Trending Charts (#1: ${safeTrack} by ${safeArtist}) – LOWERVIBE`;
+        description = `Explore ${totalCount} tracks on LOWERVIBE Top Charts. #1 right now: "${safeTrack}" by ${safeArtist}. Stream free and share trending genres.`;
+        imageAlt = `#1 Charting: ${safeTrack} by ${safeArtist}`;
+        const rawImg = pickFirstValidArtworkCandidate([
+          topTrack.coverArt,
+          artist?.avatar,
+          topTrack.artistAvatar,
+          artist?.banner,
+        ]);
+        if (rawImg) {
+          image = `${PUBLIC_SITE_ORIGIN}/og/charts/cover`;
+        }
+      } else {
+        title = 'Most Played & Trending Charts – LOWERVIBE';
+        description = 'Explore and share the most played songs, trending chart velocity, and top genres across LOWERVIBE.';
       }
     }
   } catch {}
@@ -411,11 +502,13 @@ exports.shareMeta = onRequest({ cors: true }, async (req, res) => {
     <meta property="og:image:secure_url" content="${escapeHtmlAttr(image)}" />
     <meta property="og:image:width" content="512" />
     <meta property="og:image:height" content="512" />
+    <meta property="og:image:alt" content="${escapeHtmlAttr(imageAlt)}" />
     <meta property="og:url" content="${escapeHtmlAttr(canonicalUrl)}" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${escapeHtmlAttr(title)}" />
     <meta name="twitter:description" content="${escapeHtmlAttr(description)}" />
     <meta name="twitter:image" content="${escapeHtmlAttr(image)}" />
+    <meta name="twitter:image:alt" content="${escapeHtmlAttr(imageAlt)}" />
   </head>
   <body>
     <p>Opening <a href="${escapeHtmlAttr(canonicalUrl)}">${escapeHtmlAttr(title)}</a>…</p>

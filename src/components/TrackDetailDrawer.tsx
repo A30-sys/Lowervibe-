@@ -1,6 +1,7 @@
 import {
   ArrowRight,
   Check,
+  CheckCircle2,
   ChevronRight,
   Clock,
   Copy,
@@ -44,6 +45,13 @@ import {
   parseDurationInput,
 } from '../utils/formatters';
 import { translateGenreCategory } from '../utils/genreCategories';
+import {
+  formatLrcTimestamp,
+  getActiveLrcIndex,
+  parseLrc,
+  stripLrcTimestamps,
+} from '../utils/lrcParser';
+import { getTrackSubTags } from '../utils/tags';
 import { GenreSelectOrCustom } from './common/GenreSelectOrCustom';
 import { MoodSelectOrCustom } from './common/MoodSelectOrCustom';
 
@@ -79,6 +87,8 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
     setSleepTimer,
     cancelSleepTimer,
     upsertGenre,
+    savedTrackIds,
+    toggleSaveTrack,
   } = useAudio();
 
   const { currentUser, isAdmin, toggleLikeTrack } = useAuth();
@@ -112,6 +122,13 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
     setEditDuration(track ? formatTime(getTrackDurationSeconds(track)) : '');
   }, [track?.id, track?.title, track?.genre, track?.mood, track?.story, track?.durationSeconds, track?.metadata?.Duration]);
 
+  const isCurrentTrackSelected = Boolean(track && currentTrack?.id === track.id);
+  const parsedTrackLyrics = React.useMemo(() => parseLrc(track?.lyrics), [track?.lyrics]);
+  const activeTrackLyricIdx = React.useMemo(() => {
+    if (!isCurrentTrackSelected || !parsedTrackLyrics.isSynced) return -1;
+    return getActiveLrcIndex(parsedTrackLyrics.lines, currentTime, 0.15);
+  }, [isCurrentTrackSelected, parsedTrackLyrics, currentTime]);
+
   if (!track) return null;
 
   const artist = artists.find((a) => a.id === track.artistId);
@@ -135,7 +152,6 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
   );
 
   const isCurrentTrackPlaying = currentTrack?.id === track.id && isPlaying;
-  const isCurrentTrackSelected = currentTrack?.id === track.id;
   const isLiked = isTrackLikedByUser(track, currentUser);
   const likeCount = getTrackLikeCount(track);
   const trackDurationSec = getTrackDurationSeconds(track);
@@ -209,7 +225,8 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
 
   const handleCopyLyrics = () => {
     if (!track.lyrics) return;
-    navigator.clipboard.writeText(track.lyrics);
+    const cleanText = stripLrcTimestamps(track.lyrics) || track.lyrics;
+    navigator.clipboard.writeText(cleanText);
     setCopiedLyrics(true);
     setTimeout(() => setCopiedLyrics(false), 2000);
   };
@@ -393,7 +410,7 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
                 <button
                   type="button"
                   onClick={() => toggleLikeTrack(track.id)}
-                  className={`flex items-center gap-1 text-xs transition cursor-pointer ${
+                  className={`flex items-center gap-1 text-xs transition cursor-pointer min-h-[36px] ${
                     isLiked ? 'text-rose-500' : 'text-[var(--text-muted)] hover:text-[var(--text)]'
                   }`}
                 >
@@ -401,10 +418,27 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
                   <span className="font-mono tabular-nums">{likeCount}</span>
                 </button>
 
+                {(() => {
+                  const isSaved = (savedTrackIds || []).includes(track.id);
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => toggleSaveTrack(track.id)}
+                      aria-pressed={isSaved}
+                      className={`flex items-center gap-1 text-xs transition cursor-pointer min-h-[36px] ${
+                        isSaved ? 'text-[var(--accent-text)] font-semibold' : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+                      }`}
+                    >
+                      <CheckCircle2 className={`w-3.5 h-3.5 ${isSaved ? 'fill-[var(--accent)]/20' : ''}`} />
+                      <span>{isSaved ? (isNy ? 'Zasungidwa' : 'Saved') : t('save', 'Save')}</span>
+                    </button>
+                  );
+                })()}
+
                 <button
                   type="button"
                   onClick={() => setActiveShareTrack(track)}
-                  className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text)] transition cursor-pointer"
+                  className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text)] transition cursor-pointer min-h-[36px]"
                 >
                   <Share2 className="w-3.5 h-3.5" />
                   <span>{t('share', 'Share')}</span>
@@ -583,9 +617,16 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
                       <span className="text-xs font-bold text-[var(--text)]">
                         {t('story_behind_song', 'About this song')}
                       </span>
-                      <span className="text-[11px] font-mono text-[var(--text-muted)]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigate(`/discover?genre=${encodeURIComponent(track.genre)}`);
+                          onClose();
+                        }}
+                        className="text-[11px] font-mono text-[var(--text-muted)] hover:text-[var(--accent-text)] hover:underline cursor-pointer"
+                      >
                         {translateGenreCategory(track.genre, language)}
-                      </span>
+                      </button>
                     </div>
                     <p className="text-xs text-[var(--text-dim)] leading-relaxed">{track.story}</p>
                   </div>
@@ -699,7 +740,11 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
                       </h4>
                     </div>
                     <span className="text-[11px] font-mono text-[var(--text-muted)]">
-                      {track.lyrics
+                      {parsedTrackLyrics.isSynced
+                        ? isNy
+                          ? 'Mawu ogwirizana'
+                          : 'Synced LRC'
+                        : parsedTrackLyrics.hasLyrics
                         ? isNy
                           ? 'Alipo'
                           : 'Available'
@@ -709,26 +754,22 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
                     </span>
                   </div>
 
-                  {track.lyrics ? (
+                  {parsedTrackLyrics.hasLyrics ? (
                     <div className="space-y-3">
                       <div className="relative p-3.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] overflow-hidden">
                         <Quote className="w-5 h-5 text-[var(--text-muted)]/30 absolute top-2 right-2 pointer-events-none" />
                         <div className="text-xs text-[var(--text-dim)] space-y-1 max-h-24 overflow-hidden">
-                          {track.lyrics
-                            .split('\n')
-                            .filter((l) => l.trim() && !l.startsWith('['))
-                            .slice(0, 4)
-                            .map((line, idx) => (
-                              <p key={idx} className="truncate">
-                                {line}
-                              </p>
-                            ))}
+                          {parsedTrackLyrics.plainLines.slice(0, 4).map((line, idx) => (
+                            <p key={idx} className="truncate">
+                              {line}
+                            </p>
+                          ))}
                         </div>
                       </div>
                       <button
                         type="button"
                         onClick={() => setActiveTab('lyrics')}
-                        className="w-full py-2.5 px-3 rounded-xl bg-[var(--surface)] hover:bg-[var(--bg)] border border-[var(--border-strong)] text-[var(--text)] text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        className="w-full py-2.5 px-3 rounded-xl bg-[var(--surface)] hover:bg-[var(--bg)] border border-[var(--border-strong)] text-[var(--text)] text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer min-h-[44px]"
                       >
                         <Mic2 className="w-3.5 h-3.5" />
                         <span>{isNy ? 'Werengani mawu onse' : 'Read full lyrics'}</span>
@@ -804,9 +845,16 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
                       <div className="text-[11px] text-[var(--text-muted)]">
                         {isNy ? 'Mtundu' : 'Genre'}
                       </div>
-                      <div className="text-xs font-bold text-[var(--text)] mt-0.5 truncate">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigate(`/discover?genre=${encodeURIComponent(track.genre)}`);
+                          onClose();
+                        }}
+                        className="text-xs font-bold text-[var(--text)] hover:text-[var(--accent-text)] hover:underline mt-0.5 truncate block max-w-full text-left cursor-pointer"
+                      >
                         {translateGenreCategory(track.genre, language)}
-                      </div>
+                      </button>
                     </div>
 
                     <div className="p-2.5 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
@@ -817,6 +865,45 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
                         {track.releaseDate || (isNy ? 'Sinatchulidwe' : 'Not specified')}
                       </div>
                     </div>
+
+                    {(track.region || getTrackSubTags(track).length > 0) && (
+                      <div className="p-2.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] col-span-2 space-y-2">
+                        {track.region && (
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] text-[var(--text-muted)]">
+                              {isNy ? 'Dziko' : 'Region'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigate(`/discover?region=${encodeURIComponent(track.region!)}`);
+                                onClose();
+                              }}
+                              className="text-xs font-semibold text-[var(--accent-text)] hover:underline cursor-pointer"
+                            >
+                              {track.region}
+                            </button>
+                          </div>
+                        )}
+                        {getTrackSubTags(track).length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {getTrackSubTags(track).map((tagLabel) => (
+                              <button
+                                key={tagLabel}
+                                type="button"
+                                onClick={() => {
+                                  navigate(`/search?tag=${encodeURIComponent(tagLabel)}`);
+                                  onClose();
+                                }}
+                                className="px-2.5 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--accent)] text-[10.5px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] transition cursor-pointer"
+                              >
+                                #{tagLabel}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div className="p-2.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] col-span-2 flex items-center justify-between">
                       <span className="text-[11px] text-[var(--text-muted)]">
@@ -982,13 +1069,15 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
               >
                 <div className="flex items-center justify-between p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
                   <span className="text-xs font-semibold text-[var(--text)]">
-                    {track.lyrics
+                    {parsedTrackLyrics.isSynced
+                      ? t('synced_lyrics', 'Synced Lyrics')
+                      : parsedTrackLyrics.hasLyrics
                       ? t('lyrics', 'Lyrics')
                       : isNy
                       ? 'Zida zokha'
                       : 'Instrumental'}
                   </span>
-                  {track.lyrics && (
+                  {parsedTrackLyrics.hasLyrics && (
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
@@ -1023,32 +1112,56 @@ export const TrackDetailDrawer: React.FC<TrackDetailDrawerProps> = ({ track, onC
                   )}
                 </div>
 
-                {track.lyrics ? (
-                  <div className="p-5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] space-y-2 select-text">
-                    {track.lyrics.split('\n').map((line, idx) => {
-                      const trimmed = line.trim();
-                      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+                {parsedTrackLyrics.hasLyrics ? (
+                  parsedTrackLyrics.isSynced ? (
+                    <div className="p-3 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] space-y-1.5">
+                      {parsedTrackLyrics.lines.map((line, idx) => {
+                        const isActiveLine = idx === activeTrackLyricIdx;
                         return (
-                          <div key={idx} className="pt-3 pb-1">
-                            <span className="inline-block px-2 py-0.5 rounded text-[11px] font-mono font-bold uppercase bg-[var(--surface)] text-[var(--violet)] border border-[var(--border)]">
-                              {trimmed.slice(1, -1)}
+                          <button
+                            key={`${idx}-${line.timeSeconds}`}
+                            type="button"
+                            onClick={() => {
+                              if (currentTrack?.id !== track.id) {
+                                playTrack(track, { startAtSeconds: line.timeSeconds });
+                              } else {
+                                seekTo(line.timeSeconds);
+                              }
+                            }}
+                            className={`w-full flex items-baseline justify-between gap-3 px-3 py-2 rounded-xl text-left transition cursor-pointer min-h-[44px] ${
+                              isActiveLine
+                                ? 'bg-[var(--accent)]/15 text-[var(--accent-text)] font-bold'
+                                : 'hover:bg-[var(--surface)] text-[var(--text)]'
+                            }`}
+                          >
+                            <span
+                              className={`leading-relaxed flex-1 ${
+                                lyricsFontSize === 'large' ? 'text-base' : 'text-sm'
+                              }`}
+                            >
+                              {line.text}
                             </span>
-                          </div>
+                            <span className="text-[11px] font-mono tabular-nums text-[var(--text-muted)] shrink-0">
+                              {formatLrcTimestamp(line.timeSeconds)}
+                            </span>
+                          </button>
                         );
-                      }
-                      if (!trimmed) return <div key={idx} className="h-2" />;
-                      return (
+                      })}
+                    </div>
+                  ) : (
+                    <div className="p-5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] space-y-2 select-text">
+                      {parsedTrackLyrics.plainLines.map((line, idx) => (
                         <p
                           key={idx}
                           className={`leading-relaxed text-[var(--text)] ${
                             lyricsFontSize === 'large' ? 'text-base font-medium' : 'text-sm'
                           }`}
                         >
-                          {trimmed}
+                          {line}
                         </p>
-                      );
-                    })}
-                  </div>
+                      ))}
+                    </div>
+                  )
                 ) : (
                   <div className="py-12 px-6 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-center space-y-3">
                     <Mic2 className="w-8 h-8 text-[var(--text-muted)] mx-auto" />

@@ -1,15 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Clock,
-  Disc3,
-  Heart,
-  ListMusic,
-  Music,
   Pause,
   Play,
   Search,
+  Tag,
   Trash2,
-  UserCheck,
+  Trophy,
   X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -20,6 +17,13 @@ import { Artist, Playlist, Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../../utils/artworkFallback';
 import { formatTime } from '../../utils/formatters';
 import { normalizeGenreCategory, translateGenreCategory } from '../../utils/genreCategories';
+import {
+  artistMatchesTag,
+  extractCatalogTags,
+  getTrackSubTags,
+  normalizeTagLabel,
+  trackMatchesTag,
+} from '../../utils/tags';
 
 const RECENT_SEARCHES_KEY = 'lowervibe_recent_searches_v1';
 
@@ -83,13 +87,15 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
     togglePlayPause,
     setActiveDetailTrack,
   } = useAudio();
-  const { currentRoute, navigate } = useRouter();
+  const { currentRoute, navigate, searchParams } = useRouter();
   const { language, t } = useLanguage();
   const isNy = language === 'ny';
 
+  const urlTag = (searchParams.get('tag') || searchParams.get('mood') || '').trim();
   const initialQuery = currentRoute.searchQuery || '';
   const [rawQuery, setRawQuery] = useState(initialQuery);
   const [debouncedQuery, setDebouncedQuery] = useState(initialQuery);
+  const [selectedTag, setSelectedTag] = useState(urlTag);
   const [activeCategory, setActiveCategory] = useState<'all' | 'tracks' | 'artists' | 'playlists' | 'genres'>('all');
 
   const [recentSearches, setRecentSearches] = useState<string[]>(() => {
@@ -104,14 +110,15 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
     return [];
   });
 
-  // Sync external URL query parameter
+  // Sync external URL query & tag parameters
   useEffect(() => {
     const q = currentRoute.searchQuery || '';
     if (q !== rawQuery) {
       setRawQuery(q);
       setDebouncedQuery(q);
     }
-  }, [currentRoute.searchQuery]);
+    setSelectedTag(urlTag);
+  }, [currentRoute.searchQuery, urlTag]);
 
   // 300ms Debounce
   useEffect(() => {
@@ -147,12 +154,40 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     saveSearchTerm(rawQuery);
-    navigate(`/search?q=${encodeURIComponent(rawQuery.trim())}`);
+    const params = new URLSearchParams();
+    if (rawQuery.trim()) params.set('q', rawQuery.trim());
+    if (selectedTag.trim()) params.set('tag', selectedTag.trim());
+    const qs = params.toString();
+    navigate(`/search${qs ? `?${qs}` : ''}`);
   };
+
+  const applyTagFilter = (tag: string) => {
+    const normalized = normalizeTagLabel(tag);
+    const nextTag = selectedTag.toLowerCase() === normalized.toLowerCase() ? '' : normalized;
+    setSelectedTag(nextTag);
+    const params = new URLSearchParams();
+    if (rawQuery.trim()) params.set('q', rawQuery.trim());
+    if (nextTag) params.set('tag', nextTag);
+    const qs = params.toString();
+    navigate(`/search${qs ? `?${qs}` : ''}`);
+  };
+
+  const artistLookup = useMemo(() => {
+    const map = new Map<string, Artist>();
+    artists.forEach((a) => {
+      map.set(a.id, a);
+    });
+    return map;
+  }, [artists]);
 
   const publicTracks = useMemo(
     () => tracks.filter((t) => !t.isDraft && !t.isDeranked),
     [tracks]
+  );
+
+  const catalogTags = useMemo(
+    () => extractCatalogTags(publicTracks, artists),
+    [publicTracks, artists]
   );
 
   const trendingGenres = useMemo(() => {
@@ -169,9 +204,12 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
       .slice(0, 8);
   }, [publicTracks]);
 
+  const isFiltering = Boolean(debouncedQuery.trim() || selectedTag.trim());
+
   const { matchedTracks, matchedArtists, matchedPlaylists, matchedGenres, topResult } = useMemo(() => {
     const q = debouncedQuery.trim();
-    if (!q) {
+    const activeTag = selectedTag.trim();
+    if (!q && !activeTag) {
       return {
         matchedTracks: [] as Track[],
         matchedArtists: [] as Artist[],
@@ -185,44 +223,84 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
       };
     }
 
-    const scoredTracks = publicTracks
-      .map((t) => ({
-        item: t,
-        score: Math.max(
-          fuzzyScore(q, t.title),
-          fuzzyScore(q, t.artistName) * 0.9,
-          fuzzyScore(q, t.genre) * 0.7,
-          fuzzyScore(q, normalizeGenreCategory(t.genre)) * 0.7,
-          fuzzyScore(q, translateGenreCategory(t.genre, language)) * 0.7
-        ),
-      }))
+    const baseTracks = activeTag
+      ? publicTracks.filter((tr) => trackMatchesTag(tr, activeTag))
+      : publicTracks;
+
+    const scoredTracks = baseTracks
+      .map((t) => {
+        if (!q) {
+          return { item: t, score: 80 };
+        }
+        const vibeJoined = Array.isArray(t.vibeTags) ? t.vibeTags.join(' ') : '';
+        return {
+          item: t,
+          score: Math.max(
+            fuzzyScore(q, t.title),
+            fuzzyScore(q, t.artistName) * 0.9,
+            fuzzyScore(q, t.genre) * 0.75,
+            fuzzyScore(q, normalizeGenreCategory(t.genre)) * 0.75,
+            fuzzyScore(q, translateGenreCategory(t.genre, language)) * 0.75,
+            fuzzyScore(q, t.mood || '') * 0.8,
+            fuzzyScore(q, vibeJoined) * 0.8,
+            fuzzyScore(q, t.region || '') * 0.7
+          ),
+        };
+      })
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score || (b.item.plays || 0) - (a.item.plays || 0));
 
-    const scoredArtists = artists
+    const tracksByArtist = new Map<string, Track[]>();
+    publicTracks.forEach((tr) => {
+      const list = tracksByArtist.get(tr.artistId) || [];
+      list.push(tr);
+      tracksByArtist.set(tr.artistId, list);
+    });
+
+    const baseArtists = activeTag
+      ? artists.filter((a) => artistMatchesTag(a, tracksByArtist.get(a.id) || [], activeTag))
+      : artists;
+
+    const scoredArtists = baseArtists
       .map((a) => ({
         item: a,
-        score: Math.max(
-          fuzzyScore(q, a.name),
-          fuzzyScore(q, a.handle),
-          fuzzyScore(q, (a.genres || []).join(' ')) * 0.7
-        ),
+        score: q
+          ? Math.max(
+              fuzzyScore(q, a.name),
+              fuzzyScore(q, a.handle),
+              fuzzyScore(q, (a.genres || []).join(' ')) * 0.75,
+              fuzzyScore(q, [a.city, a.country, a.location].filter(Boolean).join(' ')) * 0.7
+            )
+          : 75,
       }))
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score || (b.item.followersCount || 0) - (a.item.followersCount || 0));
 
     const allPlaylists = playlists.filter((p) => p.isPublic);
     const scoredPlaylists = allPlaylists
+      .filter((p) =>
+        activeTag
+          ? fuzzyScore(activeTag, `${p.name} ${p.genre || ''}`) > 0 ||
+            (p.trackIds || []).some((tid) => {
+              const found = publicTracks.find((tr) => tr.id === tid);
+              return found ? trackMatchesTag(found, activeTag) : false;
+            })
+          : true
+      )
       .map((p) => ({
         item: p,
-        score: Math.max(fuzzyScore(q, p.name), fuzzyScore(q, p.genre || '') * 0.8),
+        score: q ? Math.max(fuzzyScore(q, p.name), fuzzyScore(q, p.genre || '') * 0.8) : 70,
       }))
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score);
 
-    const scoredGenres = trendingGenres.filter(
-      (g) => fuzzyScore(q, g.name) > 0 || fuzzyScore(q, translateGenreCategory(g.name, language)) > 0
-    );
+    const scoredGenres = trendingGenres.filter((g) => {
+      if (activeTag && normalizeTagLabel(g.name).toLowerCase() === normalizeTagLabel(activeTag).toLowerCase()) {
+        return true;
+      }
+      if (!q) return false;
+      return fuzzyScore(q, g.name) > 0 || fuzzyScore(q, translateGenreCategory(g.name, language)) > 0;
+    });
 
     const bestArtist = scoredArtists[0];
     const bestTrack = scoredTracks[0];
@@ -249,7 +327,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
       matchedGenres: scoredGenres,
       topResult: best,
     };
-  }, [debouncedQuery, publicTracks, artists, playlists, trendingGenres, language]);
+  }, [debouncedQuery, selectedTag, publicTracks, artists, playlists, trendingGenres, language]);
 
   const totalMatches =
     matchedTracks.length + matchedArtists.length + matchedPlaylists.length + matchedGenres.length;
@@ -266,15 +344,16 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
           placeholder={t('search_placeholder', 'Search songs, artists, playlists, or genres...')}
           className="w-full pl-12 pr-24 py-3.5 rounded-2xl bg-[var(--surface)] border border-[var(--border)] text-sm text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-text)]"
         />
-        {rawQuery && (
+        {(rawQuery || selectedTag) && (
           <button
             type="button"
             onClick={() => {
               setRawQuery('');
               setDebouncedQuery('');
+              setSelectedTag('');
               navigate('/search');
             }}
-            className="absolute right-16 top-1/2 -translate-y-1/2 p-1.5 text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
+            className="absolute right-20 top-1/2 -translate-y-1/2 p-1.5 text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -287,6 +366,28 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
         </button>
       </form>
 
+      {/* Active Tag Filter Banner + Quick Charts Link */}
+      {selectedTag && (
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 rounded-2xl bg-[var(--surface)] border border-[var(--accent)]/50">
+          <div className="flex items-center gap-2 text-xs">
+            <Tag className="w-4 h-4 text-[var(--accent-text)] shrink-0" />
+            <span className="text-[var(--text-muted)]">
+              {isNy ? 'Mukuyang\'ana tag:' : 'Filtering by tag:'}
+            </span>
+            <span className="font-bold text-[var(--accent-text)]">#{selectedTag}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => applyTagFilter(selectedTag)}
+              className="px-3 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] hover:border-[var(--danger)] hover:text-[var(--danger)] cursor-pointer"
+            >
+              {isNy ? 'Chotsani' : 'Clear tag'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Instant Live Suggestions when typing */}
       {rawQuery.trim().length >= 2 && (
         <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
@@ -297,7 +398,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
             new Set([
               ...matchedArtists.slice(0, 3).map((a) => a.name),
               ...matchedTracks.slice(0, 3).map((tr) => tr.title),
-              ...trendingGenres.slice(0, 3).map((g) => g.name),
+              ...catalogTags.slice(0, 4).map((tg) => tg.tag),
             ])
           )
             .slice(0, 6)
@@ -318,8 +419,8 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
         </div>
       )}
 
-      {/* EMPTY QUERY STATE: Recent Searches + Trending Genres */}
-      {!debouncedQuery.trim() ? (
+      {/* EMPTY QUERY STATE: Recent Searches + Sub-Genres & Mood Tags + Trending Genres */}
+      {!isFiltering ? (
         <div className="space-y-6">
           {recentSearches.length > 0 && (
             <section className="space-y-3">
@@ -356,6 +457,44 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
             </section>
           )}
 
+          {catalogTags.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-sm font-bold text-[var(--text)] flex items-center gap-2">
+                  <Tag className="w-4 h-4 text-[var(--accent-text)]" />
+                  <span>{isNy ? 'Fufuzani ndi Mitundu & Ma Tag' : 'Sub-Genres & Mood Tags'}</span>
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => navigate('/charts?tab=genres')}
+                  className="inline-flex items-center gap-1 text-xs font-bold text-[var(--accent-text)] hover:underline cursor-pointer"
+                >
+                  <Trophy className="w-3.5 h-3.5" />
+                  <span>{isNy ? 'Tchati & Promo' : 'View Charts & Promo'}</span>
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {catalogTags.slice(0, 20).map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => applyTagFilter(item.tag)}
+                    className="px-3.5 py-1.5 rounded-full bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--accent)] hover:text-[var(--accent-text)] text-xs font-semibold text-[var(--text)] transition cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5"
+                  >
+                    <span>
+                      {item.kind === 'genre'
+                        ? translateGenreCategory(item.tag, language)
+                        : `#${item.tag}`}
+                    </span>
+                    <span className="text-[10px] font-mono text-[var(--text-muted)]">
+                      {item.count || item.artistCount}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
           <section className="space-y-3">
             <h2 className="text-sm font-bold text-[var(--text)]">
               {isNy ? 'Mitundu yotchuka' : 'Trending genres'}
@@ -370,11 +509,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                   <button
                     key={g.name}
                     type="button"
-                    onClick={() => {
-                      setRawQuery(g.name);
-                      setDebouncedQuery(g.name);
-                      saveSearchTerm(g.name);
-                    }}
+                    onClick={() => applyTagFilter(g.name)}
                     className="p-4 rounded-2xl bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-strong)] text-left transition cursor-pointer space-y-1"
                   >
                     <div className="text-sm font-bold text-[var(--text)] truncate">
@@ -394,6 +529,34 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
       ) : (
         /* SEARCH RESULTS */
         <div className="space-y-6">
+          {/* Quick interactive tag switcher strip inside results */}
+          {catalogTags.length > 0 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+              <span className="text-[11px] font-bold text-[var(--text-muted)] shrink-0 mr-1">
+                {isNy ? 'Ma Tag:' : 'Tags:'}
+              </span>
+              {catalogTags.slice(0, 12).map((item) => {
+                const isActive = selectedTag.toLowerCase() === item.key;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => applyTagFilter(item.tag)}
+                    className={`px-3 py-1 rounded-full text-[11px] font-semibold whitespace-nowrap cursor-pointer transition ${
+                      isActive
+                        ? 'bg-[var(--accent)] text-[var(--accent-contrast)] font-bold'
+                        : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--accent)]'
+                    }`}
+                  >
+                    {item.kind === 'genre'
+                      ? translateGenreCategory(item.tag, language)
+                      : `#${item.tag}`}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {/* Category Filter Chips */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
             {[
@@ -427,8 +590,8 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                 </h2>
                 <p className="text-xs text-[var(--text-muted)] max-w-md mx-auto">
                   {isNy
-                    ? `Sitinapeze "${debouncedQuery}". Yesani mitundu, oimba, kapena nyimbo zomwe zilipo pansipa.`
-                    : `We could not find "${debouncedQuery}". Explore available genres, artists, or songs below.`}
+                    ? `Sitinapeze "${debouncedQuery || selectedTag}". Yesani mitundu, oimba, kapena nyimbo zomwe zilipo pansipa.`
+                    : `We could not find "${debouncedQuery || selectedTag}". Explore available genres, artists, or songs below.`}
                 </p>
               </div>
 
@@ -442,10 +605,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                       <button
                         key={g.name}
                         type="button"
-                        onClick={() => {
-                          setRawQuery(g.name);
-                          setDebouncedQuery(g.name);
-                        }}
+                        onClick={() => applyTagFilter(g.name)}
                         className="px-3.5 py-2 rounded-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--accent)] text-xs font-semibold text-[var(--text)] cursor-pointer"
                       >
                         {translateGenreCategory(g.name, language)} ({g.count})
@@ -522,7 +682,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                     <div
                       onClick={() => {
                         saveSearchTerm(debouncedQuery);
-                        navigate(`/artists/${topResult.item.id}`);
+                        navigate(`/artists/${encodeURIComponent(topResult.item.slug || topResult.item.id)}`);
                       }}
                       className="p-5 rounded-[22px] bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-strong)] flex items-center justify-between gap-4 cursor-pointer transition"
                     >
@@ -538,7 +698,8 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                             {topResult.item.name}
                           </div>
                           <div className="text-xs text-[var(--text-muted)]">
-                            {t('artist', 'Artist')} · {topResult.item.country || 'Malawi'} ·{' '}
+                            {t('artist', 'Artist')}
+                            {topResult.item.country ? ` · ${topResult.item.country}` : ''} ·{' '}
                             {topResult.item.followersCount || 0} {isNy ? 'otsatira' : 'followers'}
                           </div>
                         </div>
@@ -563,13 +724,42 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                           referrerPolicy="no-referrer"
                           className="w-16 h-16 rounded-2xl object-cover border border-[var(--border)] shrink-0"
                         />
-                        <div className="min-w-0">
-                          <div className="text-base font-extrabold text-[var(--text)] truncate">
+                        <div className="min-w-0 space-y-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/tracks/${encodeURIComponent(topResult.item.id)}`);
+                            }}
+                            className="text-base font-extrabold text-[var(--text)] hover:text-[var(--accent-text)] truncate block max-w-full text-left cursor-pointer"
+                          >
                             {topResult.item.title}
-                          </div>
-                          <div className="text-xs text-[var(--text-muted)]">
-                            {isNy ? 'Nyimbo' : 'Song'} · {topResult.item.artistName} ·{' '}
-                            {translateGenreCategory(topResult.item.genre, language)}
+                          </button>
+                          <div className="text-xs text-[var(--text-muted)] flex items-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const linked = artistLookup.get(topResult.item.artistId);
+                                navigate(
+                                  `/artists/${encodeURIComponent(linked?.slug || topResult.item.artistId)}`
+                                );
+                              }}
+                              className="hover:text-[var(--text)] font-medium cursor-pointer"
+                            >
+                              {topResult.item.artistName}
+                            </button>
+                            <span>·</span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                applyTagFilter(topResult.item.genre);
+                              }}
+                              className="hover:text-[var(--accent-text)] cursor-pointer"
+                            >
+                              {translateGenreCategory(topResult.item.genre, language)}
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -629,8 +819,9 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                 <section className="space-y-2.5">
                   <h2 className="text-sm font-bold text-[var(--text)]">{t('artist_songs', 'Songs')}</h2>
                   <div className="rounded-[20px] bg-[var(--surface)] border border-[var(--border)] divide-y divide-[var(--border)] overflow-hidden">
-                    {matchedTracks.slice(0, activeCategory === 'tracks' ? 30 : 6).map((tItem) => {
+                    {matchedTracks.slice(0, activeCategory === 'tracks' ? 30 : 8).map((tItem) => {
                       const active = currentTrack?.id === tItem.id;
+                      const subTags = getTrackSubTags(tItem);
                       return (
                         <div
                           key={tItem.id}
@@ -648,10 +839,55 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                               referrerPolicy="no-referrer"
                               className="w-11 h-11 rounded-xl object-cover shrink-0 border border-[var(--border)]"
                             />
-                            <div className="min-w-0">
-                              <div className="text-sm font-semibold text-[var(--text)] truncate">{tItem.title}</div>
-                              <div className="text-xs text-[var(--text-muted)] truncate">
-                                {tItem.artistName} · {translateGenreCategory(tItem.genre, language)}
+                            <div className="min-w-0 space-y-0.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/tracks/${encodeURIComponent(tItem.id)}`);
+                                }}
+                                className="text-sm font-semibold text-[var(--text)] hover:text-[var(--accent-text)] truncate block max-w-full text-left cursor-pointer"
+                              >
+                                {tItem.title}
+                              </button>
+                              <div className="text-xs text-[var(--text-muted)] flex items-center gap-1.5 flex-wrap">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const linked = artistLookup.get(tItem.artistId);
+                                    navigate(
+                                      `/artists/${encodeURIComponent(linked?.slug || tItem.artistId)}`
+                                    );
+                                  }}
+                                  className="hover:text-[var(--text)] cursor-pointer truncate max-w-[140px]"
+                                >
+                                  {tItem.artistName}
+                                </button>
+                                <span>·</span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    applyTagFilter(tItem.genre);
+                                  }}
+                                  className="hover:text-[var(--accent-text)] cursor-pointer"
+                                >
+                                  {translateGenreCategory(tItem.genre, language)}
+                                </button>
+                                {subTags.slice(0, 2).map((sub) => (
+                                  <button
+                                    key={sub}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      applyTagFilter(sub);
+                                    }}
+                                    className="px-2 py-0.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[10px] hover:border-[var(--accent)] hover:text-[var(--accent-text)] cursor-pointer"
+                                  >
+                                    #{sub}
+                                  </button>
+                                ))}
                               </div>
                             </div>
                           </div>
@@ -688,7 +924,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                         key={a.id}
                         onClick={() => {
                           saveSearchTerm(debouncedQuery);
-                          navigate(`/artists/${a.id}`);
+                          navigate(`/artists/${encodeURIComponent(a.slug || a.id)}`);
                         }}
                         className="p-4 rounded-2xl bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-strong)] text-center space-y-2.5 cursor-pointer transition"
                       >
@@ -701,7 +937,7 @@ export const SearchResultsView: React.FC<{ onOpenTrackDetails: (track: Track) =>
                         <div>
                           <div className="text-xs font-bold text-[var(--text)] truncate">{a.name}</div>
                           <div className="text-[11px] text-[var(--text-muted)] truncate">
-                            {a.country || t('artist', 'Artist')}
+                            {a.country || a.location || t('artist', 'Artist')}
                           </div>
                         </div>
                       </div>

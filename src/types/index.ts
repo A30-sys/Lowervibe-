@@ -2,6 +2,20 @@ export type UserRole = 'listener' | 'artist' | 'admin';
 export type VisualizerStyle = 'bars' | 'wave' | 'pulse';
 export type EqPreset = 'flat' | 'bass_boost' | 'vocal' | 'treble' | 'warm_tape' | 'studio_flat' | 'deep_sub' | 'air_clarity';
 export type ArtistApplicationStatus = 'none' | 'pending' | 'approved' | 'rejected';
+export type FullscreenPlayerTab = 'playing' | 'queue' | 'lyrics' | 'comments';
+
+export interface LrcLyricLine {
+  timeSeconds: number;
+  text: string;
+}
+
+export interface LrcLyricsMetadata {
+  title?: string;
+  artist?: string;
+  album?: string;
+  by?: string;
+  offsetMs?: number;
+}
 
 export interface ActiveSessionRecord {
   id: string;
@@ -429,6 +443,8 @@ export interface TrackMetadata {
   composer?: string;
   recordLabel?: string;
   checksum?: string;
+  /** Optional plain-text or LRC time-coded lyrics mirror when embedded in track metadata */
+  lyrics?: string;
   verifiedSource?: 'firebase_storage' | 'https_stream';
 }
 
@@ -482,6 +498,7 @@ export interface Track {
   isrcCode?: string;
   masteringNotes?: string;
   licenseType?: string;
+  /** Plain-text or synchronized LRC time-coded lyrics (e.g. "[00:12.40] Line text") */
   lyrics?: string;
   bitrate?: string;
   sampleRate?: string;

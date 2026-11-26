@@ -290,6 +290,11 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
   const desktopLinks = [
     { label: t('home', 'Home'), path: '/', active: currentRoute.route === 'home' },
     {
+      label: t('charts', language === 'ny' ? 'Tchati' : 'Charts'),
+      path: '/charts',
+      active: currentRoute.route === 'charts',
+    },
+    {
       label: t('search', 'Search'),
       path: '/search',
       active: currentRoute.route === 'search' || currentRoute.route === 'discover',
@@ -300,10 +305,9 @@ export const StickyHeader: React.FC<StickyHeaderProps> = ({
       path: '/artistcreator',
       active: currentRoute.route === 'studio',
     },
-    { label: t('profile', 'Profile'), path: '/account', active: currentRoute.route === 'account' },
   ];
 
-  const totalBadgeCount = unreadCount + (unreadCount === 0 && activePlatformBanners.length > 0 ? 0 : 0);
+  const totalBadgeCount = unreadCount;
 
   return (
     <header className="sticky top-0 z-40 w-full bg-[var(--bg)]/[0.97] pt-[env(safe-area-inset-top,0px)] border-b border-[var(--border)] transition-colors duration-200">

@@ -19,7 +19,7 @@ import { LegalModals } from './components/LegalModals';
 import { OfflineBanner } from './components/OfflineBanner';
 import { OnboardingModal } from './components/OnboardingModal';
 import { PwaInstallPrompt } from './components/PwaInstallPrompt';
-import { ShareModal } from './components/ShareModal';
+import { PromoSharePayload, ShareModal } from './components/ShareModal';
 import { TrackDetailDrawer } from './components/TrackDetailDrawer';
 import { BottomTabBar, MainTabType } from './components/layout/BottomTabBar';
 import { Footer } from './components/layout/Footer';
@@ -68,6 +68,9 @@ const ServerErrorView = lazyWithRetry(() => import('./components/views/ServerErr
 const FullscreenPlayerModal = lazyWithRetry(() =>
   import('./components/FullscreenPlayerModal').then((m) => ({ default: m.FullscreenPlayerModal }))
 );
+const ChartsPromoView = lazyWithRetry(() =>
+  import('./components/views/ChartsPromoView').then((m) => ({ default: m.ChartsPromoView }))
+);
 
 const PageLoader: React.FC = () => (
   <div className="py-12 flex items-center justify-center">
@@ -87,6 +90,7 @@ function AppContent() {
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [standaloneGateBypassed, setStandaloneGateBypassed] = useState(false);
   const [isScrolledPastBannerSlot, setIsScrolledPastBannerSlot] = useState(false);
+  const [activeSharePromo, setActiveSharePromo] = useState<PromoSharePayload | null>(null);
   const standaloneInitialRoutedRef = useRef(false);
 
   // Continuous listening break timer (soft prompt after 2 hours = 7200s of active playback)
@@ -711,6 +715,7 @@ function AppContent() {
   const activeTab: MainTabType = (() => {
     switch (currentRoute.route) {
       case 'home':
+      case 'charts':
         return 'home';
       case 'search':
       case 'discover':
@@ -913,7 +918,13 @@ function AppContent() {
               isSearchOpen ||
               isAuthModalOpen ||
               authModalOpen ||
-              Boolean(activeDetailTrack || activeShareTrack || activeShareArtist || selectedArtistModal)
+              Boolean(
+                activeDetailTrack ||
+                  activeShareTrack ||
+                  activeShareArtist ||
+                  activeSharePromo ||
+                  selectedArtistModal
+              )
             }
           >
             <main
@@ -981,6 +992,13 @@ function AppContent() {
 
                   {currentRoute.route === 'search' && (
                     <SearchResultsView onOpenTrackDetails={handleOpenTrackDetails} />
+                  )}
+
+                  {currentRoute.route === 'charts' && (
+                    <ChartsPromoView
+                      onOpenTrackDetails={handleOpenTrackDetails}
+                      onSharePromo={setActiveSharePromo}
+                    />
                   )}
 
                   {currentRoute.route === 'thank_you' && <ThankYouView />}
@@ -1134,9 +1152,11 @@ function AppContent() {
       <ShareModal
         track={activeShareTrack}
         artist={activeShareArtist}
+        promoShare={activeSharePromo}
         onClose={() => {
           setActiveShareTrack(null);
           setActiveShareArtist(null);
+          setActiveSharePromo(null);
         }}
       />
 

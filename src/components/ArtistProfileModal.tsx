@@ -22,6 +22,7 @@ import { DEFAULT_AVATAR_SVG } from '../utils/artworkFallback';
 import { formatNumber, formatTime, getTrackDurationSeconds, getTrackLikeCount, isTrackLikedByUser } from '../utils/formatters';
 import { translateGenreCategory } from '../utils/genreCategories';
 import { getShortArtistShareUrl } from '../utils/shareLinks';
+import { extractArtistTags, getTrackSubTags, trackMatchesTag } from '../utils/tags';
 
 interface ArtistProfileModalProps {
   artist: Artist | null;
@@ -44,6 +45,7 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
   const isNy = language === 'ny';
 
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [selectedTag, setSelectedTag] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileSaveError, setProfileSaveError] = useState<string | null>(null);
   const [profileForm, setProfileForm] = useState({
@@ -60,6 +62,7 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
         location: artist.location || '',
       });
       setIsEditingProfile(false);
+      setSelectedTag('');
     }
   }, [artist]);
 
@@ -74,6 +77,11 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
       !t.isDraft &&
       (t.artistId === artist.id || (t.artistName || '').toLowerCase() === safeName.toLowerCase())
   );
+
+  const artistTags = extractArtistTags(artist, artistTracks);
+  const visibleTracks = selectedTag
+    ? artistTracks.filter((tr) => trackMatchesTag(tr, selectedTag))
+    : artistTracks;
 
   const isOwner = Boolean(
     currentUser &&
@@ -109,12 +117,23 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
               </div>
               <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] flex-wrap">
                 {artist.location && (
-                  <span className="inline-flex items-center gap-1">
-                    <MapPin className="w-3.5 h-3.5" />
-                    <span>{artist.location}</span>
-                  </span>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigate(
+                          `/discover?region=${encodeURIComponent(artist.country || artist.location)}`
+                        );
+                        onClose();
+                      }}
+                      className="inline-flex items-center gap-1 hover:text-[var(--accent-text)] transition cursor-pointer"
+                    >
+                      <MapPin className="w-3.5 h-3.5" />
+                      <span>{artist.location}</span>
+                    </button>
+                    <span>·</span>
+                  </>
                 )}
-                <span>·</span>
                 <span className="tabular-nums">
                   {formatNumber(artist.monthlyListeners || 0)} {isNy ? 'omvera pamwezi' : 'monthly listeners'}
                 </span>
@@ -300,24 +319,86 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
             </div>
           )}
 
+          {artistTags.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                  {isNy ? 'Mitundu & Ma Tag' : 'Sub-Genres & Mood Tags'}
+                </span>
+                {selectedTag && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigate(`/search?tag=${encodeURIComponent(selectedTag)}`);
+                      onClose();
+                    }}
+                    className="text-[11px] font-bold text-[var(--accent-text)] hover:underline cursor-pointer"
+                  >
+                    {isNy ? `Fufuzani "${selectedTag}" ponse →` : `Explore "${selectedTag}" on LOWERVIBE →`}
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSelectedTag('')}
+                  className={`px-3 py-1 rounded-full text-xs font-semibold transition cursor-pointer ${
+                    !selectedTag
+                      ? 'bg-[var(--accent)] text-[var(--accent-contrast)] font-bold'
+                      : 'bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  {t('all', 'All')} ({artistTracks.length})
+                </button>
+                {artistTags.map((tagItem) => {
+                  const isActive = selectedTag.toLowerCase() === tagItem.key;
+                  return (
+                    <button
+                      key={tagItem.key}
+                      type="button"
+                      onClick={() => setSelectedTag(isActive ? '' : tagItem.tag)}
+                      className={`px-3 py-1 rounded-full text-xs font-semibold transition cursor-pointer ${
+                        isActive
+                          ? 'bg-[var(--accent)] text-[var(--accent-contrast)] font-bold'
+                          : 'bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent-text)]'
+                      }`}
+                    >
+                      {tagItem.kind === 'genre'
+                        ? translateGenreCategory(tagItem.tag, language)
+                        : `#${tagItem.tag}`}
+                      {tagItem.count > 0 ? ` (${tagItem.count})` : ''}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="space-y-2.5">
             <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
               <Music className="w-3.5 h-3.5" />
               <span>
-                {isNy ? 'Nyimbo' : 'Tracks'} ({artistTracks.length})
+                {isNy ? 'Nyimbo' : 'Tracks'} ({visibleTracks.length})
               </span>
             </h3>
 
-            {artistTracks.length === 0 ? (
+            {visibleTracks.length === 0 ? (
               <p className="text-sm text-[var(--text-muted)] py-4">
-                {isNy ? 'Palibe nyimbo zotulutsidwa pakadali pano.' : 'No songs released yet.'}
+                {selectedTag
+                  ? isNy
+                    ? `Palibe nyimbo zokhala ndi "${selectedTag}".`
+                    : `No tracks tagged "${selectedTag}".`
+                  : isNy
+                  ? 'Palibe nyimbo zotulutsidwa pakadali pano.'
+                  : 'No songs released yet.'}
               </p>
             ) : (
               <div className="rounded-2xl border border-[var(--border)] divide-y divide-[var(--border)] overflow-hidden">
-                {artistTracks.map((tr) => {
+                {visibleTracks.map((tr) => {
                   const isCurrent = currentTrack?.id === tr.id;
                   const isCurrentPlaying = isCurrent && isPlaying;
                   const liked = isTrackLikedByUser(tr, currentUser);
+                  const subTags = getTrackSubTags(tr);
                   return (
                     <div
                       key={tr.id}
@@ -330,10 +411,48 @@ export const ArtistProfileModal: React.FC<ArtistProfileModalProps> = ({ artist, 
                         referrerPolicy="no-referrer"
                         className="w-11 h-11 rounded-xl object-cover shrink-0 border border-[var(--border)]"
                       />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-bold text-[var(--text)] truncate">{tr.title}</div>
-                        <div className="text-xs text-[var(--text-muted)]">
-                          {translateGenreCategory(tr.genre, language)} · {formatTime(getTrackDurationSeconds(tr))}
+                      <div className="flex-1 min-w-0 space-y-0.5">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/tracks/${encodeURIComponent(tr.id)}`);
+                            onClose();
+                          }}
+                          className="text-sm font-bold text-[var(--text)] hover:text-[var(--accent-text)] truncate block max-w-full text-left cursor-pointer"
+                        >
+                          {tr.title}
+                        </button>
+                        <div className="text-xs text-[var(--text-muted)] flex items-center gap-1.5 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedTag((prev) =>
+                                prev.toLowerCase() === tr.genre.toLowerCase() ? '' : tr.genre
+                              );
+                            }}
+                            className="hover:text-[var(--accent-text)] cursor-pointer"
+                          >
+                            {translateGenreCategory(tr.genre, language)}
+                          </button>
+                          {subTags.slice(0, 2).map((sub) => (
+                            <button
+                              key={sub}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedTag((prev) =>
+                                  prev.toLowerCase() === sub.toLowerCase() ? '' : sub
+                                );
+                              }}
+                              className="px-1.5 py-0.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[10px] hover:border-[var(--accent)] hover:text-[var(--accent-text)] cursor-pointer"
+                            >
+                              #{sub}
+                            </button>
+                          ))}
+                          <span>·</span>
+                          <span>{formatTime(getTrackDurationSeconds(tr))}</span>
                         </div>
                       </div>
                       <button

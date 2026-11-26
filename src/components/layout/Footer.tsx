@@ -249,6 +249,24 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               <li>
                 <button
                   type="button"
+                  onClick={() => onNavigate?.('/charts')}
+                  className="hover:text-[var(--text)] transition cursor-pointer text-left"
+                >
+                  {isNy ? 'Tchati & Kutsatsa' : 'Charts & Promo'}
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={() => onNavigate?.('/discover')}
+                  className="hover:text-[var(--text)] transition cursor-pointer text-left"
+                >
+                  {t('discover_title', 'Discover')}
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
                   onClick={() => onNavigate?.('/search')}
                   className="hover:text-[var(--text)] transition cursor-pointer text-left"
                 >
@@ -353,7 +371,15 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
             <address className="not-italic space-y-1.5 leading-relaxed text-[var(--text-muted)]">
               <div className="font-semibold text-[var(--text)]">LOWERVIBE Media House</div>
               <div>Nsanje, M1 Road</div>
-              <div>Malawi</div>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate?.('/discover?region=Malawi')}
+                  className="hover:text-[var(--accent-text)] hover:underline transition cursor-pointer text-left"
+                >
+                  Malawi
+                </button>
+              </div>
               <div>
                 <a
                   href="mailto:odulamw@gmail.com"

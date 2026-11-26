@@ -1,7 +1,8 @@
-import { Disc3 } from 'lucide-react';
+import { ArrowRight, Disc3 } from 'lucide-react';
 import React, { useMemo } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useLanguage } from '../../context/LanguageContext';
+import { useRouter } from '../../context/RouterContext';
 import { matchesLocationFilter } from '../../data/regions';
 import { normalizeGenreCategory, translateGenreCategory } from '../../utils/genreCategories';
 
@@ -12,6 +13,7 @@ interface VibeTrendsShelfProps {
 export const VibeTrendsShelf: React.FC<VibeTrendsShelfProps> = ({ onFilterVibe }) => {
   const { tracks, selectedCountry } = useAudio();
   const { language, t } = useLanguage();
+  const { navigate } = useRouter();
 
   const hasCountryScope = Boolean(
     selectedCountry && selectedCountry !== 'Global' && selectedCountry !== 'Africa'
@@ -47,15 +49,26 @@ export const VibeTrendsShelf: React.FC<VibeTrendsShelfProps> = ({ onFilterVibe }
 
   return (
     <section className="space-y-4">
-      <div>
-        <h2 className="text-lg sm:text-xl font-extrabold font-heading text-[var(--lv-text)]">
-          {t('vibe_frequencies', 'Browse by Genre')}
-        </h2>
-        <p className="text-xs text-[var(--lv-muted)]">
-          {hasCountryScope
-            ? t('trending_in_country', 'Trending in {country}', { country: selectedCountry })
-            : t('vibe_subheading', 'Explore sounds across Malawi, Nigeria, and Africa')}
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-lg sm:text-xl font-extrabold font-heading text-[var(--lv-text)]">
+            {t('vibe_frequencies', 'Browse by Genre')}
+          </h2>
+          <p className="text-xs text-[var(--lv-muted)]">
+            {hasCountryScope
+              ? t('trending_in_country', 'Trending in {country}', { country: selectedCountry })
+              : t('vibe_subheading', 'Explore sounds across Malawi, Nigeria, and Africa')}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => navigate('/charts?tab=genres')}
+          className="px-3.5 py-2 rounded-2xl bg-[var(--lv-surface)] hover:bg-[var(--lv-elevated)] border border-[var(--lv-border)] text-xs font-bold text-[var(--lv-accent-text)] inline-flex items-center gap-1 transition cursor-pointer min-h-[40px] whitespace-nowrap"
+        >
+          <span>{language === 'ny' ? 'Mitundu Yotchuka' : 'Trending Charts'}</span>
+          <ArrowRight className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

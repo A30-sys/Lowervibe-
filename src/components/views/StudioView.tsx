@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
+  AlignLeft,
   ArrowLeft,
   ArrowRight,
   ArrowUpDown,
@@ -18,6 +19,7 @@ import {
   FileAudio,
   Heart,
   Image as ImageIcon,
+  Info,
   Lock,
   Music,
   Pause,
@@ -28,6 +30,7 @@ import {
   Search,
   Share2,
   ShieldCheck,
+  Sparkles,
   Trash2,
   UploadCloud,
   Wallet,
@@ -69,6 +72,7 @@ import { PayoutProviderType, Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG, DEFAULT_BANNER_SVG, LOWERVIBE_ICON_ARTWORK } from '../../utils/artworkFallback';
 import { formatTime } from '../../utils/formatters';
 import { normalizeGenreCategory, translateGenreCategory } from '../../utils/genreCategories';
+import { formatLrcTimestamp, parseLrc } from '../../utils/lrcParser';
 import { openPwaInstallPrompt } from '../../utils/pwaManifest';
 import { GenreSelectOrCustom } from '../common/GenreSelectOrCustom';
 import { MoodSelectOrCustom } from '../common/MoodSelectOrCustom';
@@ -141,6 +145,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
   const [earningsRefreshKey, setEarningsRefreshKey] = useState(0);
   const [isRefreshingEarnings, setIsRefreshingEarnings] = useState(false);
   const [publishedCelebrationTrack, setPublishedCelebrationTrack] = useState<Track | null>(null);
+  const [showRealPlaysTooltip, setShowRealPlaysTooltip] = useState(false);
   const [isPayoutNotifOpen, setIsPayoutNotifOpen] = useState(false);
   const payoutNotifPopoverRef = useRef<HTMLDivElement | null>(null);
   const prevPayoutStatusMapRef = useRef<Record<string, string>>({});
@@ -507,6 +512,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
   const [editGenre, setEditGenre] = useState('');
   const [editMood, setEditMood] = useState('');
   const [editStory, setEditStory] = useState('');
+  const [editLyrics, setEditLyrics] = useState('');
   const [savingTrackId, setSavingTrackId] = useState<string | null>(null);
   const [togglingTrackId, setTogglingTrackId] = useState<string | null>(null);
   const [deletingTrackId, setDeletingTrackId] = useState<string | null>(null);
@@ -1435,9 +1441,9 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
             </div>
 
             <div className="space-y-2">
-              <p className="text-3xl leading-none" aria-hidden="true">
-                🎊
-              </p>
+              <div className="mx-auto w-10 h-10 rounded-2xl bg-[var(--accent)]/15 border border-[var(--accent)]/40 text-[var(--accent-text)] flex items-center justify-center">
+                <Sparkles className="w-5 h-5" />
+              </div>
               <h2 className="text-xl sm:text-2xl font-extrabold font-heading text-[var(--text)]">
                 {isNy ? 'Zabwino! Nyimbo yanu yafika pa intaneti' : 'Congratulations! Your song is live'}
               </h2>
@@ -1760,8 +1766,38 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                 {publishedTracks.length}
               </div>
             </div>
-            <div className="p-4 rounded-[20px] bg-[var(--surface)] border border-[var(--border)]">
-              <div className="text-xs text-[var(--text-muted)]">{translate('studio_real_plays')}</div>
+            <div className="p-4 rounded-[20px] bg-[var(--surface)] border border-[var(--border)] relative">
+              <div className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+                <span>{translate('studio_real_plays')}</span>
+                <div className="relative inline-flex items-center group">
+                  <button
+                    type="button"
+                    onClick={() => setShowRealPlaysTooltip((prev) => !prev)}
+                    onBlur={() => setShowRealPlaysTooltip(false)}
+                    aria-label={
+                      isNy
+                        ? 'Lamulo lowerengera nyimbo zomveredwa kwenikweni'
+                        : 'How Real plays are counted'
+                    }
+                    aria-expanded={showRealPlaysTooltip}
+                    className="inline-flex items-center justify-center w-6 h-6 -m-1 rounded-full text-[var(--text-muted)] hover:text-[var(--accent-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] transition cursor-pointer"
+                  >
+                    <Info className="w-3.5 h-3.5" />
+                  </button>
+                  <div
+                    role="tooltip"
+                    className={`absolute left-0 sm:left-1/2 sm:-translate-x-1/2 top-full mt-2 z-30 w-64 p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border-strong)] shadow-xl text-[11px] leading-relaxed text-[var(--text)] transition-opacity ${
+                      showRealPlaysTooltip
+                        ? 'opacity-100 pointer-events-auto'
+                        : 'opacity-0 pointer-events-none group-hover:opacity-100 group-focus-within:opacity-100'
+                    }`}
+                  >
+                    {isNy
+                      ? 'Kuwerenga kumakhala kwenikweni pambuyo pa masekondi 30 akumvera kapena 50% ya nyimbo, chilichonse chochepa. Wokonda mmodzi amawerengedwa kamodzi pa ola lililonse.'
+                      : 'A play counts after 30 seconds of listening or 50% of the track, whichever is shorter. The same user replaying the same track counts once per hour.'}
+                  </div>
+                </div>
+              </div>
               <div className="text-2xl font-extrabold text-[var(--text)] mt-1 tabular-nums">
                 {totalPlays.toLocaleString()}
               </div>
@@ -2617,16 +2653,57 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                     </div>
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-[var(--text)]">
-                      {isNy ? 'Mawu a nyimbo (zosankha)' : 'Lyrics (optional)'}
-                    </label>
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-xs font-semibold text-[var(--text)]">
+                        {isNy ? 'Mawu a nyimbo kapena LRC (zosankha)' : 'Lyrics / LRC synced (optional)'}
+                      </label>
+                      <div className="flex items-center gap-2">
+                        {(() => {
+                          const p = parseLrc(lyrics);
+                          if (!p.hasLyrics) return null;
+                          return (
+                            <span className="text-[11px] font-mono text-[var(--accent-text)] tabular-nums">
+                              {p.isSynced
+                                ? isNy
+                                  ? `LRC · Mizere ${p.lines.length} (${formatLrcTimestamp(p.lines[0].timeSeconds)}–${formatLrcTimestamp(p.lines[p.lines.length - 1].timeSeconds)})`
+                                  : `Synced LRC · ${p.lines.length} lines`
+                                : isNy
+                                ? `Mawu wamba · Mizere ${p.plainLines.length}`
+                                : `Plain text · ${p.plainLines.length} lines`}
+                            </span>
+                          );
+                        })()}
+                        <label className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--surface-2)] hover:bg-[var(--surface)] border border-[var(--border)] text-[11px] font-semibold text-[var(--text)] cursor-pointer transition">
+                          <AlignLeft className="w-3 h-3 text-[var(--accent-text)]" />
+                          <span>{isNy ? 'Tengani .lrc' : 'Import .lrc / .txt'}</span>
+                          <input
+                            type="file"
+                            accept=".lrc,.txt,text/plain"
+                            className="sr-only"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              try {
+                                const text = await file.text();
+                                setLyrics(text);
+                              } catch {}
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                      </div>
+                    </div>
                     <textarea
-                      rows={3}
+                      rows={4}
                       value={lyrics}
                       onChange={(e) => setLyrics(e.target.value)}
-                      placeholder={isNy ? 'Ikani mawu a nyimbo...' : 'Paste song lyrics...'}
-                      className="w-full px-3.5 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text)]"
+                      placeholder={
+                        isNy
+                          ? 'Ikani mawu a nyimbo kapena LRC (mwachitsanzo: [00:12.40] Mzere woyamba)...'
+                          : 'Paste plain lyrics or LRC time-coded lyrics (e.g. [00:12.40] First line)...'
+                      }
+                      className="w-full px-3.5 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-mono text-[var(--text)]"
                     />
                   </div>
                 </div>
@@ -3133,6 +3210,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                       setEditGenre(track.genre);
                                       setEditMood(track.mood || '');
                                       setEditStory(track.story || '');
+                                      setEditLyrics(track.lyrics || '');
                                     }
                                   }}
                                   className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--text)] cursor-pointer flex items-center gap-1 hover:border-[var(--accent)] transition-colors"
@@ -3245,6 +3323,55 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                 placeholder={isNy ? 'Za nyimboyi' : 'About this track'}
                                 className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text)]"
                               />
+                              <div className="space-y-1">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <label className="text-[11px] font-semibold text-[var(--text-muted)]">
+                                    {isNy ? 'Mawu a nyimbo / LRC' : 'Lyrics / LRC synced'}
+                                  </label>
+                                  <div className="flex items-center gap-2">
+                                    {(() => {
+                                      const p = parseLrc(editLyrics);
+                                      if (!p.hasLyrics) return null;
+                                      return (
+                                        <span className="text-[10.5px] font-mono text-[var(--accent-text)] tabular-nums">
+                                          {p.isSynced
+                                            ? `LRC · ${p.lines.length}`
+                                            : `${p.plainLines.length} lines`}
+                                        </span>
+                                      );
+                                    })()}
+                                    <label className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[10.5px] font-semibold text-[var(--text)] cursor-pointer">
+                                      <AlignLeft className="w-3 h-3 text-[var(--accent-text)]" />
+                                      <span>{isNy ? 'Tengani .lrc' : 'Import .lrc'}</span>
+                                      <input
+                                        type="file"
+                                        accept=".lrc,.txt,text/plain"
+                                        className="sr-only"
+                                        onChange={async (e) => {
+                                          const file = e.target.files?.[0];
+                                          if (!file) return;
+                                          try {
+                                            const text = await file.text();
+                                            setEditLyrics(text);
+                                          } catch {}
+                                          e.target.value = '';
+                                        }}
+                                      />
+                                    </label>
+                                  </div>
+                                </div>
+                                <textarea
+                                  rows={3}
+                                  value={editLyrics}
+                                  onChange={(e) => setEditLyrics(e.target.value)}
+                                  placeholder={
+                                    isNy
+                                      ? '[00:12.40] Mzere woyamba...'
+                                      : 'Plain lyrics or [00:12.40] LRC time-coded lines...'
+                                  }
+                                  className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs font-mono text-[var(--text)]"
+                                />
+                              </div>
                               <div className="flex justify-end gap-2">
                                 <button
                                   type="button"
@@ -3267,6 +3394,7 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                         mood: nextMood,
                                         vibeTags: [nextGenre, ...(nextMood ? [nextMood] : [])].filter(Boolean),
                                         story: editStory.trim(),
+                                        lyrics: editLyrics.trim(),
                                       });
                                       setEditingTrackId(null);
                                       showNotice(isNy ? 'Nyimbo yasinthidwa.' : 'Track updated.');

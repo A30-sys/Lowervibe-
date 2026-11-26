@@ -4,6 +4,7 @@ export interface RouteMatch {
   route:
     | 'home'
     | 'discover'
+    | 'charts'
     | 'artists'
     | 'artist_detail'
     | 'track_detail'
@@ -109,6 +110,9 @@ export function parseRoute(pathname: string, search: string, hash: string = ''):
   }
   if (cleanPath === '/discover') {
     return { route: 'discover', params: {}, pathname: cleanPath, searchQuery, hash };
+  }
+  if (cleanPath === '/charts' || cleanPath === '/trending' || cleanPath === '/promo') {
+    return { route: 'charts', params: {}, pathname: cleanPath, searchQuery, hash };
   }
   if (cleanPath === '/artists') {
     return { route: 'artists', params: {}, pathname: cleanPath, searchQuery, hash };

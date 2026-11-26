@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  AlignLeft,
   Heart,
   Maximize2,
   Pause,
@@ -15,7 +16,7 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
-import React, { memo, useEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -24,6 +25,7 @@ import { audioEngine } from '../../services/audioEngine';
 import { LOWERVIBE_ICON_ARTWORK } from '../../utils/artworkFallback';
 import { formatTime, isTrackLikedByUser } from '../../utils/formatters';
 import { triggerHaptic } from '../../utils/haptics';
+import { getActiveLrcIndex, parseLrc } from '../../utils/lrcParser';
 import { usePinnedPlayerSession } from '../../utils/playerSessionStore';
 
 interface DynamicVolumeCanvasProps {
@@ -275,6 +277,7 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
     audioQuality,
     effectiveAudioQuality,
     setAudioQuality,
+    openFullscreenPlayer,
   } = useAudio();
 
   const pinnedSession = usePinnedPlayerSession();
@@ -323,6 +326,13 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
     setScrubTime(null);
     activePointerIdRef.current = null;
   }, [displayTrack?.id]);
+
+  const parsedDisplayLyrics = useMemo(() => parseLrc(displayTrack?.lyrics), [displayTrack?.lyrics]);
+  const activeLyricLineText = useMemo(() => {
+    if (!parsedDisplayLyrics.isSynced || parsedDisplayLyrics.lines.length === 0) return null;
+    const idx = getActiveLrcIndex(parsedDisplayLyrics.lines, effectiveTime, 0.15);
+    return idx >= 0 ? parsedDisplayLyrics.lines[idx]?.text || null : null;
+  }, [parsedDisplayLyrics, effectiveTime]);
 
   if (!isPlayerActive || !displayTrack) return null;
 
@@ -667,21 +677,37 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                 <p className="text-xs sm:text-sm font-bold text-[var(--lv-text)] line-clamp-1">
                   {displayTrack.title}
                 </p>
-                <div className="flex items-center gap-1.5 text-[11px] text-[var(--lv-muted)] mt-0.5">
+                {activeLyricLineText ? (
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onOpenArtist(displayTrack.artistId);
+                      triggerHaptic('tap');
+                      openFullscreenPlayer('lyrics');
                     }}
-                    className="hover:text-[var(--lv-text)] truncate font-medium cursor-pointer text-left"
+                    className="flex items-center gap-1.5 text-[11px] text-[var(--lv-accent-text)] mt-0.5 truncate max-w-full cursor-pointer text-left hover:underline"
+                    title={t('synced_lyrics', 'Synced Lyrics')}
                   >
-                    {displayTrack.artistName}
+                    <AlignLeft className="w-3 h-3 shrink-0" />
+                    <span className="truncate font-medium">{activeLyricLineText}</span>
                   </button>
-                  <span className="font-mono text-[10px] tabular-nums shrink-0 opacity-85">
-                    · {formatTime(activeTime)} / {formatTime(effectiveDuration)}
-                  </span>
-                </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-[11px] text-[var(--lv-muted)] mt-0.5">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenArtist(displayTrack.artistId);
+                      }}
+                      className="hover:text-[var(--lv-text)] truncate font-medium cursor-pointer text-left"
+                    >
+                      {displayTrack.artistName}
+                    </button>
+                    <span className="font-mono text-[10px] tabular-nums shrink-0 opacity-85">
+                      · {formatTime(activeTime)} / {formatTime(effectiveDuration)}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -852,11 +878,30 @@ const BottomPlayerInner: React.FC<BottomPlayerProps> = ({
                 {quickQualityDesktopLabel}
               </button>
 
+              {parsedDisplayLyrics.hasLyrics && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic('tap');
+                    openFullscreenPlayer('lyrics');
+                  }}
+                  className={`hidden sm:flex items-center justify-center rounded-xl border transition active:scale-95 min-h-[42px] min-w-[40px] cursor-pointer ${
+                    parsedDisplayLyrics.isSynced
+                      ? 'bg-[var(--lv-accent)]/15 border-[var(--lv-accent)]/45 text-[var(--lv-accent-text)]'
+                      : 'bg-[var(--lv-elevated)]/65 border-[var(--lv-border)] text-[var(--lv-muted)] hover:text-[var(--lv-text)]'
+                  }`}
+                  title={parsedDisplayLyrics.isSynced ? t('synced_lyrics', 'Synced Lyrics') : t('lyrics', 'Lyrics')}
+                  aria-label={parsedDisplayLyrics.isSynced ? t('synced_lyrics', 'Synced Lyrics') : t('lyrics', 'Lyrics')}
+                >
+                  <AlignLeft className="w-4 h-4" />
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => {
                   triggerHaptic('tap');
-                  onOpenFullscreen();
+                  openFullscreenPlayer('playing');
                 }}
                 className="hidden sm:flex items-center justify-center rounded-xl text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition active:scale-95 min-h-[42px] min-w-[40px] cursor-pointer"
                 title={t('expand_player')}

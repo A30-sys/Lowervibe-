@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  ArrowRight,
   Check,
   CheckCircle2,
   Heart,
@@ -9,19 +10,27 @@ import {
   Play,
   RefreshCw,
   Shuffle,
+  Trophy,
   Upload,
   UserPlus,
 } from 'lucide-react';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
 import { getLocalizedGreeting, useLanguage } from '../../context/LanguageContext';
+import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
 import { matchesLocationFilter } from '../../data/regions';
 import { Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../../utils/artworkFallback';
 import { formatNumber, formatTime } from '../../utils/formatters';
 import { normalizeGenreCategory, translateGenreCategory } from '../../utils/genreCategories';
+import {
+  bumpVisitMixSeed,
+  getVisitMixSeed,
+  mixTracksForVisit,
+  recordLeadTrackIds,
+} from '../../utils/mixEngine';
 import { HeroSkeleton, ShelfSkeleton } from '../common/LoadingSkeleton';
 import { LazySlideImage } from '../common/LazySlideImage';
 import { HeroFeaturedCard } from '../hero/HeroFeaturedCard';
@@ -38,19 +47,6 @@ interface HomeViewProps {
   onSelectCategory?: (category: string) => void;
 }
 
-function seededShuffle<T>(items: T[], seed: number): T[] {
-  const arr = [...items];
-  let s = (seed >>> 0) || 1;
-  for (let i = arr.length - 1; i > 0; i--) {
-    s = (Math.imul(1664525, s) + 1013904223) >>> 0;
-    const j = s % (i + 1);
-    const tmp = arr[i];
-    arr[i] = arr[j];
-    arr[j] = tmp;
-  }
-  return arr;
-}
-
 interface ShelfSectionProps {
   title: string;
   subtitle: string;
@@ -60,6 +56,7 @@ interface ShelfSectionProps {
   onPlayTrack: (track: Track) => void;
   onPlayAll?: (items: Track[]) => void;
   onSelectArtist: (artistId: string) => void;
+  onOpenTrackDetails?: (track: Track) => void;
   playAllLabel: string;
   minItems?: number;
 }
@@ -73,6 +70,7 @@ const HorizontalTrackShelf: React.FC<ShelfSectionProps> = ({
   onPlayTrack,
   onPlayAll,
   onSelectArtist,
+  onOpenTrackDetails,
   playAllLabel,
   minItems = 3,
 }) => {
@@ -133,9 +131,22 @@ const HorizontalTrackShelf: React.FC<ShelfSectionProps> = ({
                 </div>
               </div>
               <div className="space-y-0.5 px-0.5">
-                <h3 className="text-xs sm:text-sm font-bold text-[var(--text)] line-clamp-2 leading-snug">
-                  {track.title}
-                </h3>
+                {onOpenTrackDetails ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenTrackDetails(track);
+                    }}
+                    className="text-xs sm:text-sm font-bold text-[var(--text)] hover:text-[var(--accent-text)] hover:underline line-clamp-2 leading-snug text-left block w-full cursor-pointer"
+                  >
+                    {track.title}
+                  </button>
+                ) : (
+                  <h3 className="text-xs sm:text-sm font-bold text-[var(--text)] line-clamp-2 leading-snug">
+                    {track.title}
+                  </h3>
+                )}
                 <button
                   type="button"
                   onClick={(e) => {
@@ -181,11 +192,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
   } = useAudio();
   const { currentUser, toggleFollowArtist } = useAuth();
   const { language, t } = useLanguage();
+  const { navigate } = useRouter();
   const { showToast } = useToast();
   const [selectedGenre, setSelectedGenre] = useState<string>('All');
-  const [visitSeed, setVisitSeed] = useState<number>(() =>
-    Math.floor(Math.random() * 2147483647) || 1
-  );
+  const [visitSeed, setVisitSeed] = useState<number>(() => getVisitMixSeed());
 
   const publicTracks = useMemo(
     () => tracks.filter((tr) => !tr.isDraft && !tr.isDeranked),
@@ -356,8 +366,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
       }
     }
 
-    const mixedAffinity = seededShuffle(affinityPool, visitSeed + 17);
-    const mixedDiscovery = seededShuffle(discoveryPool, visitSeed + 53);
+    const mixedAffinity = mixTracksForVisit(affinityPool, visitSeed, { salt: 17 });
+    const mixedDiscovery = mixTracksForVisit(discoveryPool, visitSeed, { salt: 53 });
     const combined: Track[] = [];
     const seen = new Set<string>();
     const maxCount = Math.min(10, publicTracks.length);
@@ -399,6 +409,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
     visitSeed,
   ]);
 
+  useEffect(() => {
+    if (recommendedTracks.length > 0) {
+      recordLeadTrackIds(recommendedTracks.slice(0, 3).map((t) => t.id));
+    }
+  }, [recommendedTracks]);
+
   // Personalized Shelf 1: Daily Mix (prefers user's signup/liked/played genres, shuffled per visit; min 3 items)
   const dailyMixTracks = useMemo(() => {
     if (publicTracks.length < 3) return [];
@@ -419,7 +435,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         ? publicTracks.filter((t) => t.genre && affinityGenres.has(t.genre.toLowerCase()))
         : publicTracks;
     const pool = matching.length >= 3 ? matching : publicTracks;
-    return seededShuffle(pool, visitSeed + 101).slice(0, 8);
+    return mixTracksForVisit(pool, visitSeed, { salt: 101 }).slice(0, 8);
   }, [publicTracks, currentUser?.likedTrackIds, currentUser?.preferredGenres, playHistory, visitSeed]);
 
   const preferredGenreTracks = useMemo(() => {
@@ -429,7 +445,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     const matched = publicTracks.filter(
       (t) => t.genre && pickedSet.has(t.genre.trim().toLowerCase())
     );
-    return seededShuffle(matched, visitSeed + 203).slice(0, 10);
+    return mixTracksForVisit(matched, visitSeed, { salt: 203 }).slice(0, 10);
   }, [publicTracks, currentUser?.preferredGenres, visitSeed]);
 
   // Personalized Shelf 2: Because you played [LastTrack] (min 3 similar tracks, mixed per visit)
@@ -445,7 +461,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     );
     return {
       anchorTitle: anchor.title,
-      items: seededShuffle(related, visitSeed + 307).slice(0, 8),
+      items: mixTracksForVisit(related, visitSeed, { salt: 307 }).slice(0, 8),
     };
   }, [continueListening, publicTracks, visitSeed]);
 
@@ -530,19 +546,19 @@ export const HomeView: React.FC<HomeViewProps> = ({
     ];
 
     return specs
-      .map((spec) => {
-        const matched = publicTracks
-          .filter((tr) => {
-            const raw = (tr.genre || '').trim().toLowerCase();
-            const canonical = normalizeGenreCategory(tr.genre).toLowerCase();
-            return spec.aliases.some((a) => raw === a || raw.includes(a) || canonical === a);
-          })
-          .sort((a, b) => (b.plays || 0) - (a.plays || 0))
-          .slice(0, 8);
-        return { ...spec, items: matched };
+      .map((spec, idx) => {
+        const matched = publicTracks.filter((tr) => {
+          const raw = (tr.genre || '').trim().toLowerCase();
+          const canonical = normalizeGenreCategory(tr.genre).toLowerCase();
+          return spec.aliases.some((a) => raw === a || raw.includes(a) || canonical === a);
+        });
+        return {
+          ...spec,
+          items: mixTracksForVisit(matched, visitSeed, { salt: 400 + idx }).slice(0, 8),
+        };
       })
       .filter((s) => s.items.length > 0);
-  }, [publicTracks]);
+  }, [publicTracks, visitSeed]);
 
   // Regional African discovery (African countries excluding Malawi)
   const regionalAfricaTracks = useMemo(() => {
@@ -698,7 +714,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => handlePlayMix(false)}
@@ -714,6 +730,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
             >
               <Shuffle className="w-4 h-4" />
               <span>{t('shuffle', 'Shuffle')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/charts')}
+              className="px-4 py-3 rounded-2xl bg-[var(--surface)] hover:bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--accent)]/50 text-[var(--accent-text)] font-bold text-xs sm:text-sm inline-flex items-center gap-1.5 active:scale-95 transition cursor-pointer min-h-[48px] whitespace-nowrap"
+            >
+              <Trophy className="w-4 h-4" />
+              <span>{language === 'ny' ? 'Tchati' : 'Charts'}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -766,6 +791,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             showToast(translateGenreCategory(selectedGenre, language));
           }}
           onSelectArtist={onSelectArtist}
+          onOpenTrackDetails={onOpenTrackDetails}
         />
       )}
 
@@ -796,11 +822,28 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     className="w-12 h-12 rounded-xl object-cover shrink-0 border border-[var(--border)]"
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs sm:text-sm font-bold text-[var(--text)] line-clamp-1">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenTrackDetails(track);
+                      }}
+                      className="text-xs sm:text-sm font-bold text-[var(--text)] hover:text-[var(--accent-text)] hover:underline line-clamp-1 text-left cursor-pointer"
+                    >
                       {track.title}
-                    </p>
+                    </button>
                     <p className="text-[11px] text-[var(--text-muted)] truncate">
-                      {track.artistName} ·{' '}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectArtist(track.artistId);
+                        }}
+                        className="hover:text-[var(--text)] hover:underline cursor-pointer"
+                      >
+                        {track.artistName}
+                      </button>
+                      {' · '}
                       <span className="font-mono tabular-nums">
                         {t('time_left', '{time} left', { time: formatTime(remainingSec) })}
                       </span>
@@ -848,7 +891,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  setVisitSeed((prev) => (prev + Math.floor(Math.random() * 99991) + 7919) % 2147483647);
+                  setVisitSeed(bumpVisitMixSeed());
                 }}
                 className="px-3 py-2 rounded-2xl bg-[var(--surface)] hover:bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] text-xs font-bold text-[var(--text)] inline-flex items-center gap-1.5 transition active:scale-95 cursor-pointer min-h-[44px] whitespace-nowrap"
                 title={t('mix_again', 'Remix')}
@@ -902,9 +945,16 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     </div>
                   </div>
                   <div className="space-y-0.5 px-0.5">
-                    <h3 className="text-xs sm:text-sm font-bold text-[var(--text)] line-clamp-2 leading-snug">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenTrackDetails(track);
+                      }}
+                      className="text-xs sm:text-sm font-bold text-[var(--text)] hover:text-[var(--accent-text)] hover:underline line-clamp-2 leading-snug text-left block w-full cursor-pointer"
+                    >
                       {track.title}
-                    </h3>
+                    </button>
                     <button
                       type="button"
                       onClick={(e) => {
@@ -935,6 +985,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         playAllLabel={t('play_all', 'Play all')}
         onPlayAll={(list) => playTrackList(list, 0)}
         onSelectArtist={onSelectArtist}
+        onOpenTrackDetails={onOpenTrackDetails}
       />
 
       {/* Single Top Spotlight (Location-based Featured Pick or Most Trending) */}
@@ -956,6 +1007,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         playAllLabel={t('play_all', 'Play all')}
         onPlayAll={(list) => playTrackList(list, 0)}
         onSelectArtist={onSelectArtist}
+        onOpenTrackDetails={onOpenTrackDetails}
       />
 
       {/* New Releases */}
@@ -977,6 +1029,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             playAllLabel={t('play_all', 'Play all')}
             onPlayAll={(list) => playTrackList(list, 0)}
             onSelectArtist={onSelectArtist}
+            onOpenTrackDetails={onOpenTrackDetails}
           />
         );
       })}
@@ -993,6 +1046,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         playAllLabel={t('play_all', 'Play all')}
         onPlayAll={(list) => playTrackList(list, 0)}
         onSelectArtist={onSelectArtist}
+        onOpenTrackDetails={onOpenTrackDetails}
       />
 
       {/* Recommended Artists */}
@@ -1030,7 +1084,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         <h3 className="text-xs sm:text-sm font-bold text-[var(--text)] truncate">
                           {artist.name}
                         </h3>
-                        {artist.verified && (
+                        {(artist.verified || artist.isVerified) && (
                           <CheckCircle2 className="w-3.5 h-3.5 text-[var(--accent-text)] shrink-0" />
                         )}
                       </div>
@@ -1192,6 +1246,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             showToast(t('picked_for_genres', 'Picked for your genres'));
           }}
           onSelectArtist={onSelectArtist}
+          onOpenTrackDetails={onOpenTrackDetails}
         />
       )}
 
@@ -1208,6 +1263,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           showToast(t('daily_mix', 'Daily Mix'));
         }}
         onSelectArtist={onSelectArtist}
+        onOpenTrackDetails={onOpenTrackDetails}
       />
 
       {becauseYouPlayed.items.length >= 3 && (
@@ -1223,6 +1279,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           playAllLabel={t('play_all', 'Play all')}
           onPlayAll={(list) => playTrackList(list, 0)}
           onSelectArtist={onSelectArtist}
+          onOpenTrackDetails={onOpenTrackDetails}
         />
       )}
 
@@ -1236,6 +1293,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         playAllLabel={t('play_all', 'Play all')}
         onPlayAll={(list) => playTrackList(list, 0)}
         onSelectArtist={onSelectArtist}
+        onOpenTrackDetails={onOpenTrackDetails}
       />
 
       {selectedCountry && selectedCountry !== 'Global' && selectedCountry !== 'Malawi' && (
@@ -1253,6 +1311,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           playAllLabel={t('play_all', 'Play all')}
           onPlayAll={(list) => playTrackList(list, 0)}
           onSelectArtist={onSelectArtist}
+          onOpenTrackDetails={onOpenTrackDetails}
         />
       )}
 

@@ -3,11 +3,13 @@ import React, { useMemo } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
+import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
 import { matchesLocationFilter } from '../../data/regions';
 import { DEFAULT_ARTWORK_SVG } from '../../utils/artworkFallback';
 import { formatTime, getTrackLikeCount, isTrackLikedByUser } from '../../utils/formatters';
 import { translateGenreCategory } from '../../utils/genreCategories';
+import { getTrackSubTags } from '../../utils/tags';
 import { LazySlideImage } from '../common/LazySlideImage';
 
 interface HeroFeaturedCardProps {
@@ -34,6 +36,7 @@ export const HeroFeaturedCard: React.FC<HeroFeaturedCardProps> = ({
   } = useAudio();
   const { currentUser, toggleLikeTrack } = useAuth();
   const { language, t } = useLanguage();
+  const { navigate } = useRouter();
   const { showToast } = useToast();
 
   const { featuredTrack, spotlightLabel } = useMemo(() => {
@@ -140,13 +143,23 @@ export const HeroFeaturedCard: React.FC<HeroFeaturedCardProps> = ({
 
         {/* Metadata & Primary CTA */}
         <div className="flex-1 min-w-0 space-y-4 text-center md:text-left w-full">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--lv-violet)] block">
-            {spotlightLabel}
-          </span>
+          <button
+            type="button"
+            onClick={() => navigate('/charts')}
+            className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--lv-violet)] hover:underline inline-block cursor-pointer"
+          >
+            {spotlightLabel} →
+          </button>
 
           <div className="space-y-1.5">
             <h1 className="text-2xl sm:text-4xl font-extrabold font-heading tracking-tight text-[var(--lv-text)] leading-tight line-clamp-2">
-              {featuredTrack.title}
+              <button
+                type="button"
+                onClick={onOpenTrackDetails}
+                className="text-left hover:text-[var(--lv-accent-text)] transition cursor-pointer"
+              >
+                {featuredTrack.title}
+              </button>
             </h1>
             <p className="text-sm sm:text-base text-[var(--lv-muted)] truncate">
               <button
@@ -162,14 +175,45 @@ export const HeroFeaturedCard: React.FC<HeroFeaturedCardProps> = ({
                   <button
                     type="button"
                     onClick={() => onSelectCategory?.(featuredTrack.genre)}
-                    className="hover:text-[var(--lv-text)] cursor-pointer"
+                    className="hover:text-[var(--lv-text)] hover:underline cursor-pointer"
                   >
                     {translateGenreCategory(featuredTrack.genre, language)}
                   </button>
                 </>
               )}
-              {featuredTrack.region && <span> · {featuredTrack.region}</span>}
+              {featuredTrack.region && (
+                <>
+                  <span> · </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      navigate(`/discover?region=${encodeURIComponent(featuredTrack.region!)}`)
+                    }
+                    className="hover:text-[var(--lv-text)] hover:underline cursor-pointer"
+                  >
+                    {featuredTrack.region}
+                  </button>
+                </>
+              )}
             </p>
+            {getTrackSubTags(featuredTrack).length > 0 && (
+              <div className="flex flex-wrap items-center justify-center md:justify-start gap-1.5 pt-1">
+                {getTrackSubTags(featuredTrack)
+                  .slice(0, 3)
+                  .map((tagLabel) => (
+                    <button
+                      key={tagLabel}
+                      type="button"
+                      onClick={() =>
+                        navigate(`/search?tag=${encodeURIComponent(tagLabel)}`)
+                      }
+                      className="px-2.5 py-1 rounded-full bg-[var(--lv-elevated)] border border-[var(--lv-border)] hover:border-[var(--lv-accent)] text-[11px] font-semibold text-[var(--lv-muted)] hover:text-[var(--lv-text)] transition cursor-pointer"
+                    >
+                      #{tagLabel}
+                    </button>
+                  ))}
+              </div>
+            )}
           </div>
 
           {/* Monospace Track Metadata */}

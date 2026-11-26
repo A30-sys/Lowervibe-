@@ -36,6 +36,7 @@ import {
   EqPreset,
   FeaturedVibe,
   FirestoreGenre,
+  FullscreenPlayerTab,
   MonetizationConfig,
   PayoutMethod,
   PayoutProviderType,
@@ -64,6 +65,7 @@ import {
 } from '../utils/playerSessionStore';
 import { useAuth } from './AuthContext';
 import { useRouter } from './RouterContext';
+import { useToast } from './ToastContext';
 import { isVerifiedAdminGoogleSession, PRIMARY_ADMIN_EMAIL } from '../services/authService';
 import { sanitizePlatformSocialLinks } from '../utils/socialLinks';
 
@@ -122,6 +124,7 @@ interface AudioContextType {
   catalogError: string | null;
   playHistory: PlayHistoryItem[];
   isFullscreenPlayerOpen: boolean;
+  fullscreenPlayerTab: FullscreenPlayerTab;
   activeShareTrack: Track | null;
   activeShareArtist: Artist | null;
   activeDetailTrack: Track | null;
@@ -318,6 +321,8 @@ interface AudioContextType {
 
   // UI state setters
   setIsFullscreenPlayerOpen: (open: boolean) => void;
+  openFullscreenPlayer: (tab?: FullscreenPlayerTab) => void;
+  setFullscreenPlayerTab: (tab: FullscreenPlayerTab) => void;
   setActiveShareTrack: (track: Track | null) => void;
   setActiveShareArtist: (artist: Artist | null) => void;
   setActiveDetailTrack: (track: Track | null) => void;
@@ -622,6 +627,7 @@ export function isTrackLosslessSource(track?: Track | null): boolean {
 export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { currentUser, authReady, emailVerified, requireAuth, userSettings, updateUserSettings, updateCurrentUser } = useAuth();
   const { navigate } = useRouter();
+  const { showToast } = useToast();
 
   const [isCatalogLoaded, setIsCatalogLoaded] = useState<boolean>(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -723,6 +729,22 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } catch {}
     return [];
   });
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (!currentUser) {
+      setSavedTrackIds([]);
+      try {
+        localStorage.removeItem('lowervibe_saved_tracks');
+      } catch {}
+      return;
+    }
+    const nextSaved = Array.isArray(currentUser.savedTrackIds) ? currentUser.savedTrackIds : [];
+    setSavedTrackIds(nextSaved);
+    try {
+      localStorage.setItem('lowervibe_saved_tracks', JSON.stringify(nextSaved));
+    } catch {}
+  }, [authReady, currentUser?.id, currentUser?.savedTrackIds]);
 
   const [playHistory, setPlayHistory] = useState<PlayHistoryItem[]>(() => {
     try {
@@ -990,6 +1012,11 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Modals & Drawers
   const [isFullscreenPlayerOpen, setIsFullscreenPlayerOpen] = useState<boolean>(false);
+  const [fullscreenPlayerTab, setFullscreenPlayerTab] = useState<FullscreenPlayerTab>('playing');
+  const openFullscreenPlayer = (tab: FullscreenPlayerTab = 'playing') => {
+    setFullscreenPlayerTab(tab);
+    setIsFullscreenPlayerOpen(true);
+  };
   const [activeShareTrack, setActiveShareTrack] = useState<Track | null>(null);
   const [activeShareArtist, setActiveShareArtist] = useState<Artist | null>(null);
   const [activeDetailTrack, setActiveDetailTrack] = useState<Track | null>(null);
@@ -1019,6 +1046,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [activeBatchDownload, setActiveBatchDownload] = useState<BatchOfflineDownloadState | null>(null);
 
   const sessionListenedSeconds = useRef<number>(0);
+  const actualListenedSecRef = useRef<number>(0);
+  const lastTimeUpdatePosRef = useRef<number | null>(null);
   const hasStreamBeenValidated = useRef<boolean>(false);
   const hasAttemptedResumeRestoreRef = useRef<boolean>(false);
   const artistRemapRef = useRef<Map<string, Artist>>(new Map());
@@ -1178,8 +1207,22 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [tracks]);
 
   const didRunConnectionCheckRef = useRef(false);
+  const publicPlaylistsRef = useRef<Playlist[]>([]);
+  const ownPlaylistsRef = useRef<Playlist[]>([]);
+  const adminPlaylistsRef = useRef<Playlist[] | null>(null);
 
-  // Firestore Real-time Catalog Synchronizers + Startup Artist Dedupe Migration
+  const syncMergedPlaylists = () => {
+    if (adminPlaylistsRef.current) {
+      setPlaylists(adminPlaylistsRef.current);
+      return;
+    }
+    const merged = new Map<string, Playlist>();
+    publicPlaylistsRef.current.forEach((p) => merged.set(p.id, p));
+    ownPlaylistsRef.current.forEach((p) => merged.set(p.id, p));
+    setPlaylists(Array.from(merged.values()));
+  };
+
+  // Public Firestore Real-time Catalog Synchronizers (never torn down on auth state transitions)
   useEffect(() => {
     setCatalogError(null);
     if (!didRunConnectionCheckRef.current) {
@@ -1222,6 +1265,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         },
         likedByUserIds: likedBy,
         likes: likedBy ? likedBy.length : Math.max(0, raw.likes || 0),
+        lyrics: typeof raw.lyrics === 'string' ? raw.lyrics : typeof raw.metadata?.lyrics === 'string' ? raw.metadata.lyrics : undefined,
       } as Track;
     };
 
@@ -1314,60 +1358,20 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               return t;
             })
         );
-
-        // Note: artist profile records are strictly editable only by their verified owners.
       },
       (err) => {
         console.error('Artists listener error:', formatFirebaseError(err));
       }
     );
 
-    const fbUser = auth.currentUser;
-    const isAuthenticatedSession = Boolean(
-      authReady && currentUser && fbUser && fbUser.uid === currentUser.id
+    const unsubPublicPlaylists = onSnapshot(
+      query(collection(db, 'playlists'), where('isPublic', '==', true), limit(120)),
+      (snap) => {
+        publicPlaylistsRef.current = snap.docs.map((d) => ({ ...d.data(), id: d.id } as Playlist));
+        syncMergedPlaylists();
+      },
+      () => {}
     );
-    const activeUid = isAuthenticatedSession && fbUser ? fbUser.uid : null;
-    const isVerifiedAdminUser = Boolean(
-      isAuthenticatedSession && fbUser && isVerifiedAdminGoogleSession(fbUser)
-    );
-
-    let publicPlaylistsCache: Playlist[] = [];
-    let ownPlaylistsCache: Playlist[] = [];
-    const syncMergedPlaylists = () => {
-      const merged = new Map<string, Playlist>();
-      publicPlaylistsCache.forEach((p) => merged.set(p.id, p));
-      ownPlaylistsCache.forEach((p) => merged.set(p.id, p));
-      setPlaylists(Array.from(merged.values()));
-    };
-
-    const unsubPlaylists = isVerifiedAdminUser
-      ? onSnapshot(
-          query(collection(db, 'playlists'), limit(200)),
-          (snap) => {
-            setPlaylists(snap.docs.map((d) => ({ ...d.data(), id: d.id } as Playlist)));
-          },
-          () => {}
-        )
-      : onSnapshot(
-          query(collection(db, 'playlists'), where('isPublic', '==', true), limit(120)),
-          (snap) => {
-            publicPlaylistsCache = snap.docs.map((d) => ({ ...d.data(), id: d.id } as Playlist));
-            syncMergedPlaylists();
-          },
-          () => {}
-        );
-
-    let unsubOwnPlaylists = () => {};
-    if (activeUid && !isVerifiedAdminUser) {
-      unsubOwnPlaylists = onSnapshot(
-        query(collection(db, 'playlists'), where('createdBy', '==', activeUid), limit(80)),
-        (snap) => {
-          ownPlaylistsCache = snap.docs.map((d) => ({ ...d.data(), id: d.id } as Playlist));
-          syncMergedPlaylists();
-        },
-        () => {}
-      );
-    }
 
     const unsubEvents = onSnapshot(
       query(collection(db, 'events'), limit(100)),
@@ -1399,55 +1403,100 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       () => {}
     );
 
-    let unsubPayoutMethods = () => {};
-    let unsubPayoutRequests = () => {};
-    let unsubTickets = () => {};
+    return () => {
+      unsubTracks();
+      unsubArtists();
+      unsubPublicPlaylists();
+      unsubEvents();
+      unsubPlatformConfig();
+    };
+  }, [catalogReloadNonce]);
 
-    if (activeUid) {
-      unsubPayoutMethods = onSnapshot(
-        query(collection(db, 'payoutMethods'), where('userId', '==', activeUid), limit(30)),
-        (snap) => {
-          setPayoutMethods(snap.docs.map((d) => ({ ...d.data(), id: d.id } as PayoutMethod)));
-        },
-        (err) => {
-          console.error('Payout methods listener error:', formatFirebaseError(err));
-        }
-      );
+  // Authenticated & Admin-scoped Firestore Synchronizers (start only after authReady settles)
+  useEffect(() => {
+    const fbUser = auth.currentUser;
+    const isAuthenticatedSession = Boolean(
+      authReady && currentUser && fbUser && fbUser.uid === currentUser.id
+    );
+    const activeUid = isAuthenticatedSession && fbUser ? fbUser.uid : null;
+    const isVerifiedAdminUser = Boolean(
+      isAuthenticatedSession && fbUser && isVerifiedAdminGoogleSession(fbUser)
+    );
 
-      unsubPayoutRequests = onSnapshot(
-        isVerifiedAdminUser
-          ? query(collection(db, 'payoutRequests'), limit(200))
-          : query(collection(db, 'payoutRequests'), where('userId', '==', activeUid), limit(100)),
-        (snap) => {
-          setPayoutRequests(
-            snap.docs
-              .map((d) => ({ ...d.data(), id: d.id } as PayoutRequest))
-              .sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime())
-          );
-        },
-        (err) => {
-          console.error('Payout requests listener error:', formatFirebaseError(err));
-        }
-      );
+    if (!activeUid) {
+      adminPlaylistsRef.current = null;
+      ownPlaylistsRef.current = [];
+      syncMergedPlaylists();
+      setPayoutMethods([]);
+      setPayoutRequests([]);
+      setSupportTickets([]);
+      setAuditLogs([]);
+      return;
+    }
 
-      unsubTickets = onSnapshot(
-        isVerifiedAdminUser
-          ? query(collection(db, 'tickets'), limit(200))
-          : query(collection(db, 'tickets'), where('userId', '==', activeUid), limit(80)),
+    let unsubAdminPlaylists = () => {};
+    let unsubOwnPlaylists = () => {};
+
+    if (isVerifiedAdminUser) {
+      unsubAdminPlaylists = onSnapshot(
+        query(collection(db, 'playlists'), limit(200)),
         (snap) => {
-          setSupportTickets(
-            snap.docs
-              .map((d) => ({ ...d.data(), id: d.id } as SupportTicket))
-              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-          );
+          adminPlaylistsRef.current = snap.docs.map((d) => ({ ...d.data(), id: d.id } as Playlist));
+          syncMergedPlaylists();
         },
         () => {}
       );
     } else {
-      setPayoutMethods([]);
-      setPayoutRequests([]);
-      setSupportTickets([]);
+      adminPlaylistsRef.current = null;
+      unsubOwnPlaylists = onSnapshot(
+        query(collection(db, 'playlists'), where('createdBy', '==', activeUid), limit(80)),
+        (snap) => {
+          ownPlaylistsRef.current = snap.docs.map((d) => ({ ...d.data(), id: d.id } as Playlist));
+          syncMergedPlaylists();
+        },
+        () => {}
+      );
     }
+
+    const unsubPayoutMethods = onSnapshot(
+      query(collection(db, 'payoutMethods'), where('userId', '==', activeUid), limit(30)),
+      (snap) => {
+        setPayoutMethods(snap.docs.map((d) => ({ ...d.data(), id: d.id } as PayoutMethod)));
+      },
+      (err) => {
+        console.error('Payout methods listener error:', formatFirebaseError(err));
+      }
+    );
+
+    const unsubPayoutRequests = onSnapshot(
+      isVerifiedAdminUser
+        ? query(collection(db, 'payoutRequests'), limit(200))
+        : query(collection(db, 'payoutRequests'), where('userId', '==', activeUid), limit(100)),
+      (snap) => {
+        setPayoutRequests(
+          snap.docs
+            .map((d) => ({ ...d.data(), id: d.id } as PayoutRequest))
+            .sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime())
+        );
+      },
+      (err) => {
+        console.error('Payout requests listener error:', formatFirebaseError(err));
+      }
+    );
+
+    const unsubTickets = onSnapshot(
+      isVerifiedAdminUser
+        ? query(collection(db, 'tickets'), limit(200))
+        : query(collection(db, 'tickets'), where('userId', '==', activeUid), limit(80)),
+      (snap) => {
+        setSupportTickets(
+          snap.docs
+            .map((d) => ({ ...d.data(), id: d.id } as SupportTicket))
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        );
+      },
+      () => {}
+    );
 
     let unsubAudit = () => {};
     if (isVerifiedAdminUser) {
@@ -1458,15 +1507,13 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         },
         () => {}
       );
+    } else {
+      setAuditLogs([]);
     }
 
     return () => {
-      unsubTracks();
-      unsubArtists();
-      unsubPlaylists();
+      unsubAdminPlaylists();
       unsubOwnPlaylists();
-      unsubEvents();
-      unsubPlatformConfig();
       unsubPayoutMethods();
       unsubPayoutRequests();
       unsubTickets();
@@ -1491,7 +1538,6 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const run = (async () => {
       lastCatalogRefreshAtRef.current = Date.now();
       try {
-        await enableNetwork(db).catch(() => {});
         const [connRes, , tracksRes, artistsRes] = await Promise.allSettled([
           testFirestoreConnection(),
           flushPendingSyncOperations(),
@@ -1619,6 +1665,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const retryCatalogLoad = () => {
     setIsCatalogLoaded(false);
     setCatalogError(null);
+    enableNetwork(db).catch(() => {});
     setCatalogReloadNonce((n) => n + 1);
   };
 
@@ -1654,23 +1701,24 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [currentUser?.id, isAuthenticatedListener]);
 
   /**
-   * Append-only real play event recording (30s minimum listen, 30-min dedupe window per user+track,
-   * anti-self-play flag for payout calculations).
-   * Unauthenticated / guest listening plays freely without counting as a real play until signup/login.
+   * Append-only real play event recording:
+   * - Counts after 30 seconds of listening or 50% of the track, whichever is shorter.
+   * - Same user replaying the same track counts once per hour.
+   * - Recorded server-side (/api/plays/record) with durable offline fallback.
    */
-  const recordValidatedPlay = (playedTrack: Track, listenedSeconds: number) => {
+  const recordValidatedPlay = async (playedTrack: Track, listenedSeconds: number, trackDurationSeconds: number) => {
     if (!currentUser || !auth.currentUser || auth.currentUser.uid !== currentUser.id) {
       return;
     }
     const userId = currentUser.id;
-    const windowKey = Math.floor(Date.now() / (30 * 60 * 1000));
+    const windowKey = Math.floor(Date.now() / (60 * 60 * 1000));
     const dedupeToken = `${userId}_${playedTrack.id}_${windowKey}`;
 
     try {
       const raw = sessionStorage.getItem(PLAY_DEDUPE_KEY);
       const seen: string[] = raw ? JSON.parse(raw) : [];
       if (seen.includes(dedupeToken)) {
-        return; // Deduplicate inside same 30-minute window
+        return; // Deduplicate inside same 1-hour window
       }
       const nextSeen = [...seen.slice(-50), dedupeToken];
       sessionStorage.setItem(PLAY_DEDUPE_KEY, JSON.stringify(nextSeen));
@@ -1714,6 +1762,62 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       },
     });
 
+    const normalizedListened = Math.max(1, Math.round(listenedSeconds));
+    let serverCounted = false;
+    let serverRejected = false;
+    let serverPersistedToFirestore = false;
+
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const resp = await fetch('/api/plays/record', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          trackId: playedTrack.id,
+          listenedSeconds: normalizedListened,
+          durationSeconds: trackDurationSeconds || playedTrack.durationSeconds || 0,
+          country: regionKey,
+        }),
+      });
+      if (resp.ok) {
+        const json = (await resp.json()) as {
+          ok?: boolean;
+          counted?: boolean;
+          firestorePersisted?: boolean;
+        };
+        if (json.ok && json.counted === false) {
+          serverRejected = true;
+        } else if (json.ok && json.counted) {
+          serverCounted = true;
+          serverPersistedToFirestore = Boolean(json.firestorePersisted);
+        }
+      }
+    } catch {
+      // Offline / unreachable: fall through to durable Firestore outbox below
+    }
+
+    if (serverRejected) {
+      // Server 1-hour dedupe or duration threshold rejected this duplicate replay; revert optimistic increment
+      setTracks((all) =>
+        all.map((t) => {
+          if (t.id !== playedTrack.id) return t;
+          const nextRegionStats = { ...(t.regionStats || {}) };
+          if ((nextRegionStats[regionKey] || 0) > 0) {
+            nextRegionStats[regionKey] = nextRegionStats[regionKey] - 1;
+          }
+          return { ...t, plays: Math.max(0, (t.plays || 0) - 1), regionStats: nextRegionStats };
+        })
+      );
+      return;
+    }
+
+    if (serverCounted && serverPersistedToFirestore) {
+      return;
+    }
+
     const playId = `play-${dedupeToken}-${Date.now()}`;
     const playRecord: PlayRecord = {
       id: playId,
@@ -1721,7 +1825,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       artistId: playedTrack.artistId,
       userId,
       country: regionKey,
-      listenedSeconds: Math.max(30, Math.round(listenedSeconds)),
+      listenedSeconds: normalizedListened,
       windowKey,
       isArtistSelfPlay,
       qualifiesForPayout: !isArtistSelfPlay,
@@ -1729,7 +1833,6 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     try {
-      // Write append-only play doc reliably via durable outbox (skip Express mirror to avoid saturating backend at high scale)
       void durableSetDoc('plays', playId, playRecord as unknown as Record<string, unknown>, {
         mirrorBackup: false,
       });
@@ -1772,15 +1875,28 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setDuration(effectiveDur);
       }
       updatePinnedPlayerPosition(curr, effectiveDur);
-      sessionListenedSeconds.current = Math.floor(curr);
+
+      if (lastTimeUpdatePosRef.current !== null) {
+        const delta = curr - lastTimeUpdatePosRef.current;
+        if (delta > 0 && delta <= 3) {
+          actualListenedSecRef.current += delta;
+        }
+      }
+      lastTimeUpdatePosRef.current = curr;
+      sessionListenedSeconds.current = Math.floor(actualListenedSecRef.current);
+
+      const trackDurForRule = effectiveDur > 0 ? effectiveDur : currentTrack?.durationSeconds || 0;
+      const playThresholdSeconds =
+        trackDurForRule > 0 ? Math.min(30, Math.max(1, Math.floor(trackDurForRule * 0.5))) : 30;
+
       if (
         isAuthenticatedListener &&
-        sessionListenedSeconds.current >= 30 &&
+        sessionListenedSeconds.current >= playThresholdSeconds &&
         !hasStreamBeenValidated.current &&
         currentTrack
       ) {
         hasStreamBeenValidated.current = true;
-        recordValidatedPlay(currentTrack, sessionListenedSeconds.current);
+        void recordValidatedPlay(currentTrack, sessionListenedSeconds.current, trackDurForRule);
       }
 
       if (dur > 0) {
@@ -1968,6 +2084,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         : 0;
 
     sessionListenedSeconds.current = 0;
+    actualListenedSecRef.current = 0;
+    lastTimeUpdatePosRef.current = options?.startAtSeconds ?? 0;
     hasStreamBeenValidated.current = false;
 
     const startPos = options?.startAtSeconds ?? 0;
@@ -2503,12 +2621,42 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [currentUser?.likedArtistIds, currentUser?.id]);
 
+  const saveTrackInFlightRef = useRef<Set<string>>(new Set());
   const toggleSaveTrack = (trackId: string) => {
-    setSavedTrackIds((prev) => {
-      const next = prev.includes(trackId) ? prev.filter((id) => id !== trackId) : [...prev, trackId];
-      try { localStorage.setItem('lowervibe_saved_tracks', JSON.stringify(next)); } catch {}
-      return next;
-    });
+    if (!currentUser || !auth.currentUser || auth.currentUser.uid !== currentUser.id) {
+      requireAuth(() => toggleSaveTrack(trackId), 'Sign in to save songs to your library');
+      return;
+    }
+    if (saveTrackInFlightRef.current.has(trackId)) return;
+
+    const prevIds = savedTrackIds;
+    const exists = prevIds.includes(trackId);
+    const next = exists ? prevIds.filter((id) => id !== trackId) : Array.from(new Set([...prevIds, trackId]));
+
+    // Optimistic state + local storage + user profile update
+    setSavedTrackIds(next);
+    updateCurrentUser({ savedTrackIds: next });
+    try {
+      localStorage.setItem('lowervibe_saved_tracks', JSON.stringify(next));
+    } catch {}
+
+    saveTrackInFlightRef.current.add(trackId);
+    void updateDoc(doc(db, 'users', currentUser.id), {
+      savedTrackIds: next,
+      updatedAt: new Date().toISOString(),
+    })
+      .catch((err) => {
+        console.warn('toggleSaveTrack failed, rolling back:', formatFirebaseError(err, 'Save failed'));
+        setSavedTrackIds(prevIds);
+        updateCurrentUser({ savedTrackIds: prevIds });
+        try {
+          localStorage.setItem('lowervibe_saved_tracks', JSON.stringify(prevIds));
+        } catch {}
+        showToast('Could not save to library. Changes reverted.', 'error');
+      })
+      .finally(() => {
+        saveTrackInFlightRef.current.delete(trackId);
+      });
   };
 
   const addReaction = (trackId: string, emoji: string) => {
@@ -4446,6 +4594,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         catalogError,
         playHistory,
         isFullscreenPlayerOpen,
+        fullscreenPlayerTab,
         activeShareTrack,
         activeShareArtist,
         activeDetailTrack,
@@ -4557,6 +4706,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         openAnalyticsModal,
         closeAnalyticsModal,
         setIsFullscreenPlayerOpen,
+        openFullscreenPlayer,
+        setFullscreenPlayerTab,
         setActiveShareTrack,
         setActiveShareArtist,
         setActiveDetailTrack,

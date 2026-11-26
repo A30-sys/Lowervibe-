@@ -470,14 +470,15 @@ service cloud.firestore {
       }
     }
 
-    // Verified Plays Ledger: immutable after creation, requires >= 30s listen and matching userId
+    // Verified Plays Ledger: immutable after creation, requires >= 1s listen (30s or 50% of track) and matching userId
     match /plays/{playId} {
       allow read: if isSignedIn();
       allow create: if isValidId(playId)
         && isSignedIn()
         && (request.resource.data.userId == request.auth.uid || isAdmin())
         && request.resource.data.listenedSeconds is number
-        && request.resource.data.listenedSeconds >= 30;
+        && request.resource.data.listenedSeconds >= 1
+        && request.resource.data.listenedSeconds <= 86400;
       allow update, delete: if isAdmin();
     }
 

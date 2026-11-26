@@ -10,6 +10,50 @@
     ],
     "rewrites": [
       {
+        "source": "/og/**",
+        "function": "ogCover"
+      },
+      {
+        "source": "/api/og/**",
+        "function": "ogCover"
+      },
+      {
+        "source": "/s/**",
+        "function": "shareMeta"
+      },
+      {
+        "source": "/song/**",
+        "function": "shareMeta"
+      },
+      {
+        "source": "/tracks/**",
+        "function": "shareMeta"
+      },
+      {
+        "source": "/a/**",
+        "function": "shareMeta"
+      },
+      {
+        "source": "/artist/**",
+        "function": "shareMeta"
+      },
+      {
+        "source": "/artists/**",
+        "function": "shareMeta"
+      },
+      {
+        "source": "/charts",
+        "function": "shareMeta"
+      },
+      {
+        "source": "/trending",
+        "function": "shareMeta"
+      },
+      {
+        "source": "/promo",
+        "function": "shareMeta"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

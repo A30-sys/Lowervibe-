@@ -1,6 +1,7 @@
 import {
+  ArrowRight,
   ArrowUpDown,
-  Bookmark,
+  CheckCircle2,
   Compass,
   Disc3,
   Flame,
@@ -11,8 +12,10 @@ import {
   Play,
   RotateCcw,
   Search,
+  Shuffle,
   Sliders,
   Tag,
+  Trophy,
   Volume2,
   X,
 } from 'lucide-react';
@@ -28,6 +31,8 @@ import { FirestoreGenre, GenreSortMode, Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG } from '../../utils/artworkFallback';
 import { formatTime, getTrackLikeCount, isTrackLikedByUser } from '../../utils/formatters';
 import { normalizeGenreCategory, translateGenreCategory } from '../../utils/genreCategories';
+import { bumpVisitMixSeed, getVisitMixSeed, mixTracksForVisit } from '../../utils/mixEngine';
+import { getTrackSubTags, trackMatchesTag } from '../../utils/tags';
 import { TrackRowSkeleton } from '../common/LoadingSkeleton';
 
 interface DiscoverViewProps {
@@ -47,6 +52,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
     playTrack,
     togglePlayPause,
     featuredVibe,
+    savedTrackIds,
     toggleSaveTrack,
     selectedCountry,
   } = useAudio();
@@ -55,7 +61,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
   const { language, t } = useLanguage();
   const isNy = language === 'ny';
   const { showToast } = useToast();
-  const { searchParams } = useRouter();
+  const { navigate, searchParams } = useRouter();
 
   const [activeTab, setActiveTab] = useState<'all' | 'charts' | 'chill' | 'rising' | 'verified'>('all');
   const [viewMode, setViewMode] = useState<'rows' | 'grid'>('rows');
@@ -63,6 +69,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
 
   const [firestoreGenres, setFirestoreGenres] = useState<FirestoreGenre[]>([]);
   const [selectedGenre, setSelectedGenre] = useState<string>('all');
+  const [selectedTag, setSelectedTag] = useState<string>('all');
   const [genreFilterBehavior, setGenreFilterBehavior] = useState<'prioritize_sort' | 'strict_filter'>('prioritize_sort');
   const [genreSortMode, setGenreSortMode] = useState<GenreSortMode>('genre_priority');
 
@@ -72,11 +79,16 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
   const [searchFilter, setSearchFilter] = useState('');
   const [displayCount, setDisplayCount] = useState(8);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [visitSeed, setVisitSeed] = useState<number>(() => getVisitMixSeed());
 
   useEffect(() => {
     const genreParam = searchParams.get('genre') || searchParams.get('category');
     if (genreParam) {
       setSelectedGenre(genreParam);
+    }
+    const tagParam = searchParams.get('tag');
+    if (tagParam) {
+      setSelectedTag(tagParam);
     }
     const tabParam = searchParams.get('tab');
     if (tabParam && ['all', 'charts', 'chill', 'rising', 'verified'].includes(tabParam)) {
@@ -155,7 +167,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
         (t) => normalizeGenreCategory(t.genre).toLowerCase() === normalizedSel
       ).length,
       isFeatured: false,
-      icon: '🎵',
+      icon: '',
     };
   }, [selectedGenre, firestoreGenres, publicTracks, isNy, language]);
 
@@ -188,6 +200,8 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
         if (!matchesTrackGenre(t)) return false;
       }
 
+      if (selectedTag !== 'all' && !trackMatchesTag(t, selectedTag)) return false;
+
       if (selectedMood !== 'all' && t.mood !== selectedMood) return false;
       if (selectedRegion !== 'all' && !matchesLocationFilter(t.region, selectedRegion)) return false;
 
@@ -203,12 +217,23 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
           t.artistName.toLowerCase().includes(q) ||
           t.genre.toLowerCase().includes(q) ||
           localizedGenre.includes(q) ||
+          (t.mood && t.mood.toLowerCase().includes(q)) ||
+          (Array.isArray(t.vibeTags) && t.vibeTags.some((v) => v.toLowerCase().includes(q))) ||
           (t.region && t.region.toLowerCase().includes(q))
         );
       }
 
       return true;
     });
+
+    if (
+      genreSortMode === 'genre_priority' &&
+      selectedGenre === 'all' &&
+      selectedTag === 'all' &&
+      !searchFilter.trim()
+    ) {
+      return mixTracksForVisit(list, visitSeed, { salt: 88 });
+    }
 
     return [...list].sort((a, b) => {
       const aMatchesGenre = selectedGenre !== 'all' && matchesTrackGenre(a);
@@ -229,7 +254,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
       if (aMatchesGenre && bMatchesGenre) return (b.plays || 0) - (a.plays || 0);
       return 0;
     });
-  }, [publicTracks, activeTab, selectedGenre, genreFilterBehavior, genreSortMode, selectedMood, selectedRegion, bpmRange, searchFilter, language]);
+  }, [publicTracks, activeTab, selectedGenre, selectedTag, genreFilterBehavior, genreSortMode, selectedMood, selectedRegion, bpmRange, searchFilter, language, visitSeed]);
 
   const topPlayedTracks = useMemo(
     () => [...publicTracks].sort((a, b) => (b.plays || 0) - (a.plays || 0)).slice(0, 5),
@@ -283,6 +308,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
 
   const handleResetFilters = () => {
     setSelectedGenre('all');
+    setSelectedTag('all');
     setGenreSortMode('genre_priority');
     setGenreFilterBehavior('prioritize_sort');
     setSelectedMood('all');
@@ -385,18 +411,36 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
 
             <div className="space-y-3 flex-1 text-center md:text-left">
               <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 text-xs">
-                <span className="font-bold uppercase tracking-wider text-[11px] text-[var(--accent-text)]">
+                <button
+                  type="button"
+                  onClick={() => navigate('/charts')}
+                  className="font-bold uppercase tracking-wider text-[11px] text-[var(--accent-text)] hover:underline cursor-pointer"
+                >
                   {isNy ? 'Nyimbo Yosankhidwa' : 'Featured Release'}
-                </span>
-                <span className="text-[var(--text-muted)]">·</span>
-                <span className="font-mono text-[11px] text-[var(--text-muted)]">
-                  {featuredRecord.region || (isNy ? 'Padziko Lonse' : 'Global')}
-                </span>
+                </button>
+                {featuredRecord.region && (
+                  <>
+                    <span className="text-[var(--text-muted)]">·</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRegion(featuredRecord.region!)}
+                      className="font-mono text-[11px] text-[var(--text-muted)] hover:text-[var(--accent-text)] hover:underline cursor-pointer"
+                    >
+                      {featuredRecord.region}
+                    </button>
+                  </>
+                )}
               </div>
 
               <div>
                 <h2 className="text-2xl sm:text-3xl font-black font-heading text-[var(--text)] tracking-tight">
-                  {featuredRecord.title}
+                  <button
+                    type="button"
+                    onClick={() => onOpenTrackDetails(featuredRecord)}
+                    className="text-left hover:text-[var(--accent-text)] transition cursor-pointer"
+                  >
+                    {featuredRecord.title}
+                  </button>
                 </h2>
                 <button
                   type="button"
@@ -428,14 +472,39 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                   <span>{currentTrack?.id === featuredRecord.id && isPlaying ? t('pause') : t('play')}</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={(e) => handleToggleLikeTrack(e, featuredRecord)}
-                  className="px-4 py-3 rounded-full bg-[var(--surface-2)] hover:border-[var(--border-strong)] text-[var(--text)] text-xs font-bold border border-[var(--border)] transition flex items-center gap-2 cursor-pointer min-h-[44px]"
-                >
-                  <Bookmark className="w-4 h-4 text-[var(--accent-text)]" />
-                  <span>{t('save')}</span>
-                </button>
+                {(() => {
+                  const isFeaturedSaved = (savedTrackIds || []).includes(featuredRecord.id);
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!currentUser) {
+                          toggleSaveTrack(featuredRecord.id);
+                          return;
+                        }
+                        toggleSaveTrack(featuredRecord.id);
+                        showToast(
+                          isFeaturedSaved
+                            ? isNy
+                              ? `"${featuredRecord.title}" yachotsedwa mu Nyumba`
+                              : `Removed "${featuredRecord.title}" from Library`
+                            : isNy
+                            ? `"${featuredRecord.title}" yasungidwa mu Nyumba`
+                            : `Saved "${featuredRecord.title}" to Library`
+                        );
+                      }}
+                      aria-pressed={isFeaturedSaved}
+                      className={`px-4 py-3 rounded-full text-xs font-bold border transition flex items-center gap-2 cursor-pointer min-h-[44px] ${
+                        isFeaturedSaved
+                          ? 'bg-[var(--accent)]/15 border-[var(--accent)] text-[var(--accent-text)]'
+                          : 'bg-[var(--surface-2)] hover:border-[var(--border-strong)] text-[var(--text)] border-[var(--border)]'
+                      }`}
+                    >
+                      <CheckCircle2 className={`w-4 h-4 ${isFeaturedSaved ? 'fill-[var(--accent)]/20' : 'text-[var(--accent-text)]'}`} />
+                      <span>{isFeaturedSaved ? (isNy ? 'Zasungidwa' : 'Saved') : t('save')}</span>
+                    </button>
+                  );
+                })()}
 
                 <button
                   type="button"
@@ -498,6 +567,26 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setVisitSeed(bumpVisitMixSeed())}
+                className="px-3 py-2 rounded-xl bg-[var(--surface-2)] hover:border-[var(--border-strong)] border border-[var(--border)] text-xs font-bold text-[var(--text)] inline-flex items-center gap-1.5 cursor-pointer"
+                title={t('mix_again', 'Remix')}
+              >
+                <Shuffle className="w-3.5 h-3.5 text-[var(--accent-text)]" />
+                <span>{t('mix_again', 'Remix')}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/charts')}
+                className="px-3 py-2 rounded-xl bg-[var(--surface-2)] hover:border-[var(--accent)]/50 border border-[var(--border)] text-xs font-bold text-[var(--accent-text)] inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trophy className="w-3.5 h-3.5" />
+                <span>{isNy ? 'Onani Tchati' : 'View Charts'}</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+
               <div className="flex items-center p-1 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs">
                 <button
                   type="button"
@@ -531,7 +620,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                   className="bg-transparent text-[var(--text)] text-xs font-semibold focus:outline-none cursor-pointer pr-1"
                   title={t('sort_by')}
                 >
-                  <option value="genre_priority">{isNy ? 'Mtundu Poyamba' : 'Sort: Genre Match First'}</option>
+                  <option value="genre_priority">{isNy ? 'Kusakaniza Kwapadera' : 'Mix & Genre Match'}</option>
                   <option value="most_played">{isNy ? 'Zomveredwa Kwambiri' : 'Sort: Most Played'}</option>
                   <option value="newest">{isNy ? 'Zatsopano' : 'Sort: Newest Releases'}</option>
                   <option value="bpm_asc">{isNy ? 'Liwiro (Pansi ku Mwamba)' : 'Sort: BPM (Low to High)'}</option>
@@ -592,12 +681,33 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
             })}
           </div>
 
+          {selectedTag !== 'all' && (
+            <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--accent)]/40 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2">
+                <Tag className="w-4 h-4 text-[var(--accent-text)]" />
+                <span className="font-bold text-[var(--text)]">#{selectedTag}</span>
+                <span className="text-[var(--text-muted)]">
+                  ({sortedAndFilteredTracks.length}{' '}
+                  {sortedAndFilteredTracks.length === 1 ? 'song' : 'songs'})
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedTag('all')}
+                className="px-3 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] font-bold inline-flex items-center gap-1 cursor-pointer text-xs"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>{isNy ? 'Chotsani Tag' : 'Clear Tag'}</span>
+              </button>
+            </div>
+          )}
+
           {currentGenreMeta && (
             <div className="p-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--accent)]/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
               <div className="flex items-center gap-3 min-w-0">
-                <span className="text-2xl p-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] shrink-0">
-                  {currentGenreMeta.icon || '🎵'}
-                </span>
+                <div className="w-10 h-10 rounded-xl bg-[var(--surface)] border border-[var(--border)] flex items-center justify-center shrink-0">
+                  <Disc3 className="w-5 h-5 text-[var(--accent-text)]" />
+                </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-black text-[var(--text)] font-heading">
@@ -759,10 +869,26 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                             className="w-10 h-10 rounded-lg object-cover shrink-0"
                           />
                           <div className="min-w-0 flex-1">
-                            <div className="text-xs font-bold text-[var(--text)] truncate group-hover/row:text-[var(--accent-text)] transition">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/tracks/${t.id}`);
+                              }}
+                              className="text-xs font-bold text-[var(--text)] hover:text-[var(--accent-text)] hover:underline truncate block text-left max-w-full cursor-pointer"
+                            >
                               {t.title}
-                            </div>
-                            <div className="text-[11px] text-[var(--text-muted)] truncate">{t.artistName}</div>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectArtist(t.artistId);
+                              }}
+                              className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text)] hover:underline truncate block text-left max-w-full cursor-pointer"
+                            >
+                              {t.artistName}
+                            </button>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
@@ -881,9 +1007,16 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="text-xs sm:text-sm font-bold text-[var(--text)] group-hover:text-[var(--accent-text)] transition truncate">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/tracks/${track.id}`);
+                            }}
+                            className="text-xs sm:text-sm font-bold text-[var(--text)] hover:text-[var(--accent-text)] hover:underline transition truncate text-left cursor-pointer"
+                          >
                             {track.title}
-                          </h4>
+                          </button>
                           {matchesSelectedGenre && (
                             <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-[var(--accent)]/15 text-[var(--accent-text)] border border-[var(--accent)]/30 shrink-0">
                               {isNy ? 'Zogwirizana' : 'Match'}
@@ -891,7 +1024,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                           )}
                         </div>
 
-                        <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] mt-0.5 truncate">
+                        <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] mt-0.5 flex-wrap">
                           <button
                             type="button"
                             onClick={(e) => {
@@ -903,15 +1036,46 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                             {track.artistName}
                           </button>
                           <span className="opacity-40 hidden sm:inline">•</span>
-                          <span className="text-[11px] hidden sm:inline">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedGenre(normalizeGenreCategory(track.genre));
+                            }}
+                            className="text-[11px] hidden sm:inline hover:text-[var(--text)] hover:underline cursor-pointer"
+                          >
                             {translateGenreCategory(track.genre, language)}
-                          </span>
+                          </button>
                           {track.region && (
                             <>
                               <span className="opacity-40 hidden md:inline">•</span>
-                              <span className="text-[11px] text-[var(--accent-text)] hidden md:inline">{track.region}</span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedRegion(track.region!);
+                                }}
+                                className="text-[11px] text-[var(--accent-text)] hidden md:inline hover:underline cursor-pointer"
+                              >
+                                {track.region}
+                              </button>
                             </>
                           )}
+                          {getTrackSubTags(track)
+                            .slice(0, 2)
+                            .map((subTag) => (
+                              <button
+                                key={subTag}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/search?tag=${encodeURIComponent(subTag)}`);
+                                }}
+                                className="text-[10.5px] font-semibold text-[var(--text-muted)] hover:text-[var(--accent-text)] hover:underline cursor-pointer hidden md:inline"
+                              >
+                                #{subTag}
+                              </button>
+                            ))}
                         </div>
                       </div>
                     </div>
@@ -1017,15 +1181,22 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
 
                       <div className="space-y-1">
                         <div className="flex items-center justify-between gap-2">
-                          <h4 className="text-sm font-black font-heading text-[var(--text)] truncate group-hover:text-[var(--accent-text)] transition-colors">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/tracks/${track.id}`);
+                            }}
+                            className="text-sm font-black font-heading text-[var(--text)] hover:text-[var(--accent-text)] hover:underline truncate text-left cursor-pointer"
+                          >
                             {track.title}
-                          </h4>
+                          </button>
                           <span className="text-[10px] font-mono text-[var(--text-muted)] shrink-0">
                             {formatTime(track.durationSeconds)}
                           </span>
                         </div>
 
-                        <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center justify-between text-xs gap-2">
                           <button
                             type="button"
                             onClick={(e) => {
@@ -1036,14 +1207,34 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
                           >
                             {track.artistName}
                           </button>
-                          <span className="text-[10px] font-mono text-[var(--accent-text)]">{track.region || 'Global'}</span>
+                          {track.region && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedRegion(track.region!);
+                              }}
+                              className="text-[10px] font-mono text-[var(--accent-text)] hover:underline shrink-0 cursor-pointer"
+                            >
+                              {track.region}
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
 
-                    <div className="pt-3 mt-3 border-t border-[var(--border)] flex items-center justify-between text-[11px] font-mono text-[var(--text-muted)]">
-                      <span>{translateGenreCategory(track.genre, language)}</span>
-                      <span>{track.bpm} BPM</span>
+                    <div className="pt-3 mt-3 border-t border-[var(--border)] flex items-center justify-between gap-2 text-[11px] font-mono text-[var(--text-muted)]">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedGenre(normalizeGenreCategory(track.genre));
+                        }}
+                        className="hover:text-[var(--text)] hover:underline truncate cursor-pointer text-left"
+                      >
+                        {translateGenreCategory(track.genre, language)}
+                      </button>
+                      <span className="shrink-0">{track.bpm} BPM</span>
                     </div>
                   </div>
                 );

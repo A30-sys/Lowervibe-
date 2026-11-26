@@ -22,6 +22,7 @@ const APPROVAL_LEDGER_PATH = path.join(LEDGER_DIR, 'approval_tokens.json');
 const PAYOUT_LEDGER_PATH = path.join(LEDGER_DIR, 'payout_tokens.json');
 const SYNC_LEDGER_PATH = path.join(LEDGER_DIR, 'sync_events.json');
 const ANALYTICS_LEDGER_PATH = path.join(LEDGER_DIR, 'analytics_events.json');
+const PLAYS_LEDGER_PATH = path.join(LEDGER_DIR, 'plays_ledger.json');
 const SIGNING_KEY_PATH = path.join(LEDGER_DIR, '.server_signing_key');
 
 const PRIMARY_ADMIN_EMAIL = 'odulamw@gmail.com';
@@ -243,6 +244,88 @@ function decodeFirestoreFields(fields?: Record<string, FirestoreRestValue>): Rec
     out[k] = decodeFirestoreValue(v);
   }
   return out;
+}
+
+function encodeFirestoreValue(val: unknown): FirestoreRestValue {
+  if (val === null || val === undefined) return { nullValue: null };
+  if (typeof val === 'boolean') return { booleanValue: val };
+  if (typeof val === 'number') {
+    if (Number.isInteger(val)) return { integerValue: String(val) };
+    return { doubleValue: val };
+  }
+  if (typeof val === 'string') return { stringValue: val };
+  if (Array.isArray(val)) {
+    return { arrayValue: { values: val.map((item) => encodeFirestoreValue(item)) } };
+  }
+  if (typeof val === 'object') {
+    return { mapValue: { fields: encodeFirestoreFields(val as Record<string, unknown>) } };
+  }
+  return { stringValue: String(val) };
+}
+
+function encodeFirestoreFields(obj: Record<string, unknown>): Record<string, FirestoreRestValue> {
+  const fields: Record<string, FirestoreRestValue> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) {
+      fields[k] = encodeFirestoreValue(v);
+    }
+  }
+  return fields;
+}
+
+async function firestoreCreateDocRest(
+  collectionId: string,
+  docId: string,
+  data: Record<string, unknown>,
+  idToken: string
+): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${getFirestoreBaseUrl()}/${encodeURIComponent(collectionId)}/${encodeURIComponent(docId)}?currentDocument.exists=false`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ fields: encodeFirestoreFields(data) }),
+        signal: AbortSignal.timeout(4000),
+      }
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function firestoreIncrementFieldsRest(
+  writes: Array<{ collection: string; docId: string; increments: Record<string, number> }>,
+  idToken: string
+): Promise<boolean> {
+  try {
+    const docBase = `projects/${FIREBASE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents`;
+    const commitWrites = writes.map((w) => ({
+      transform: {
+        document: `${docBase}/${w.collection}/${w.docId}`,
+        fieldTransforms: Object.entries(w.increments).map(([fieldPath, amount]) => ({
+          fieldPath,
+          increment: { integerValue: String(Math.round(amount)) },
+        })),
+      },
+    }));
+    const res = await fetch(`${getFirestoreBaseUrl()}:commit`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({ writes: commitWrites }),
+      signal: AbortSignal.timeout(4000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 function getFirestoreBaseUrl(): string {
@@ -546,6 +629,17 @@ function truncateSeoText(text: string, maxLen: number): string {
   return `${(lastSpace > 40 ? sliced.slice(0, lastSpace) : sliced).trim()}…`;
 }
 
+function formatTrackShareTitle(trackTitle: string, artistName: string): string {
+  const safeTrack = String(trackTitle || 'Track').replace(/\s+/g, ' ').trim();
+  const safeArtist = String(artistName || 'Independent Artist').replace(/\s+/g, ' ').trim();
+  const full = `${safeTrack} by ${safeArtist} – LOWERVIBE`;
+  if (full.length <= 70) return full;
+
+  const trimmedTrack = safeTrack.length > 28 ? `${safeTrack.slice(0, 27).trim()}…` : safeTrack;
+  const trimmedArtist = safeArtist.length > 22 ? `${safeArtist.slice(0, 21).trim()}…` : safeArtist;
+  return `${trimmedTrack} by ${trimmedArtist} – LOWERVIBE`;
+}
+
 function resolveSeoPublicAudio(rawUrl: unknown, origin: string): string | undefined {
   if (typeof rawUrl !== 'string') return undefined;
   const trimmed = rawUrl.trim();
@@ -744,6 +838,126 @@ async function lookupPublicTrackForSeo(
   return { track, artist };
 }
 
+const seoChartsCache: {
+  expiresAt: number;
+  topTrack: Record<string, any> | null;
+  artist: Record<string, any> | null;
+  totalCount: number;
+} = {
+  expiresAt: 0,
+  topTrack: null,
+  artist: null,
+  totalCount: 0,
+};
+
+async function lookupTopChartsForSeo(): Promise<{
+  topTrack: Record<string, any> | null;
+  artist: Record<string, any> | null;
+  totalCount: number;
+}> {
+  if (seoChartsCache.expiresAt > Date.now()) {
+    return {
+      topTrack: seoChartsCache.topTrack,
+      artist: seoChartsCache.artist,
+      totalCount: seoChartsCache.totalCount,
+    };
+  }
+
+  let topTrack: Record<string, any> | null = null;
+  let artist: Record<string, any> | null = null;
+  let totalCount = 0;
+
+  try {
+    const docs = await firestoreRunListQueryRest('tracks', 300);
+    const valid = docs
+      .filter(
+        (t) =>
+          !t.isDraft &&
+          !t.isDeranked &&
+          !isExcludedDemoArtistRecord({ id: t.artistId, name: t.artistName })
+      )
+      .sort((a, b) => Number(b.plays || 0) - Number(a.plays || 0));
+
+    totalCount = valid.length;
+    topTrack = valid[0] || null;
+    if (topTrack?.artistId) {
+      artist = await firestoreGetDocRest(`artists/${encodeURIComponent(String(topTrack.artistId))}`);
+      if (isExcludedDemoArtistRecord(artist)) {
+        artist = null;
+      }
+    }
+  } catch {}
+
+  seoChartsCache.expiresAt = Date.now() + 30_000;
+  seoChartsCache.topTrack = topTrack;
+  seoChartsCache.artist = artist;
+  seoChartsCache.totalCount = totalCount;
+
+  return { topTrack, artist, totalCount };
+}
+
+function injectChartsSeoHtml(
+  html: string,
+  topTrack: Record<string, any> | null,
+  artist: Record<string, any> | null,
+  totalCount: number,
+  req: express.Request
+): string {
+  const origin = resolveRequestOrigin(req);
+  const canonicalUrl = `${origin}/charts`;
+  const safeTrack = String(topTrack?.title || '').trim();
+  const safeArtist = String(topTrack?.artistName || artist?.name || '').trim();
+
+  const title = safeTrack
+    ? `Most Played & Trending Charts (#1: ${safeTrack} by ${safeArtist || 'Artist'}) – LOWERVIBE`
+    : 'Most Played & Trending Charts – LOWERVIBE';
+  const description = truncateSeoText(
+    safeTrack
+      ? `Explore ${totalCount || 'all'} tracks on LOWERVIBE Top Charts. #1 right now: "${safeTrack}" by ${safeArtist || 'Independent Artist'}. Stream free and share trending genres.`
+      : 'Explore and share the most played songs, fastest-rising trending tracks, and top genres across LOWERVIBE.',
+    160
+  );
+
+  const rawImg = topTrack
+    ? pickFirstValidArtworkCandidate([
+        topTrack.coverArt,
+        artist?.avatar,
+        topTrack.artistAvatar,
+        artist?.banner,
+      ])
+    : undefined;
+  const image = rawImg ? `${origin}/og/charts/cover` : `${origin}/icons/pwa-512x512.png`;
+  const imageMime = inferImageMimeType(image, rawImg ? 'image/jpeg' : 'image/png');
+  const imageAlt = safeTrack ? `#1 Charting: ${safeTrack} by ${safeArtist}` : 'LOWERVIBE Top Charts';
+
+  const headInject = [
+    `<title>${escapeHtmlAttr(title)}</title>`,
+    `<link rel="canonical" href="${escapeHtmlAttr(canonicalUrl)}" />`,
+    `<meta name="description" content="${escapeHtmlAttr(description)}" />`,
+    `<meta property="og:type" content="website" />`,
+    `<meta property="og:locale" content="en_US" />`,
+    `<meta property="og:site_name" content="LOWERVIBE" />`,
+    `<meta property="og:title" content="${escapeHtmlAttr(title)}" />`,
+    `<meta property="og:description" content="${escapeHtmlAttr(description)}" />`,
+    `<meta property="og:image" content="${escapeHtmlAttr(image)}" />`,
+    `<meta property="og:image:secure_url" content="${escapeHtmlAttr(image)}" />`,
+    `<meta property="og:image:type" content="${escapeHtmlAttr(imageMime)}" />`,
+    `<meta property="og:image:width" content="512" />`,
+    `<meta property="og:image:height" content="512" />`,
+    `<meta property="og:image:alt" content="${escapeHtmlAttr(imageAlt)}" />`,
+    `<meta property="og:url" content="${escapeHtmlAttr(canonicalUrl)}" />`,
+    `<meta name="twitter:card" content="summary_large_image" />`,
+    `<meta name="twitter:title" content="${escapeHtmlAttr(title)}" />`,
+    `<meta name="twitter:description" content="${escapeHtmlAttr(description)}" />`,
+    `<meta name="twitter:image" content="${escapeHtmlAttr(image)}" />`,
+    `<meta name="twitter:image:src" content="${escapeHtmlAttr(image)}" />`,
+    `<meta name="twitter:image:alt" content="${escapeHtmlAttr(imageAlt)}" />`,
+  ].join('\n    ');
+
+  const stripped = stripExistingSeoTags(html);
+  return stripped.replace('</head>', `    ${headInject}\n  </head>`);
+}
+
 function injectTrackSeoHtml(
   html: string,
   track: Record<string, any> | null,
@@ -760,10 +974,7 @@ function injectTrackSeoHtml(
 
   const safeTrack = String(track.title || 'Track').trim();
   const safeArtist = String(track.artistName || artist?.name || 'Independent Artist').trim();
-  let title = `${safeTrack} by ${safeArtist} – LOWERVIBE`;
-  if (title.length > 60) {
-    title = `${truncateSeoText(safeTrack, 38)} – LOWERVIBE`;
-  }
+  const title = formatTrackShareTitle(safeTrack, safeArtist);
 
   const rawStory = typeof track.story === 'string' ? track.story.replace(/\s+/g, ' ').trim() : '';
   const description = truncateSeoText(
@@ -883,6 +1094,7 @@ async function buildDynamicSitemapXml(origin: string): Promise<string> {
 
   [
     { loc: `${origin}/`, changefreq: 'daily', priority: '1.0', lastmod: today },
+    { loc: `${origin}/charts`, changefreq: 'daily', priority: '0.95', lastmod: today },
     { loc: `${origin}/discover`, changefreq: 'daily', priority: '0.9', lastmod: today },
     { loc: `${origin}/artists`, changefreq: 'daily', priority: '0.9', lastmod: today },
     { loc: `${origin}/search`, changefreq: 'weekly', priority: '0.7', lastmod: today },
@@ -1881,6 +2093,173 @@ async function startServer() {
     }
   });
 
+  // 4e-2. Server-Validated Real Plays Recording (30s or 50% rule + 1-hour per-user dedupe)
+  const playsLedgerCache = readJsonArray<Record<string, unknown>>(PLAYS_LEDGER_PATH);
+  const recordedPlayDedupeKeys = new Map<string, number>();
+  for (const row of playsLedgerCache) {
+    if (typeof row.dedupeKey === 'string' && typeof row.windowKey === 'number') {
+      recordedPlayDedupeKeys.set(row.dedupeKey, row.windowKey);
+    }
+  }
+
+  app.post('/api/plays/record', async (req, res) => {
+    try {
+      const authUser = await verifyFirebaseBearerToken(req);
+      if (!authUser) {
+        res.status(401).json({ ok: false, error: 'Unauthorized: sign in required to count real plays.' });
+        return;
+      }
+
+      const trackId = String(req.body?.trackId || '').trim();
+      const listenedSecondsRaw = Number(req.body?.listenedSeconds ?? 0);
+      const durationSecondsRaw = Number(req.body?.durationSeconds ?? 0);
+      const requestedCountry = String(req.body?.country || '').trim().slice(0, 64);
+
+      if (!isSafeMediaId(trackId)) {
+        res.status(400).json({ ok: false, error: 'Invalid trackId.' });
+        return;
+      }
+      if (!Number.isFinite(listenedSecondsRaw) || listenedSecondsRaw < 0 || listenedSecondsRaw > 86400) {
+        res.status(400).json({ ok: false, error: 'Invalid listenedSeconds.' });
+        return;
+      }
+
+      const trackDoc = await firestoreGetDocRest(`tracks/${encodeURIComponent(trackId)}`, authUser.idToken);
+      if (!trackDoc) {
+        res.status(404).json({ ok: false, error: 'Track not found.' });
+        return;
+      }
+      if (trackDoc.isDraft || trackDoc.isDeranked) {
+        res.status(403).json({ ok: false, error: 'Unpublished tracks cannot accrue real plays.' });
+        return;
+      }
+
+      const authoritativeDuration =
+        Number(trackDoc.durationSeconds || 0) > 0
+          ? Number(trackDoc.durationSeconds)
+          : Number.isFinite(durationSecondsRaw) && durationSecondsRaw > 0
+          ? durationSecondsRaw
+          : 0;
+
+      const minRequiredSeconds =
+        authoritativeDuration > 0
+          ? Math.min(30, Math.max(1, Math.floor(authoritativeDuration * 0.5)))
+          : 30;
+
+      const listenedSeconds = Math.round(listenedSecondsRaw);
+      if (listenedSeconds < minRequiredSeconds) {
+        res.status(200).json({
+          ok: true,
+          counted: false,
+          reason: 'threshold_not_met',
+          minRequiredSeconds,
+        });
+        return;
+      }
+
+      const currentHourWindow = Math.floor(Date.now() / (60 * 60 * 1000));
+      const dedupeKey = `${authUser.uid}_${trackId}_${currentHourWindow}`;
+      if (recordedPlayDedupeKeys.has(dedupeKey)) {
+        res.status(200).json({
+          ok: true,
+          counted: false,
+          reason: 'rate_limited_1h',
+          windowKey: currentHourWindow,
+        });
+        return;
+      }
+
+      const artistId = String(trackDoc.artistId || '').trim();
+      let isArtistSelfPlay = trackDoc.uploadedByUserId === authUser.uid;
+      if (!isArtistSelfPlay && artistId && isSafeMediaId(artistId)) {
+        const artistDoc = await firestoreGetDocRest(`artists/${encodeURIComponent(artistId)}`, authUser.idToken);
+        if (
+          artistDoc &&
+          (artistDoc.ownerId === authUser.uid ||
+            artistDoc.ownerUserId === authUser.uid ||
+            artistDoc.claimedByUserId === authUser.uid)
+        ) {
+          isArtistSelfPlay = true;
+        }
+      }
+
+      const regionKey =
+        requestedCountry && requestedCountry !== 'Global'
+          ? requestedCountry
+          : String(trackDoc.region || 'Malawi');
+      const safeRegionField = regionKey.replace(/[^a-zA-Z0-9_]/g, '_') || 'Malawi';
+      const playId = `play-${dedupeKey}-${Date.now()}`;
+      const playedAt = new Date().toISOString();
+
+      const playPayload = {
+        id: playId,
+        trackId,
+        artistId,
+        userId: authUser.uid,
+        country: regionKey,
+        listenedSeconds: Math.max(minRequiredSeconds, listenedSeconds),
+        windowKey: currentHourWindow,
+        isArtistSelfPlay,
+        qualifiesForPayout: !isArtistSelfPlay,
+        playedAt,
+      };
+
+      const incrementWrites: Array<{ collection: string; docId: string; increments: Record<string, number> }> = [
+        {
+          collection: 'tracks',
+          docId: trackId,
+          increments: {
+            plays: 1,
+            [`regionStats.${safeRegionField}`]: 1,
+          },
+        },
+      ];
+      if (artistId && isSafeMediaId(artistId)) {
+        incrementWrites.push({
+          collection: 'artists',
+          docId: artistId,
+          increments: {
+            totalStreams: 1,
+            [`regionStats.${safeRegionField}`]: 1,
+          },
+        });
+      }
+
+      const [playCreated, countersUpdated] = await Promise.all([
+        firestoreCreateDocRest('plays', playId, playPayload, authUser.idToken),
+        firestoreIncrementFieldsRest(incrementWrites, authUser.idToken),
+      ]);
+
+      // Prune stale window keys > 2 hours old from memory
+      for (const [k, win] of recordedPlayDedupeKeys.entries()) {
+        if (win < currentHourWindow - 1) {
+          recordedPlayDedupeKeys.delete(k);
+        }
+      }
+      setBoundedMapEntry(recordedPlayDedupeKeys, dedupeKey, currentHourWindow, 10000);
+
+      const ledgerRows = readJsonArray<Record<string, unknown>>(PLAYS_LEDGER_PATH);
+      ledgerRows.unshift({ ...playPayload, dedupeKey });
+      writeJsonArray(PLAYS_LEDGER_PATH, ledgerRows.slice(0, 5000));
+
+      res.status(200).json({
+        ok: true,
+        counted: true,
+        playId,
+        windowKey: currentHourWindow,
+        minRequiredSeconds,
+        isArtistSelfPlay,
+        firestorePersisted: playCreated && countersUpdated,
+      });
+    } catch (err) {
+      console.error('[LOWERVIBE] Play record error:', err);
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Unable to record play.',
+      });
+    }
+  });
+
   // 4f. First-Party Analytics Event Ingestion & Summary (async buffered)
   app.post('/api/analytics/event', (req, res) => {
     try {
@@ -2064,7 +2443,21 @@ async function startServer() {
     }
   });
 
-  // 5. Dynamic SEO / OpenGraph SSR pre-injection for Track, Artist, Short & Legacy Query Pages + Vite / Production serving
+  app.get(['/og/charts/cover', '/api/og/charts/cover'], async (_req, res) => {
+    try {
+      const { topTrack, artist } = await lookupTopChartsForSeo();
+      await serveCoverFromCandidates(res, [
+        topTrack?.coverArt,
+        artist?.avatar,
+        topTrack?.artistAvatar,
+        artist?.banner,
+      ]);
+    } catch {
+      await serveCoverFromCandidates(res, []);
+    }
+  });
+
+  // 5. Dynamic SEO / OpenGraph SSR pre-injection for Track, Artist, Charts, Short & Legacy Query Pages + Vite / Production serving
   if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
@@ -2074,6 +2467,20 @@ async function startServer() {
         port: PORT,
       },
       appType: 'spa',
+    });
+
+    app.get(['/charts', '/trending', '/promo'], async (req, res, next) => {
+      try {
+        const indexPath = path.resolve(__dirname, 'index.html');
+        const rawTemplate = fs.readFileSync(indexPath, 'utf8');
+        const transformed = await vite.transformIndexHtml(req.originalUrl, rawTemplate);
+        const { topTrack, artist, totalCount } = await lookupTopChartsForSeo();
+        const seoHtml = injectChartsSeoHtml(transformed, topTrack, artist, totalCount, req);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(seoHtml);
+      } catch (err) {
+        vite.ssrFixStacktrace(err as Error);
+        next(err);
+      }
     });
 
     app.get(['/artists/:slug', '/a/:slug', '/artist/:slug'], async (req, res, next) => {
@@ -2143,6 +2550,23 @@ async function startServer() {
     const distIndexPath = path.resolve(distPath, 'index.html');
     if (fs.existsSync(distPath)) {
       app.use(express.static(distPath, { index: false }));
+
+      app.get(['/charts', '/trending', '/promo'], async (req, res) => {
+        try {
+          const rawHtml = fs.readFileSync(distIndexPath, 'utf8');
+          const { topTrack, artist, totalCount } = await lookupTopChartsForSeo();
+          const seoHtml = injectChartsSeoHtml(rawHtml, topTrack, artist, totalCount, req);
+          res
+            .status(200)
+            .set({
+              'Content-Type': 'text/html',
+              'Cache-Control': 'public, max-age=30, stale-while-revalidate=120',
+            })
+            .end(seoHtml);
+        } catch {
+          res.sendFile(distIndexPath);
+        }
+      });
 
       app.get(['/artists/:slug', '/a/:slug', '/artist/:slug'], async (req, res) => {
         try {

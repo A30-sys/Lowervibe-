@@ -5,11 +5,11 @@ import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
-import { CANONICAL_GENRES } from '../../services/genresService';
-import { Artist } from '../../types';
+import { Artist, Track } from '../../types';
 import { DEFAULT_AVATAR_SVG } from '../../utils/artworkFallback';
 import { formatNumber } from '../../utils/formatters';
 import { normalizeGenreCategory, translateGenreCategory } from '../../utils/genreCategories';
+import { artistMatchesTag, extractArtistTags, normalizeTagLabel } from '../../utils/tags';
 import { SafeImage } from '../SafeImage';
 
 export const ArtistsRosterView: React.FC = () => {
@@ -29,36 +29,62 @@ export const ArtistsRosterView: React.FC = () => {
     [tracks]
   );
 
-  // Pre-compute song counts & real plays per artist in O(T) instead of O(A * T) per render
-  const { trackCountById, trackCountByName, totalPlaysById } = useMemo(() => {
+  // Pre-compute song counts, track lists, and real plays per artist in O(T)
+  const { trackCountById, trackCountByName, totalPlaysById, tracksByArtistId } = useMemo(() => {
     const byId = new Map<string, number>();
     const byName = new Map<string, number>();
     const playsById = new Map<string, number>();
+    const tracksMap = new Map<string, Track[]>();
 
     for (const tr of publicTracks) {
       if (tr.artistId) {
         byId.set(tr.artistId, (byId.get(tr.artistId) || 0) + 1);
         playsById.set(tr.artistId, (playsById.get(tr.artistId) || 0) + (tr.plays || 0));
+        const list = tracksMap.get(tr.artistId) || [];
+        list.push(tr);
+        tracksMap.set(tr.artistId, list);
       }
       const lowerName = (tr.artistName || '').trim().toLowerCase();
       if (lowerName) {
         byName.set(lowerName, (byName.get(lowerName) || 0) + 1);
       }
     }
-    return { trackCountById: byId, trackCountByName: byName, totalPlaysById: playsById };
+    return {
+      trackCountById: byId,
+      trackCountByName: byName,
+      totalPlaysById: playsById,
+      tracksByArtistId: tracksMap,
+    };
   }, [publicTracks]);
 
   const genres = useMemo(() => {
-    const artistGenres = artists.flatMap((a) => a.genres || []).map((g) => normalizeGenreCategory(g));
-    const trackGenres = publicTracks.map((tr) => tr.genre).filter(Boolean).map((g) => normalizeGenreCategory(g));
-    const merged = Array.from(
-      new Set([
-        ...CANONICAL_GENRES.slice(0, 5).map((g) => normalizeGenreCategory(g.name)),
-        ...artistGenres,
-        ...trackGenres,
-      ])
-    ).filter(Boolean);
-    return ['all', ...merged];
+    const tagScore = new Map<string, { label: string; score: number }>();
+    const pushTag = (raw: string | undefined, weight: number) => {
+      const label = normalizeTagLabel(raw);
+      if (!label || label.toLowerCase() === 'other') return;
+      const key = label.toLowerCase();
+      const prev = tagScore.get(key) || { label, score: 0 };
+      prev.score += weight;
+      tagScore.set(key, prev);
+    };
+
+    for (const a of artists) {
+      (a.genres || []).forEach((g) => pushTag(normalizeGenreCategory(g), 10));
+    }
+    for (const tr of publicTracks) {
+      if (tr.genre) pushTag(normalizeGenreCategory(tr.genre), 12);
+      if (tr.mood) pushTag(tr.mood, 6);
+      if (Array.isArray(tr.vibeTags)) {
+        tr.vibeTags.forEach((v) => pushTag(v, 5));
+      }
+    }
+
+    const sorted = Array.from(tagScore.values())
+      .sort((a, b) => b.score - a.score || a.label.localeCompare(b.label))
+      .slice(0, 12)
+      .map((entry) => entry.label);
+
+    return ['all', ...sorted];
   }, [artists, publicTracks]);
 
   const filteredArtists = useMemo(() => {
@@ -67,16 +93,20 @@ export const ArtistsRosterView: React.FC = () => {
       .filter((artist) => {
         const isArtistVerified = Boolean(artist.verified || artist.isVerified);
         if (verifiedOnly && !isArtistVerified) return false;
+        const artistTracks = tracksByArtistId.get(artist.id) || [];
         const matchesSearch =
           !q ||
           (artist.name || '').toLowerCase().includes(q) ||
           (artist.location || artist.country || '').toLowerCase().includes(q) ||
-          (artist.bio || '').toLowerCase().includes(q);
-        const matchesGenre =
-          selectedGenre === 'all' ||
-          (artist.genres || []).some(
-            (g) => normalizeGenreCategory(g).toLowerCase() === selectedGenre.toLowerCase()
+          (artist.bio || '').toLowerCase().includes(q) ||
+          (artist.genres || []).some((g) => g.toLowerCase().includes(q)) ||
+          artistTracks.some((tr) =>
+            [tr.title, tr.genre, tr.mood, ...(tr.vibeTags || [])]
+              .filter(Boolean)
+              .some((v) => String(v).toLowerCase().includes(q))
           );
+        const matchesGenre =
+          selectedGenre === 'all' || artistMatchesTag(artist, artistTracks, selectedGenre);
         return matchesSearch && matchesGenre;
       })
       .sort((a, b) => {
@@ -93,7 +123,7 @@ export const ArtistsRosterView: React.FC = () => {
           (trackCountById.get(b.id) || 0) * 10;
         return bScore - aScore;
       });
-  }, [artists, searchQuery, selectedGenre, verifiedOnly, totalPlaysById, trackCountById]);
+  }, [artists, searchQuery, selectedGenre, verifiedOnly, totalPlaysById, trackCountById, tracksByArtistId]);
 
   const verifiedCount = useMemo(
     () => artists.filter((a) => Boolean(a.verified || a.isVerified)).length,
@@ -262,9 +292,22 @@ export const ArtistsRosterView: React.FC = () => {
                           />
                         )}
                       </div>
-                      <p className="text-[11px] text-[var(--text-muted)] truncate mt-0.5">
-                        {artist.country || artist.location || 'Africa'}
-                      </p>
+                      {(artist.country || artist.location) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(
+                              `/discover?region=${encodeURIComponent(
+                                (artist.country || artist.location) as string
+                              )}`
+                            );
+                          }}
+                          className="text-[11px] text-[var(--text-muted)] hover:text-[var(--accent-text)] hover:underline truncate mt-0.5 text-left block max-w-full cursor-pointer"
+                        >
+                          {artist.country || artist.location}
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -273,6 +316,31 @@ export const ArtistsRosterView: React.FC = () => {
                       {artist.bio}
                     </p>
                   )}
+
+                  {(() => {
+                    const cardTags = extractArtistTags(
+                      artist,
+                      tracksByArtistId.get(artist.id) || []
+                    ).slice(0, 3);
+                    if (cardTags.length === 0) return null;
+                    return (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {cardTags.map((tagItem) => (
+                          <button
+                            key={tagItem.key}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/search?tag=${encodeURIComponent(tagItem.tag)}`);
+                            }}
+                            className="px-2.5 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--accent)] text-[10.5px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] transition cursor-pointer"
+                          >
+                            #{tagItem.tag}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="pt-3 border-t border-[var(--border)] flex items-center justify-between gap-2">

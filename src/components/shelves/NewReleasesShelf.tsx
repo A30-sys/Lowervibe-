@@ -2,6 +2,7 @@ import { Pause, Play } from 'lucide-react';
 import React from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useLanguage } from '../../context/LanguageContext';
+import { useRouter } from '../../context/RouterContext';
 import { Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG } from '../../utils/artworkFallback';
 import { formatTime } from '../../utils/formatters';
@@ -14,10 +15,14 @@ interface NewReleasesShelfProps {
   onSelectCategory?: (category: string) => void;
 }
 
-export const NewReleasesShelf: React.FC<NewReleasesShelfProps> = ({ onSelectArtist }) => {
+export const NewReleasesShelf: React.FC<NewReleasesShelfProps> = ({
+  onSelectArtist,
+  onSelectCategory,
+}) => {
   const { tracks, isCatalogLoaded, currentTrack, isPlaying, playTrack, togglePlayPause } =
     useAudio();
   const { language, t } = useLanguage();
+  const { navigate } = useRouter();
 
   const newReleases = [...tracks]
     .filter((t) => !t.isDraft && !t.isDeranked)
@@ -91,9 +96,16 @@ export const NewReleasesShelf: React.FC<NewReleasesShelfProps> = ({ onSelectArti
               </div>
 
               <div className="space-y-0.5 px-0.5">
-                <h3 className="text-xs sm:text-sm font-bold text-[var(--lv-text)] line-clamp-2 leading-snug">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/tracks/${track.id}`);
+                  }}
+                  className="text-xs sm:text-sm font-bold text-[var(--lv-text)] hover:text-[var(--lv-accent-text)] hover:underline line-clamp-2 leading-snug text-left block w-full cursor-pointer"
+                >
                   {track.title}
-                </h3>
+                </button>
                 <button
                   type="button"
                   onClick={(e) => {
@@ -104,9 +116,25 @@ export const NewReleasesShelf: React.FC<NewReleasesShelfProps> = ({ onSelectArti
                 >
                   {track.artistName}
                 </button>
-                <span className="text-[11px] font-mono text-[var(--lv-muted)] block truncate">
-                  {translateGenreCategory(track.genre, language)} · {formatTime(track.durationSeconds)}
-                </span>
+                <div className="text-[11px] font-mono text-[var(--lv-muted)] flex items-center gap-1 truncate">
+                  {track.genre && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onSelectCategory) onSelectCategory(track.genre);
+                          else navigate(`/discover?genre=${encodeURIComponent(track.genre)}`);
+                        }}
+                        className="hover:text-[var(--lv-text)] hover:underline truncate cursor-pointer"
+                      >
+                        {translateGenreCategory(track.genre, language)}
+                      </button>
+                      <span>·</span>
+                    </>
+                  )}
+                  <span className="shrink-0">{formatTime(track.durationSeconds)}</span>
+                </div>
               </div>
             </div>
           );

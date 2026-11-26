@@ -108,6 +108,17 @@ function truncateText(text: string, maxLen: number): string {
   return `${(lastSpace > 40 ? sliced.slice(0, lastSpace) : sliced).trim()}…`;
 }
 
+export function formatTrackShareTitle(trackTitle: string, artistName: string): string {
+  const safeTrack = (trackTitle || 'Track').replace(/\s+/g, ' ').trim();
+  const safeArtist = (artistName || 'Independent Artist').replace(/\s+/g, ' ').trim();
+  const full = `${safeTrack} by ${safeArtist} – LOWERVIBE`;
+  if (full.length <= 70) return full;
+
+  const trimmedTrack = safeTrack.length > 28 ? `${safeTrack.slice(0, 27).trim()}…` : safeTrack;
+  const trimmedArtist = safeArtist.length > 22 ? `${safeArtist.slice(0, 21).trim()}…` : safeArtist;
+  return `${trimmedTrack} by ${trimmedArtist} – LOWERVIBE`;
+}
+
 export function resolvePublicImageUrl(
   rawUrl: string | undefined,
   origin: string,
@@ -304,10 +315,7 @@ export function buildTrackSeoPayload(
   const safeTrack = (track.title || 'Track').trim();
   const safeArtist = (track.artistName || options.artist?.name || 'Independent Artist').trim();
 
-  let title = `${safeTrack} by ${safeArtist} – LOWERVIBE`;
-  if (title.length > 60) {
-    title = `${truncateText(safeTrack, 38)} – LOWERVIBE`;
-  }
+  const title = formatTrackShareTitle(safeTrack, safeArtist);
 
   const description = truncateText(
     track.story?.trim() ||
@@ -317,14 +325,20 @@ export function buildTrackSeoPayload(
   const trackCoverPath = track.id
     ? `/og/track/${encodeURIComponent(track.id)}/cover`
     : undefined;
-  const rawTrackImg = [track.coverArt, options.artist?.avatar, track.artistAvatar].find(
+  const rawTrackImg = [
+    track.coverArt,
+    options.artist?.avatar,
+    track.artistAvatar,
+    options.artist?.banner,
+  ].find(
     (candidate) =>
       typeof candidate === 'string' &&
       candidate.trim().length > 0 &&
       !candidate.includes('pwa-512x512.png') &&
-      !candidate.startsWith('data:image/svg+xml')
+      !candidate.startsWith('data:image/svg+xml') &&
+      !candidate.startsWith('blob:')
   );
-  const image = resolvePublicImageUrl(rawTrackImg || track.coverArt, options.origin, trackCoverPath);
+  const image = resolvePublicImageUrl(rawTrackImg, options.origin, trackCoverPath);
   const durationSeconds = Math.round(
     Number(track.durationSeconds || track.metadata?.duration || track.metadata?.Duration || 0)
   );
@@ -447,6 +461,11 @@ export function applyRouteSeoMeta(route: string, searchQuery = ''): void {
       description:
         'Explore Top 10 charts, Afro-Fusion, Amapiano, Chillout, and rising independent artists across Malawi, Nigeria, and the African diaspora.',
     },
+    charts: {
+      title: 'Most Played & Trending Charts — LOWERVIBE',
+      description:
+        'Explore and share the most played songs, fastest-rising trending tracks, and top genres & mood tags across LOWERVIBE.',
+    },
     artists: {
       title: 'Independent Artists Directory — LOWERVIBE',
       description:
@@ -543,6 +562,7 @@ export function applyRouteSeoMeta(route: string, searchQuery = ''): void {
 
   const meta = routeMetaMap[route] || routeMetaMap.home;
   const isNoindex = NOINDEX_ROUTES.has(route);
+  const routeImage = route === 'charts' ? `${origin}/og/charts/cover` : defaultImage;
 
   document.title = meta.title;
   setCanonicalLink(canonicalUrl);
@@ -561,9 +581,9 @@ export function applyRouteSeoMeta(route: string, searchQuery = ''): void {
   setMetaTag('property', 'og:site_name', 'LOWERVIBE');
   setMetaTag('property', 'og:title', meta.title);
   setMetaTag('property', 'og:description', meta.description);
-  setMetaTag('property', 'og:image', defaultImage);
-  if (defaultImage.startsWith('https://')) {
-    setMetaTag('property', 'og:image:secure_url', defaultImage);
+  setMetaTag('property', 'og:image', routeImage);
+  if (routeImage.startsWith('https://')) {
+    setMetaTag('property', 'og:image:secure_url', routeImage);
   }
   setMetaTag('property', 'og:image:width', '512');
   setMetaTag('property', 'og:image:height', '512');
@@ -573,10 +593,10 @@ export function applyRouteSeoMeta(route: string, searchQuery = ''): void {
   setMetaTag('name', 'twitter:card', 'summary_large_image');
   setMetaTag('name', 'twitter:title', meta.title);
   setMetaTag('name', 'twitter:description', meta.description);
-  setMetaTag('name', 'twitter:image', defaultImage);
+  setMetaTag('name', 'twitter:image', routeImage);
   setMetaTag('name', 'twitter:image:alt', meta.title);
 
-  if (route === 'home' || route === 'discover' || route === 'artists') {
+  if (route === 'home' || route === 'discover' || route === 'artists' || route === 'charts') {
     setStructuredData({
       '@context': 'https://schema.org',
       '@graph': [

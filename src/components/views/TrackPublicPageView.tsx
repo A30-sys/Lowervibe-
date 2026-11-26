@@ -1,9 +1,9 @@
 import { doc, getDoc } from 'firebase/firestore';
 import {
   ArrowLeft,
+  CheckCircle2,
   Download,
   Edit3,
-  FolderHeart,
   Heart,
   Loader2,
   Moon,
@@ -30,6 +30,7 @@ import {
 } from '../../utils/formatters';
 import { translateGenreCategory } from '../../utils/genreCategories';
 import { applyTrackSeoMeta, resetDefaultSeoMeta } from '../../utils/seoMeta';
+import { getTrackSubTags } from '../../utils/tags';
 import { SafeImage } from '../SafeImage';
 
 export const TrackPublicPageView: React.FC = () => {
@@ -259,14 +260,38 @@ export const TrackPublicPageView: React.FC = () => {
         <div className="space-y-4 flex-1 w-full text-center md:text-left">
           <div className="space-y-1">
             <div className="flex items-center justify-center md:justify-start gap-2 flex-wrap">
-              <span className="text-xs font-semibold text-[var(--accent-text)]">
-                {translateGenreCategory(track.genre, language)}
-              </span>
+              {track.genre && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/discover?genre=${encodeURIComponent(track.genre)}`)}
+                  className="text-xs font-semibold text-[var(--accent-text)] hover:underline cursor-pointer"
+                >
+                  {translateGenreCategory(track.genre, language)}
+                </button>
+              )}
               {track.mood && (
-                <span className="text-xs text-[var(--text-muted)]">· {track.mood}</span>
+                <>
+                  <span className="text-xs text-[var(--text-muted)]">·</span>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/search?tag=${encodeURIComponent(track.mood || '')}`)}
+                    className="text-xs text-[var(--text-muted)] hover:text-[var(--text)] hover:underline cursor-pointer"
+                  >
+                    {track.mood}
+                  </button>
+                </>
               )}
               {track.region && (
-                <span className="text-xs text-[var(--text-muted)]">· {track.region}</span>
+                <>
+                  <span className="text-xs text-[var(--text-muted)]">·</span>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/discover?region=${encodeURIComponent(track.region!)}`)}
+                    className="text-xs text-[var(--text-muted)] hover:text-[var(--text)] hover:underline cursor-pointer"
+                  >
+                    {track.region}
+                  </button>
+                </>
               )}
             </div>
 
@@ -276,11 +301,26 @@ export const TrackPublicPageView: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => navigate(`/artists/${track.artistId}`)}
-              className="text-sm sm:text-base font-bold text-[var(--text-muted)] hover:text-[var(--text)] transition cursor-pointer"
+              onClick={() => navigate(`/artists/${artistForTrack?.slug || track.artistId}`)}
+              className="text-sm sm:text-base font-bold text-[var(--text-muted)] hover:text-[var(--text)] hover:underline transition cursor-pointer"
             >
               {track.artistName}
             </button>
+
+            {getTrackSubTags(track).length > 0 && (
+              <div className="flex flex-wrap items-center justify-center md:justify-start gap-1.5 pt-1.5">
+                {getTrackSubTags(track).map((tagLabel) => (
+                  <button
+                    key={tagLabel}
+                    type="button"
+                    onClick={() => navigate(`/search?tag=${encodeURIComponent(tagLabel)}`)}
+                    className="px-2.5 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--accent)] text-[11px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] transition cursor-pointer"
+                  >
+                    #{tagLabel}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {track.story && (
@@ -335,6 +375,10 @@ export const TrackPublicPageView: React.FC = () => {
             <button
               type="button"
               onClick={() => {
+                if (!currentUser) {
+                  toggleSaveTrack(track.id);
+                  return;
+                }
                 toggleSaveTrack(track.id);
                 showToast(
                   isSaved
@@ -346,6 +390,7 @@ export const TrackPublicPageView: React.FC = () => {
                     : `Saved "${track.title}" to Library`
                 );
               }}
+              aria-pressed={isSaved}
               className={`p-3 rounded-2xl border transition cursor-pointer min-h-[48px] min-w-[48px] flex items-center justify-center ${
                 isSaved
                   ? 'bg-[var(--accent)]/15 border-[var(--accent)] text-[var(--accent-text)]'
@@ -353,12 +398,16 @@ export const TrackPublicPageView: React.FC = () => {
               }`}
               title={isNy ? 'Sungani mu Nyumba' : 'Save to Library'}
             >
-              <FolderHeart className={`w-4 h-4 ${isSaved ? 'fill-current' : ''}`} />
+              <CheckCircle2 className={`w-4 h-4 ${isSaved ? 'fill-[var(--accent)]/20' : ''}`} />
             </button>
 
             <button
               type="button"
               onClick={() => {
+                if (!currentUser) {
+                  toggleLikeTrack(track.id);
+                  return;
+                }
                 toggleLikeTrack(track.id);
                 showToast(
                   isLiked
@@ -432,15 +481,23 @@ export const TrackPublicPageView: React.FC = () => {
             <span className="text-[11px] text-[var(--text-muted)] block">{t('duration', 'Duration')}</span>
             <span className="font-mono font-bold text-[var(--text)]">{formatTime(activeDuration)}</span>
           </div>
-          <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
+          <button
+            type="button"
+            onClick={() => navigate('/charts')}
+            className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--accent)] text-left transition cursor-pointer"
+          >
             <span className="text-[11px] text-[var(--text-muted)] block">{t('plays', 'Plays')}</span>
-            <span className="font-mono font-bold text-[var(--text)]">{track.plays.toLocaleString()}</span>
-          </div>
+            <span className="font-mono font-bold text-[var(--text)] hover:text-[var(--accent-text)]">
+              {(track.plays || 0).toLocaleString()}
+            </span>
+          </button>
           <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
             <span className="text-[11px] text-[var(--text-muted)] block">
               {isNy ? 'Tsiku lotuluka' : 'Release date'}
             </span>
-            <span className="font-mono font-bold text-[var(--text)]">{track.releaseDate || 'N/A'}</span>
+            <span className="font-mono font-bold text-[var(--text)]">
+              {track.releaseDate || t('not_specified', isNy ? 'Sinatchulidwe' : 'Not specified')}
+            </span>
           </div>
           <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
             <span className="text-[11px] text-[var(--text-muted)] block">ISRC</span>

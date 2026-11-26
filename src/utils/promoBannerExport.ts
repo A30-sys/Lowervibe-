@@ -147,6 +147,7 @@ export async function exportReleasePromoCard(params: {
   artworkUrl?: string;
   shortUrl: string;
   aspect?: 'square' | 'story';
+  ctaLabel?: string;
 }): Promise<boolean> {
   const isStory = params.aspect === 'story';
   const width = 1080;
@@ -247,7 +248,7 @@ export async function exportReleasePromoCard(params: {
 
   ctx.fillStyle = '#0a0b0a';
   ctx.font = '800 28px "Plus Jakarta Sans", system-ui, sans-serif';
-  ctx.fillText('Stream Free on LOWERVIBE', 108, footerY + 51);
+  ctx.fillText(params.ctaLabel || 'Stream Free on LOWERVIBE', 108, footerY + 51);
 
   ctx.font = '600 22px ui-monospace, monospace';
   const cleanHost = params.shortUrl.replace(/^https?:\/\//, '').slice(0, 34);
