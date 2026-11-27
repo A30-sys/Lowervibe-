@@ -18,16 +18,18 @@ import {
   TrendingUp,
   Trophy,
 } from 'lucide-react';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { useRouter } from '../../context/RouterContext';
+import { useToast } from '../../context/ToastContext';
 import { Track } from '../../types';
 import { DEFAULT_ARTWORK_SVG } from '../../utils/artworkFallback';
 import { getTrackLikeCount, isTrackLikedByUser } from '../../utils/formatters';
 import { groupTracksByCategory, translateGenreCategory } from '../../utils/genreCategories';
 import { exportReleasePromoCard } from '../../utils/promoBannerExport';
+import { applyChartsSeoMeta, resetDefaultSeoMeta } from '../../utils/seoMeta';
 import { getChartsShareUrl, getShortChartsShareUrl } from '../../utils/shareLinks';
 import {
   extractCatalogTags,
@@ -62,6 +64,7 @@ export const ChartsPromoView: React.FC<ChartsPromoViewProps> = ({
   const { currentUser, toggleLikeTrack } = useAuth();
   const { language, t } = useLanguage();
   const { navigate, searchParams } = useRouter();
+  const { showToast } = useToast();
   const isNy = language === 'ny';
 
   const initialTab = (() => {
@@ -75,6 +78,21 @@ export const ChartsPromoView: React.FC<ChartsPromoViewProps> = ({
   const [selectedGenre, setSelectedGenre] = useState<string>(searchParams.get('genre') || '');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [exportingType, setExportingType] = useState<'square' | 'story' | null>(null);
+
+  const paramTab = searchParams.get('tab');
+  const paramGenre = searchParams.get('genre') || '';
+  const paramTrackId = searchParams.get('track') || '';
+
+  useEffect(() => {
+    if (paramTab === 'trending' || paramTab === 'genres' || paramTab === 'most-played') {
+      setActiveTab(paramTab);
+    } else if (paramGenre) {
+      setActiveTab('genres');
+    }
+    if (paramGenre) {
+      setSelectedGenre(paramGenre);
+    }
+  }, [paramTab, paramGenre]);
 
   const artistLookup = useMemo(() => {
     const map = new Map<string, (typeof artists)[number]>();
@@ -164,18 +182,44 @@ export const ChartsPromoView: React.FC<ChartsPromoViewProps> = ({
     return mostPlayedTracks.slice(0, 25);
   }, [activeTab, mostPlayedTracks, trendingTracks, selectedGenreGroup]);
 
-  const spotlightTrack = displayedList[0] || mostPlayedTracks[0] || null;
+  const spotlightTrack =
+    (paramTrackId ? publicTracks.find((tr) => tr.id === paramTrackId) : undefined) ||
+    displayedList[0] ||
+    mostPlayedTracks[0] ||
+    null;
   const topGenreName = selectedGenreGroup?.category || genreGroups[0]?.category || '';
   const totalChartPlays = useMemo(
     () => publicTracks.reduce((sum, tr) => sum + (tr.plays || 0), 0),
     [publicTracks]
   );
 
+  useEffect(() => {
+    const spotlightArtist = spotlightTrack ? artistLookup.get(spotlightTrack.artistId) || null : null;
+    applyChartsSeoMeta({
+      tab: activeTab,
+      genre: selectedGenreGroup?.category,
+      topTrack: spotlightTrack,
+      artist: spotlightArtist,
+      totalCount: publicTracks.length,
+    });
+  }, [activeTab, selectedGenreGroup, spotlightTrack, artistLookup, publicTracks.length]);
+
+  useEffect(() => {
+    return () => {
+      resetDefaultSeoMeta();
+    };
+  }, []);
+
   const activeShareUrl = getChartsShareUrl({
     tab: activeTab,
     genre: selectedGenreGroup?.category,
+    trackId: paramTrackId || undefined,
   });
-  const activeShortUrl = getShortChartsShareUrl(selectedGenreGroup?.category);
+  const activeShortUrl = getShortChartsShareUrl({
+    tab: activeTab,
+    genre: selectedGenreGroup?.category,
+    trackId: paramTrackId || undefined,
+  });
 
   const buildPromoPayload = (options?: {
     title?: string;
@@ -184,11 +228,21 @@ export const ChartsPromoView: React.FC<ChartsPromoViewProps> = ({
     artworkUrl?: string;
     genre?: string;
     tab?: ChartTab;
+    trackId?: string;
   }): PromoSharePayload => {
     const chosenTab = options?.tab || activeTab;
-    const chosenGenre = options?.genre;
-    const shareUrl = getChartsShareUrl({ tab: chosenTab, genre: chosenGenre });
-    const shortUrl = getShortChartsShareUrl(chosenGenre);
+    const chosenGenre = options?.genre ?? (chosenTab === 'genres' ? selectedGenreGroup?.category : undefined);
+    const chosenTrackId = options?.trackId || paramTrackId || undefined;
+    const shareUrl = getChartsShareUrl({
+      tab: chosenTab,
+      genre: chosenGenre,
+      trackId: chosenTrackId,
+    });
+    const shortUrl = getShortChartsShareUrl({
+      tab: chosenTab,
+      genre: chosenGenre,
+      trackId: chosenTrackId,
+    });
     const topItem = spotlightTrack;
     const title =
       options?.title ||
@@ -240,15 +294,38 @@ export const ChartsPromoView: React.FC<ChartsPromoViewProps> = ({
       caption,
       badgeText: topGenreName ? translateGenreCategory(topGenreName, language) : 'Top Charts',
       ctaLabel: 'Explore Chart on LOWERVIBE',
+      tab: chosenTab,
+      genre: chosenGenre,
+      trackId: chosenTrackId || topItem?.id,
     };
   };
 
   const handleCopyText = async (key: string, text: string) => {
+    let copied = false;
     try {
-      await navigator.clipboard.writeText(text);
-      setCopiedKey(key);
-      window.setTimeout(() => setCopiedKey(null), 2200);
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      }
     } catch {}
+    if (!copied) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        copied = document.execCommand('copy');
+        ta.remove();
+      } catch {}
+    }
+    if (copied) {
+      setCopiedKey(key);
+      showToast(t('link_copied', 'Copied to clipboard'));
+      window.setTimeout(() => setCopiedKey(null), 2200);
+    }
   };
 
   const handleDownloadBanner = async (aspect: 'square' | 'story') => {

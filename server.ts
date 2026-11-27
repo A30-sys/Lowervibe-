@@ -534,13 +534,30 @@ function escapeJsonLd(value: unknown): string {
     .replace(/&/g, '\\u0026');
 }
 
+function isInternalOrLocalHost(hostHeader: string): boolean {
+  const hostOnly = hostHeader.split(':')[0].trim().toLowerCase();
+  return (
+    !hostOnly ||
+    hostOnly === 'localhost' ||
+    hostOnly === '127.0.0.1' ||
+    hostOnly === '0.0.0.0' ||
+    hostOnly === '::1' ||
+    hostOnly.endsWith('.local') ||
+    hostOnly.endsWith('.internal')
+  );
+}
+
 function resolveRequestOrigin(req: express.Request): string {
-  const configured = process.env.APP_URL?.trim().replace(/\/+$/, '');
-  if (configured) return configured;
+  const forwardedHost = (req.header('x-forwarded-host') || '').split(',')[0].trim();
+  const rawHost = forwardedHost || (req.get('host') || '').trim();
   const protoHeader = (req.header('x-forwarded-proto') || '').split(',')[0].trim();
   const proto = protoHeader || req.protocol || 'https';
-  const host = req.get('host') || `localhost:${PORT}`;
-  return `${proto}://${host}`;
+  if (rawHost && !isInternalOrLocalHost(rawHost)) {
+    return `${proto}://${rawHost}`;
+  }
+  const configured = process.env.APP_URL?.trim().replace(/\/+$/, '');
+  if (configured) return configured;
+  return `${proto}://${rawHost || `localhost:${PORT}`}`;
 }
 
 function isSafePublicHttpUrl(rawUrl: string): string | null {
@@ -802,19 +819,95 @@ const seoTrackCache = new Map<
   { expiresAt: number; track: Record<string, any> | null; artist: Record<string, any> | null }
 >();
 
+const SERVER_GENRE_ALIAS_MAP: Record<string, string> = {
+  'afro pop': 'Afro-Pop',
+  afropop: 'Afro-Pop',
+  'afro-pop': 'Afro-Pop',
+  'malawi afro pop': 'Afro-Pop',
+  'afro fusion': 'Afro-Fusion',
+  'afro-fusion': 'Afro-Fusion',
+  afrofusion: 'Afro-Fusion',
+  afrobeats: 'Afrobeats',
+  'afro beats': 'Afrobeats',
+  afrobeat: 'Afrobeats',
+  danceall: 'Dancehall',
+  dancehall: 'Dancehall',
+  'dance hall': 'Dancehall',
+  zimdancehall: 'Dancehall',
+  'trap music': 'Trap',
+  trap: 'Trap',
+  'hip hop': 'Hip-Hop',
+  'hip-hop': 'Hip-Hop',
+  hiphop: 'Hip-Hop',
+  rap: 'Hip-Hop',
+  amapiano: 'Amapiano',
+  'ama piano': 'Amapiano',
+  gospel: 'Gospel',
+  'r&b': 'R&B',
+  rnb: 'R&B',
+  'r & b': 'R&B',
+  'afro-soul': 'Afro-Soul',
+  'afro soul': 'Afro-Soul',
+  afrosoul: 'Afro-Soul',
+  soul: 'Afro-Soul',
+  reggae: 'Reggae',
+  acoustic: 'Acoustic',
+  'lo-fi': 'Lo-Fi',
+  lofi: 'Lo-Fi',
+  'lo fi': 'Lo-Fi',
+  chillout: 'Chill & Ambient',
+  'afro chillout': 'Chill & Ambient',
+  ambient: 'Chill & Ambient',
+  chill: 'Chill & Ambient',
+};
+
+function normalizeServerGenreCategory(raw?: unknown): string {
+  const cleaned = String(raw || '').trim().replace(/\s+/g, ' ');
+  if (!cleaned) return 'Other';
+  const key = cleaned.toLowerCase();
+  if (SERVER_GENRE_ALIAS_MAP[key]) return SERVER_GENRE_ALIAS_MAP[key];
+  return cleaned
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function getServerTrackEngagementScore(track: Record<string, any>): number {
+  const plays = Number(track.plays || 0);
+  const likes = Number(track.likes || (Array.isArray(track.likedByUserIds) ? track.likedByUserIds.length : 0) || 0);
+  const downloads = Number(track.downloads || 0);
+  const comments = Array.isArray(track.comments) ? track.comments.length : 0;
+  return plays + likes * 4 + downloads * 3 + comments * 5;
+}
+
 async function lookupPublicTrackForSeo(
-  trackId: string
+  trackId: string,
+  options?: { includeDrafts?: boolean }
 ): Promise<{ track: Record<string, any> | null; artist: Record<string, any> | null }> {
   const cleanId = trackId.trim();
-  const cached = seoTrackCache.get(cleanId);
+  const includeDrafts = Boolean(options?.includeDrafts);
+  const cacheKey = `${includeDrafts ? 'draft:' : 'pub:'}${cleanId}`;
+  const cached = seoTrackCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return { track: cached.track, artist: cached.artist };
   }
 
   let track = await firestoreGetDocRest(`tracks/${encodeURIComponent(cleanId)}`);
+  if (!track) {
+    const allTracks = await firestoreRunListQueryRest('tracks', 300);
+    const lowerTarget = cleanId.toLowerCase();
+    track =
+      allTracks.find(
+        (t) =>
+          String(t.id || '').trim() === cleanId ||
+          String(t.id || '').trim().toLowerCase() === lowerTarget
+      ) || null;
+  }
+
   if (
     track &&
-    (track.isDraft ||
+    ((!includeDrafts && track.isDraft) ||
       track.isDeranked ||
       isExcludedDemoArtistRecord({ id: track.artistId, name: track.artistName }))
   ) {
@@ -829,8 +922,14 @@ async function lookupPublicTrackForSeo(
       track = null;
     }
   }
+  if (track && !artist && track.uploadedByUserId) {
+    const byOwner = await firestoreQueryEqualsRest('artists', 'ownerId', String(track.uploadedByUserId));
+    if (byOwner.length > 0 && !isExcludedDemoArtistRecord(byOwner[0])) {
+      artist = byOwner[0];
+    }
+  }
 
-  setBoundedMapEntry(seoTrackCache, cleanId, {
+  setBoundedMapEntry(seoTrackCache, cacheKey, {
     expiresAt: Date.now() + (track ? 30_000 : 5_000),
     track,
     artist,
@@ -838,28 +937,42 @@ async function lookupPublicTrackForSeo(
   return { track, artist };
 }
 
-const seoChartsCache: {
-  expiresAt: number;
-  topTrack: Record<string, any> | null;
-  artist: Record<string, any> | null;
-  totalCount: number;
-} = {
-  expiresAt: 0,
-  topTrack: null,
-  artist: null,
-  totalCount: 0,
-};
+interface ChartSeoLookupOptions {
+  tab?: string;
+  genre?: string;
+  trackId?: string;
+}
 
-async function lookupTopChartsForSeo(): Promise<{
+const seoChartsCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    topTrack: Record<string, any> | null;
+    artist: Record<string, any> | null;
+    totalCount: number;
+    resolvedGenre?: string;
+  }
+>();
+
+async function lookupTopChartsForSeo(options?: ChartSeoLookupOptions): Promise<{
   topTrack: Record<string, any> | null;
   artist: Record<string, any> | null;
   totalCount: number;
+  resolvedGenre?: string;
 }> {
-  if (seoChartsCache.expiresAt > Date.now()) {
+  const tab = options?.tab === 'trending' || options?.tab === 'genres' ? options.tab : 'most-played';
+  const rawGenre = String(options?.genre || '').trim();
+  const normalizedGenre = rawGenre ? normalizeServerGenreCategory(rawGenre) : '';
+  const requestedTrackId = String(options?.trackId || '').trim();
+  const cacheKey = `${tab}|${normalizedGenre.toLowerCase()}|${requestedTrackId}`;
+
+  const cached = seoChartsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
     return {
-      topTrack: seoChartsCache.topTrack,
-      artist: seoChartsCache.artist,
-      totalCount: seoChartsCache.totalCount,
+      topTrack: cached.topTrack,
+      artist: cached.artist,
+      totalCount: cached.totalCount,
+      resolvedGenre: cached.resolvedGenre,
     };
   }
 
@@ -869,17 +982,44 @@ async function lookupTopChartsForSeo(): Promise<{
 
   try {
     const docs = await firestoreRunListQueryRest('tracks', 300);
-    const valid = docs
-      .filter(
-        (t) =>
-          !t.isDraft &&
-          !t.isDeranked &&
-          !isExcludedDemoArtistRecord({ id: t.artistId, name: t.artistName })
-      )
-      .sort((a, b) => Number(b.plays || 0) - Number(a.plays || 0));
+    let valid = docs.filter(
+      (t) =>
+        !t.isDraft &&
+        !t.isDeranked &&
+        !isExcludedDemoArtistRecord({ id: t.artistId, name: t.artistName })
+    );
+
+    if (normalizedGenre) {
+      const genreMatches = valid.filter(
+        (t) => normalizeServerGenreCategory(t.genre).toLowerCase() === normalizedGenre.toLowerCase()
+      );
+      if (genreMatches.length > 0) {
+        valid = genreMatches;
+      }
+    }
+
+    if (tab === 'trending') {
+      valid.sort((a, b) => {
+        const diff = getServerTrackEngagementScore(b) - getServerTrackEngagementScore(a);
+        if (diff !== 0) return diff;
+        return Number(b.plays || 0) - Number(a.plays || 0);
+      });
+    } else {
+      valid.sort((a, b) => {
+        const playDiff = Number(b.plays || 0) - Number(a.plays || 0);
+        if (playDiff !== 0) return playDiff;
+        return Number(b.likes || 0) - Number(a.likes || 0);
+      });
+    }
 
     totalCount = valid.length;
-    topTrack = valid[0] || null;
+    topTrack =
+      (requestedTrackId
+        ? valid.find((t) => String(t.id || '').trim() === requestedTrackId)
+        : undefined) ||
+      valid[0] ||
+      null;
+
     if (topTrack?.artistId) {
       artist = await firestoreGetDocRest(`artists/${encodeURIComponent(String(topTrack.artistId))}`);
       if (isExcludedDemoArtistRecord(artist)) {
@@ -888,12 +1028,36 @@ async function lookupTopChartsForSeo(): Promise<{
     }
   } catch {}
 
-  seoChartsCache.expiresAt = Date.now() + 30_000;
-  seoChartsCache.topTrack = topTrack;
-  seoChartsCache.artist = artist;
-  seoChartsCache.totalCount = totalCount;
+  const entry = {
+    expiresAt: Date.now() + 30_000,
+    topTrack,
+    artist,
+    totalCount,
+    resolvedGenre: normalizedGenre || undefined,
+  };
+  setBoundedMapEntry(seoChartsCache, cacheKey, entry, 200);
 
-  return { topTrack, artist, totalCount };
+  return {
+    topTrack,
+    artist,
+    totalCount,
+    resolvedGenre: normalizedGenre || undefined,
+  };
+}
+
+function buildChartQueryString(options?: ChartSeoLookupOptions): string {
+  const params = new URLSearchParams();
+  if (options?.tab && options.tab !== 'most-played') {
+    params.set('tab', options.tab);
+  }
+  if (options?.genre && options.genre.trim()) {
+    params.set('genre', options.genre.trim());
+  }
+  if (options?.trackId && options.trackId.trim()) {
+    params.set('track', options.trackId.trim());
+  }
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
 }
 
 function injectChartsSeoHtml(
@@ -901,19 +1065,29 @@ function injectChartsSeoHtml(
   topTrack: Record<string, any> | null,
   artist: Record<string, any> | null,
   totalCount: number,
-  req: express.Request
+  req: express.Request,
+  options?: ChartSeoLookupOptions
 ): string {
   const origin = resolveRequestOrigin(req);
-  const canonicalUrl = `${origin}/charts`;
+  const qs = buildChartQueryString(options);
+  const canonicalUrl = `${origin}/charts${qs}`;
   const safeTrack = String(topTrack?.title || '').trim();
   const safeArtist = String(topTrack?.artistName || artist?.name || '').trim();
+  const activeGenre = String(options?.genre || '').trim();
+  const activeTab = options?.tab || 'most-played';
+
+  const chartLabel = activeGenre
+    ? `Top ${normalizeServerGenreCategory(activeGenre)} Chart`
+    : activeTab === 'trending'
+    ? 'Most Trending Chart'
+    : 'Most Played & Trending Charts';
 
   const title = safeTrack
-    ? `Most Played & Trending Charts (#1: ${safeTrack} by ${safeArtist || 'Artist'}) – LOWERVIBE`
-    : 'Most Played & Trending Charts – LOWERVIBE';
+    ? `${chartLabel} (#1: ${safeTrack} by ${safeArtist || 'Artist'}) – LOWERVIBE`
+    : `${chartLabel} – LOWERVIBE`;
   const description = truncateSeoText(
     safeTrack
-      ? `Explore ${totalCount || 'all'} tracks on LOWERVIBE Top Charts. #1 right now: "${safeTrack}" by ${safeArtist || 'Independent Artist'}. Stream free and share trending genres.`
+      ? `Explore ${totalCount || 'all'} tracks on LOWERVIBE ${chartLabel}. #1 right now: "${safeTrack}" by ${safeArtist || 'Independent Artist'}. Stream free and share.`
       : 'Explore and share the most played songs, fastest-rising trending tracks, and top genres across LOWERVIBE.',
     160
   );
@@ -926,8 +1100,9 @@ function injectChartsSeoHtml(
         artist?.banner,
       ])
     : undefined;
-  const image = rawImg ? `${origin}/og/charts/cover` : `${origin}/icons/pwa-512x512.png`;
-  const imageMime = inferImageMimeType(image, rawImg ? 'image/jpeg' : 'image/png');
+  const coverPath = `/og/charts/cover${qs}`;
+  const image = rawImg ? `${origin}${coverPath}` : `${origin}/icons/pwa-512x512.png`;
+  const imageMime = inferImageMimeType(rawImg || image, rawImg ? 'image/jpeg' : 'image/png');
   const imageAlt = safeTrack ? `#1 Charting: ${safeTrack} by ${safeArtist}` : 'LOWERVIBE Top Charts';
 
   const headInject = [
@@ -2399,6 +2574,31 @@ async function startServer() {
       if (raw.startsWith('http://') || raw.startsWith('https://')) {
         const safeExternal = isSafePublicHttpUrl(raw);
         if (safeExternal) {
+          try {
+            const upstream = await fetch(safeExternal, {
+              headers: { Accept: 'image/*,*/*;q=0.8' },
+              signal: AbortSignal.timeout(3500),
+            });
+            if (upstream.ok) {
+              const contentType = upstream.headers.get('content-type') || inferImageMimeType(safeExternal);
+              if (contentType.startsWith('image/')) {
+                const arrayBuf = await upstream.arrayBuffer();
+                const buffer = Buffer.from(arrayBuf);
+                if (buffer.length > 0 && buffer.length <= 10 * 1024 * 1024) {
+                  res
+                    .status(200)
+                    .set({
+                      'Content-Type': contentType,
+                      'Content-Length': String(buffer.length),
+                      'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+                      'Access-Control-Allow-Origin': '*',
+                    })
+                    .send(buffer);
+                  return;
+                }
+              }
+            }
+          } catch {}
           res.redirect(302, safeExternal);
           return;
         }
@@ -2421,7 +2621,8 @@ async function startServer() {
   app.get(['/og/track/:id/cover', '/api/og/track/:id/cover'], async (req, res) => {
     try {
       const trackId = String(req.params.id || '').trim();
-      const { track, artist } = await lookupPublicTrackForSeo(trackId);
+      const includeDrafts = req.query.preview === '1';
+      const { track, artist } = await lookupPublicTrackForSeo(trackId, { includeDrafts });
       await serveCoverFromCandidates(res, [
         track?.coverArt,
         artist?.avatar,
@@ -2443,9 +2644,12 @@ async function startServer() {
     }
   });
 
-  app.get(['/og/charts/cover', '/api/og/charts/cover'], async (_req, res) => {
+  app.get(['/og/charts/cover', '/api/og/charts/cover'], async (req, res) => {
     try {
-      const { topTrack, artist } = await lookupTopChartsForSeo();
+      const tab = typeof req.query.tab === 'string' ? req.query.tab : undefined;
+      const genre = typeof req.query.genre === 'string' ? req.query.genre : undefined;
+      const trackId = typeof req.query.track === 'string' ? req.query.track : undefined;
+      const { topTrack, artist } = await lookupTopChartsForSeo({ tab, genre, trackId });
       await serveCoverFromCandidates(res, [
         topTrack?.coverArt,
         artist?.avatar,
@@ -2454,6 +2658,146 @@ async function startServer() {
       ]);
     } catch {
       await serveCoverFromCandidates(res, []);
+    }
+  });
+
+  // Live Share Preview Inspection Endpoint (lets ShareModal verify exact OG artwork, title, artist & link status)
+  app.get('/api/share-preview', async (req, res) => {
+    try {
+      const origin = resolveRequestOrigin(req);
+      const type = String(req.query.type || 'track').trim();
+      const id = String(req.query.id || '').trim();
+      const includeDrafts = req.query.includeDraft === '1';
+
+      if (type === 'track') {
+        if (!id) {
+          res.status(400).json({ ok: false, error: 'Missing track id' });
+          return;
+        }
+        const { track, artist } = await lookupPublicTrackForSeo(id, { includeDrafts });
+        if (!track) {
+          res.status(404).json({ ok: false, found: false, error: 'Track not found or unpublished' });
+          return;
+        }
+        const safeTrack = String(track.title || 'Track').trim();
+        const safeArtist = String(track.artistName || artist?.name || 'Independent Artist').trim();
+        const rawImg = pickFirstValidArtworkCandidate([
+          track.coverArt,
+          artist?.avatar,
+          track.artistAvatar,
+          artist?.banner,
+        ]);
+        const coverEndpoint = `${origin}/og/track/${encodeURIComponent(track.id)}/cover${
+          track.isDraft ? '?preview=1' : ''
+        }`;
+        const imageUrl = resolveSeoPublicImage(rawImg, origin, `/og/track/${encodeURIComponent(track.id)}/cover`);
+        res.status(200).json({
+          ok: true,
+          found: true,
+          type: 'track',
+          id: track.id,
+          isDraft: Boolean(track.isDraft),
+          title: safeTrack,
+          artistName: safeArtist,
+          shareTitle: formatTrackShareTitle(safeTrack, safeArtist),
+          description: truncateSeoText(
+            typeof track.story === 'string' && track.story.trim()
+              ? track.story
+              : `Stream "${safeTrack}" by ${safeArtist} (${track.genre || 'Independent Music'}) on LOWERVIBE.`,
+            160
+          ),
+          imageUrl,
+          coverEndpointUrl: coverEndpoint,
+          shortUrl: `${origin}/s/${encodeURIComponent(track.id)}`,
+          canonicalUrl: `${origin}/tracks/${encodeURIComponent(track.id)}`,
+        });
+        return;
+      }
+
+      if (type === 'artist') {
+        if (!id) {
+          res.status(400).json({ ok: false, error: 'Missing artist id' });
+          return;
+        }
+        const { artist, tracksCount } = await lookupPublicArtistForSeo(id);
+        if (!artist) {
+          res.status(404).json({ ok: false, found: false, error: 'Artist not found' });
+          return;
+        }
+        const safeName = String(artist.name || 'Independent Artist').trim();
+        const slugOrId = String(artist.slug || artist.id || id).trim();
+        const rawImg = pickFirstValidArtworkCandidate([artist.avatar, artist.banner]);
+        const coverEndpoint = `${origin}/og/artist/${encodeURIComponent(slugOrId)}/cover`;
+        const imageUrl = resolveSeoPublicImage(rawImg, origin, `/og/artist/${encodeURIComponent(slugOrId)}/cover`);
+        res.status(200).json({
+          ok: true,
+          found: true,
+          type: 'artist',
+          id: artist.id,
+          isDraft: false,
+          title: safeName,
+          artistName: safeName,
+          shareTitle: `${safeName} – Listen on LOWERVIBE`,
+          description: truncateSeoText(
+            typeof artist.bio === 'string' && artist.bio.trim()
+              ? artist.bio
+              : `Listen to ${safeName} (${tracksCount} tracks) on LOWERVIBE.`,
+            160
+          ),
+          imageUrl,
+          coverEndpointUrl: coverEndpoint,
+          shortUrl: `${origin}/a/${encodeURIComponent(slugOrId)}`,
+          canonicalUrl: `${origin}/artists/${encodeURIComponent(slugOrId)}`,
+        });
+        return;
+      }
+
+      const tab = typeof req.query.tab === 'string' ? req.query.tab : undefined;
+      const genre = typeof req.query.genre === 'string' ? req.query.genre : undefined;
+      const trackId = typeof req.query.track === 'string' ? req.query.track : undefined;
+      const { topTrack, artist, totalCount, resolvedGenre } = await lookupTopChartsForSeo({
+        tab,
+        genre,
+        trackId,
+      });
+      const qs = buildChartQueryString({ tab, genre: resolvedGenre || genre, trackId });
+      const safeTrack = String(topTrack?.title || '').trim();
+      const safeArtist = String(topTrack?.artistName || artist?.name || '').trim();
+      const rawImg = topTrack
+        ? pickFirstValidArtworkCandidate([
+            topTrack.coverArt,
+            artist?.avatar,
+            topTrack.artistAvatar,
+            artist?.banner,
+          ])
+        : undefined;
+      const coverEndpoint = `${origin}/og/charts/cover${qs}`;
+      const imageUrl = rawImg ? resolveSeoPublicImage(rawImg, origin, `/og/charts/cover${qs}`) : coverEndpoint;
+
+      res.status(200).json({
+        ok: true,
+        found: Boolean(topTrack),
+        type: 'charts',
+        id: topTrack?.id || 'charts',
+        isDraft: false,
+        title: safeTrack || 'LOWERVIBE Top Charts',
+        artistName: safeArtist || 'LOWERVIBE',
+        shareTitle: safeTrack
+          ? `${resolvedGenre ? `Top ${resolvedGenre} Chart` : tab === 'trending' ? 'Most Trending Chart' : 'Most Played & Trending Charts'} (#1: ${safeTrack} by ${safeArtist || 'Artist'}) – LOWERVIBE`
+          : 'Most Played & Trending Charts – LOWERVIBE',
+        description: safeTrack
+          ? `Explore ${totalCount} tracks on LOWERVIBE Charts. #1 right now: "${safeTrack}" by ${safeArtist}.`
+          : 'Explore the most played songs and trending charts on LOWERVIBE.',
+        imageUrl,
+        coverEndpointUrl: coverEndpoint,
+        shortUrl: `${origin}/charts${qs}`,
+        canonicalUrl: `${origin}/charts${qs}`,
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Unable to resolve share preview',
+      });
     }
   });
 
@@ -2474,8 +2818,19 @@ async function startServer() {
         const indexPath = path.resolve(__dirname, 'index.html');
         const rawTemplate = fs.readFileSync(indexPath, 'utf8');
         const transformed = await vite.transformIndexHtml(req.originalUrl, rawTemplate);
-        const { topTrack, artist, totalCount } = await lookupTopChartsForSeo();
-        const seoHtml = injectChartsSeoHtml(transformed, topTrack, artist, totalCount, req);
+        const tab = typeof req.query.tab === 'string' ? req.query.tab : undefined;
+        const genre = typeof req.query.genre === 'string' ? req.query.genre : undefined;
+        const trackId = typeof req.query.track === 'string' ? req.query.track : undefined;
+        const { topTrack, artist, totalCount, resolvedGenre } = await lookupTopChartsForSeo({
+          tab,
+          genre,
+          trackId,
+        });
+        const seoHtml = injectChartsSeoHtml(transformed, topTrack, artist, totalCount, req, {
+          tab,
+          genre: resolvedGenre || genre,
+          trackId,
+        });
         res.status(200).set({ 'Content-Type': 'text/html' }).end(seoHtml);
       } catch (err) {
         vite.ssrFixStacktrace(err as Error);
@@ -2554,8 +2909,19 @@ async function startServer() {
       app.get(['/charts', '/trending', '/promo'], async (req, res) => {
         try {
           const rawHtml = fs.readFileSync(distIndexPath, 'utf8');
-          const { topTrack, artist, totalCount } = await lookupTopChartsForSeo();
-          const seoHtml = injectChartsSeoHtml(rawHtml, topTrack, artist, totalCount, req);
+          const tab = typeof req.query.tab === 'string' ? req.query.tab : undefined;
+          const genre = typeof req.query.genre === 'string' ? req.query.genre : undefined;
+          const trackId = typeof req.query.track === 'string' ? req.query.track : undefined;
+          const { topTrack, artist, totalCount, resolvedGenre } = await lookupTopChartsForSeo({
+            tab,
+            genre,
+            trackId,
+          });
+          const seoHtml = injectChartsSeoHtml(rawHtml, topTrack, artist, totalCount, req, {
+            tab,
+            genre: resolvedGenre || genre,
+            trackId,
+          });
           res
             .status(200)
             .set({

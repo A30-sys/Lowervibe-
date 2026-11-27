@@ -212,8 +212,18 @@ export async function fetchTrackLyrics(
       if (localParsed.hasLyrics) {
         return buildResult(track.id, (track.lyrics || '').trim(), 'track');
       }
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        return buildResult(track.id, '', 'none');
+      }
       return buildResult(track.id, '', 'none');
     }
+  }
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (localParsed.hasLyrics) {
+      return buildResult(track.id, (track.lyrics || '').trim(), 'track');
+    }
+    return buildResult(track.id, '', 'none');
   }
 
   // Check Firestore live document first so creator-updated synced LRC arrives immediately

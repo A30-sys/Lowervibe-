@@ -19,10 +19,15 @@ import { auth, db, formatFirebaseError, handleFirestoreError, OperationType, tes
 import { audioEngine } from '../services/audioEngine';
 import {
   getAudioBlobUrl,
+  getCachedAudioTrackIds,
+  getOfflineTrackSnapshots,
   isTrackCachedOffline,
+  readLocalOfflineSnapshotsSync,
   removeTrackOfflineCache,
   saveAudioBlob,
+  saveOfflineTrackSnapshot,
 } from '../services/audioStorage';
+import { fetchTrackLyrics } from '../services/lyricsService';
 import { upsertCustomGenre } from '../services/genresService';
 import { requestServerApprovalToken, requestServerPayoutToken } from '../services/payoutTokenService';
 import { durableDeleteDoc, durableSetDoc, durableUpdateDoc, flushPendingSyncOperations } from '../services/reliableSync';
@@ -67,6 +72,7 @@ import { useAuth } from './AuthContext';
 import { useRouter } from './RouterContext';
 import { useToast } from './ToastContext';
 import { isVerifiedAdminGoogleSession, PRIMARY_ADMIN_EMAIL } from '../services/authService';
+import { getIsBatterySaverActive } from '../utils/batterySaver';
 import { sanitizePlatformSocialLinks } from '../utils/socialLinks';
 
 export type RepeatMode = 'off' | 'all' | 'one';
@@ -100,6 +106,7 @@ interface AudioContextType {
   auditLogs: AuditLogEntry[];
   featuredVibe: FeaturedVibe;
   savedTrackIds: string[];
+  offlineTrackIds: string[];
   currentTrack: Track | null;
   isPlaying: boolean;
   playbackState: PlaybackState;
@@ -629,22 +636,39 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const { navigate } = useRouter();
   const { showToast } = useToast();
 
-  const [isCatalogLoaded, setIsCatalogLoaded] = useState<boolean>(false);
-  const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [catalogReloadNonce, setCatalogReloadNonce] = useState<number>(0);
-
-  const [tracks, setTracks] = useState<Track[]>(() => {
+  const initialTracksSnapshot = (() => {
+    const byId = new Map<string, Track>();
     try {
       const saved = localStorage.getItem(TRACKS_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          return dedupeTracksById(parsed.filter((t) => !isRemovedDemoTrackRecord(t)));
+          for (const t of parsed) {
+            if (t?.id && !isRemovedDemoTrackRecord(t)) byId.set(t.id, t);
+          }
         }
       }
     } catch {}
-    return [];
-  });
+    for (const snap of readLocalOfflineSnapshotsSync()) {
+      if (snap?.id && !isRemovedDemoTrackRecord(snap) && !byId.has(snap.id)) {
+        byId.set(snap.id, snap);
+      }
+    }
+    return dedupeTracksById(Array.from(byId.values()));
+  })();
+
+  const [isCatalogLoaded, setIsCatalogLoaded] = useState<boolean>(
+    () =>
+      initialTracksSnapshot.length > 0 ||
+      (typeof navigator !== 'undefined' && navigator.onLine === false)
+  );
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogReloadNonce, setCatalogReloadNonce] = useState<number>(0);
+
+  const [tracks, setTracks] = useState<Track[]>(initialTracksSnapshot);
+  const [offlineTrackIds, setOfflineTrackIds] = useState<string[]>([]);
+  const tracksCountRef = useRef<number>(initialTracksSnapshot.length);
+  tracksCountRef.current = tracks.length;
 
   const [artists, setArtists] = useState<Artist[]>(() => {
     try {
@@ -1222,13 +1246,65 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setPlaylists(Array.from(merged.values()));
   };
 
+  // Sync offline IndexedDB audio keys & hydrate offline track snapshots cleanly
+  useEffect(() => {
+    let active = true;
+    const syncOfflineCache = async () => {
+      try {
+        const [cachedIds, offlineSnaps] = await Promise.all([
+          getCachedAudioTrackIds(),
+          getOfflineTrackSnapshots(),
+        ]);
+        if (!active) return;
+        setOfflineTrackIds(cachedIds);
+        if (offlineSnaps.length > 0) {
+          setTracks((prev) => {
+            const byId = new Map(prev.map((t) => [t.id, t]));
+            let added = false;
+            for (const snap of offlineSnaps) {
+              if (snap?.id && !isRemovedDemoTrackRecord(snap) && !byId.has(snap.id)) {
+                byId.set(snap.id, snap);
+                added = true;
+              }
+            }
+            return added ? dedupeTracksById(Array.from(byId.values())) : prev;
+          });
+          setIsCatalogLoaded(true);
+        } else if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          setIsCatalogLoaded(true);
+        }
+      } catch {}
+    };
+
+    void syncOfflineCache();
+    const onCacheChanged = () => {
+      void syncOfflineCache();
+    };
+    window.addEventListener('lowervibe:offline-cache-changed', onCacheChanged);
+    window.addEventListener('offline', onCacheChanged);
+    return () => {
+      active = false;
+      window.removeEventListener('lowervibe:offline-cache-changed', onCacheChanged);
+      window.removeEventListener('offline', onCacheChanged);
+    };
+  }, []);
+
   // Public Firestore Real-time Catalog Synchronizers (never torn down on auth state transitions)
   useEffect(() => {
     setCatalogError(null);
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setIsCatalogLoaded(true);
+    }
     if (!didRunConnectionCheckRef.current) {
       didRunConnectionCheckRef.current = true;
       testFirestoreConnection().catch(() => {});
     }
+
+    const offlineSafetyTimer = window.setTimeout(() => {
+      if (typeof navigator !== 'undefined' && (!navigator.onLine || tracksCountRef.current > 0)) {
+        setIsCatalogLoaded(true);
+      }
+    }, 3000);
 
     const mapTrackDoc = (id: string, raw: Track): Track => {
       const resolvedDuration = Math.max(
@@ -1272,6 +1348,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const unsubTracks = onSnapshot(
       query(collection(db, 'tracks'), limit(250)),
       (snap) => {
+        window.clearTimeout(offlineSafetyTimer);
         const mapped = snap.docs
           .map((d) => mapTrackDoc(d.id, d.data() as Track))
           .filter((t) => !isRemovedDemoTrackRecord(t));
@@ -1290,8 +1367,11 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         });
       },
       (err) => {
+        window.clearTimeout(offlineSafetyTimer);
         setIsCatalogLoaded(true);
-        setCatalogError(formatFirebaseError(err, 'Could not load music catalog'));
+        if (tracksCountRef.current === 0 && (typeof navigator === 'undefined' || navigator.onLine)) {
+          setCatalogError(formatFirebaseError(err, 'Could not load music catalog'));
+        }
         try {
           handleFirestoreError(err, OperationType.LIST, 'tracks');
         } catch {}
@@ -1866,15 +1946,28 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } catch {}
   };
 
-  // Hook AudioEngine events
+  // Hook AudioEngine events (with Battery Saver UI refresh throttling)
+  const lastUiTimeUpdateMsRef = useRef<number>(0);
   useEffect(() => {
     audioEngine.onTimeUpdate = (curr, dur) => {
-      setCurrentTime(curr);
+      const nowMs = Date.now();
+      const batterySaverOn = getIsBatterySaverActive();
       const effectiveDur = dur > 0 ? Math.round(dur) : duration;
-      if (dur > 0 && effectiveDur !== duration) {
-        setDuration(effectiveDur);
+
+      // In Battery Saver mode, throttle React UI time updates to ~1Hz while keeping play counting accurate
+      if (
+        !batterySaverOn ||
+        curr <= 0.5 ||
+        (dur > 0 && curr >= dur - 0.5) ||
+        nowMs - lastUiTimeUpdateMsRef.current >= 950
+      ) {
+        lastUiTimeUpdateMsRef.current = nowMs;
+        setCurrentTime(curr);
+        if (dur > 0 && effectiveDur !== duration) {
+          setDuration(effectiveDur);
+        }
+        updatePinnedPlayerPosition(curr, effectiveDur);
       }
-      updatePinnedPlayerPosition(curr, effectiveDur);
 
       if (lastTimeUpdatePosRef.current !== null) {
         const delta = curr - lastTimeUpdatePosRef.current;
@@ -2847,6 +2940,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const blob = await res.blob();
           setActiveDownload((prev) => (prev ? { ...prev, progress: 80 } : prev));
           await saveAudioBlob(track.id, blob);
+          await saveOfflineTrackSnapshot(track);
+          void fetchTrackLyrics(track).catch(() => {});
         }
       }
       const nextDownloads = (track.downloads || 0) + 1;
@@ -2957,6 +3052,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
           const blob = await res.blob();
           await saveAudioBlob(track.id, blob);
+          await saveOfflineTrackSnapshot(track);
+          void fetchTrackLyrics(track).catch(() => {});
           savedCount += 1;
           setTracks((prev) =>
             prev.map((t) =>
@@ -4571,6 +4668,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         auditLogs,
         featuredVibe,
         savedTrackIds,
+        offlineTrackIds,
         currentTrack,
         isPlaying,
         playbackState,

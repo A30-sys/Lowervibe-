@@ -23,6 +23,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useToast } from '../../context/ToastContext';
 import { audioEngine } from '../../services/audioEngine';
 import { LOWERVIBE_ICON_ARTWORK } from '../../utils/artworkFallback';
+import { useBatterySaver } from '../../utils/batterySaver';
 import { formatTime, isTrackLikedByUser } from '../../utils/formatters';
 import { triggerHaptic } from '../../utils/haptics';
 import { getActiveLrcIndex, parseLrc } from '../../utils/lrcParser';
@@ -49,6 +50,7 @@ const DynamicVolumeCanvas: React.FC<DynamicVolumeCanvasProps> = memo(({
   const lastVolTickStepRef = useRef<number>(-1);
   const lastVolTickAtRef = useRef<number>(0);
   const [showLevelTag, setShowLevelTag] = useState(false);
+  const { active: batterySaverActive } = useBatterySaver();
 
   useEffect(() => {
     pulseUntilRef.current = performance.now() + 1100;
@@ -79,10 +81,10 @@ const DynamicVolumeCanvas: React.FC<DynamicVolumeCanvasProps> = memo(({
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-      const snapshot = audioEngine.getVolumeLevelSnapshot(10);
+      const snapshot = batterySaverActive ? null : audioEngine.getVolumeLevelSnapshot(10);
       const effectiveVol = isMuted ? 0 : volume;
       const isRecentlyAdjusted = now < pulseUntilRef.current;
-      phaseRef.current += isPlaying ? 0.14 : 0.05;
+      phaseRef.current += isPlaying && !batterySaverActive ? 0.14 : 0.05;
 
       const styles = getComputedStyle(document.documentElement);
       const accentColor = styles.getPropertyValue('--lv-accent').trim() || '#C6FF3D';
@@ -102,7 +104,10 @@ const DynamicVolumeCanvas: React.FC<DynamicVolumeCanvasProps> = memo(({
         let targetLevel = 0;
         if (isMuted || effectiveVol <= 0.005) {
           targetLevel = 0.08;
-        } else if (snapshot.hasAnalyserSignal && isPlaying) {
+        } else if (batterySaverActive) {
+          // Low-power static proportional staircase (zero continuous animation frame cost)
+          targetLevel = barInVolume ? Math.max(0.24, ((i + 1) / barCount) * 0.92) : 0.12;
+        } else if (snapshot?.hasAnalyserSignal && isPlaying) {
           // Real Web Audio AnalyserNode energy combined with volume meter envelope
           const audioMod = Math.max(0.18, snapshot.bands[i] ?? snapshot.signalRms);
           targetLevel = barInVolume ? Math.min(1, audioMod * (0.65 + effectiveVol * 0.55)) : 0.12;
@@ -116,7 +121,7 @@ const DynamicVolumeCanvas: React.FC<DynamicVolumeCanvasProps> = memo(({
         }
 
         const prev = smoothedBarsRef.current[i] || 0;
-        const smoothed = prev + (targetLevel - prev) * 0.28;
+        const smoothed = batterySaverActive ? targetLevel : prev + (targetLevel - prev) * 0.28;
         smoothedBarsRef.current[i] = smoothed;
 
         const barH = Math.max(3, smoothed * maxBarHeight);
@@ -150,7 +155,7 @@ const DynamicVolumeCanvas: React.FC<DynamicVolumeCanvasProps> = memo(({
 
       ctx.restore();
 
-      if (isPlaying || isRecentlyAdjusted) {
+      if (!batterySaverActive && (isPlaying || isRecentlyAdjusted)) {
         rafId = requestAnimationFrame(drawFrame);
       } else {
         rafId = null;
@@ -163,7 +168,7 @@ const DynamicVolumeCanvas: React.FC<DynamicVolumeCanvasProps> = memo(({
       isMounted = false;
       if (rafId !== null) cancelAnimationFrame(rafId);
     };
-  }, [volume, isMuted, isPlaying]);
+  }, [volume, isMuted, isPlaying, batterySaverActive]);
 
   const applyPointerVolume = (clientX: number, allowTickHaptic = false) => {
     const el = canvasRef.current;

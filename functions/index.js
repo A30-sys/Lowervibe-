@@ -88,17 +88,33 @@ function formatTrackShareTitle(trackTitle, artistName) {
   return `${trimmedTrack} by ${trimmedArtist} – LOWERVIBE`;
 }
 
-async function readTopChartTrackForShare() {
-  const snap = await db.collection('tracks').limit(150).get();
-  const tracks = [];
+async function readTopChartTrackForShare(options) {
+  const tab = options && options.tab === 'trending' ? 'trending' : 'most-played';
+  const rawGenre = options && typeof options.genre === 'string' ? options.genre.trim().toLowerCase() : '';
+  const requestedTrackId = options && typeof options.trackId === 'string' ? options.trackId.trim() : '';
+
+  const snap = await db.collection('tracks').limit(200).get();
+  let tracks = [];
   snap.forEach((docSnap) => {
     const data = docSnap.data() || {};
     if (!data.isDraft && !data.isDeranked) {
       tracks.push({ id: docSnap.id, ...data });
     }
   });
-  tracks.sort((a, b) => Number(b.plays || 0) - Number(a.plays || 0));
-  const topTrack = tracks[0] || null;
+  if (rawGenre) {
+    const genreFiltered = tracks.filter((t) => String(t.genre || '').trim().toLowerCase() === rawGenre);
+    if (genreFiltered.length > 0) tracks = genreFiltered;
+  }
+  if (tab === 'trending') {
+    tracks.sort((a, b) => {
+      const scoreB = Number(b.plays || 0) + Number(b.likes || 0) * 4 + Number(b.downloads || 0) * 3;
+      const scoreA = Number(a.plays || 0) + Number(a.likes || 0) * 4 + Number(a.downloads || 0) * 3;
+      return scoreB - scoreA || Number(b.plays || 0) - Number(a.plays || 0);
+    });
+  } else {
+    tracks.sort((a, b) => Number(b.plays || 0) - Number(a.plays || 0));
+  }
+  const topTrack = (requestedTrackId ? tracks.find((t) => t.id === requestedTrackId) : null) || tracks[0] || null;
   let artist = null;
   if (topTrack && topTrack.artistId) {
     const artistSnap = await db.collection('artists').doc(String(topTrack.artistId)).get();
@@ -339,7 +355,10 @@ exports.ogCover = onRequest({ cors: true }, async (req, res) => {
         candidates.push(artist.avatar, artist.banner);
       }
     } else if (chartsMatch) {
-      const { topTrack, artist } = await readTopChartTrackForShare();
+      const tab = typeof req.query.tab === 'string' ? req.query.tab : undefined;
+      const genre = typeof req.query.genre === 'string' ? req.query.genre : undefined;
+      const trackId = typeof req.query.track === 'string' ? req.query.track : undefined;
+      const { topTrack, artist } = await readTopChartTrackForShare({ tab, genre, trackId });
       if (topTrack) {
         candidates.push(topTrack.coverArt, artist?.avatar, topTrack.artistAvatar, artist?.banner);
       }
@@ -463,13 +482,22 @@ exports.shareMeta = onRequest({ cors: true }, async (req, res) => {
         ogType = 'profile';
       }
     } else if (chartsMatch) {
-      canonicalUrl = `${PUBLIC_SITE_ORIGIN}/charts`;
-      const { topTrack, artist, totalCount } = await readTopChartTrackForShare();
+      const tab = typeof req.query.tab === 'string' ? req.query.tab : undefined;
+      const genre = typeof req.query.genre === 'string' ? req.query.genre : undefined;
+      const trackId = typeof req.query.track === 'string' ? req.query.track : undefined;
+      const qsParams = new URLSearchParams();
+      if (tab && tab !== 'most-played') qsParams.set('tab', tab);
+      if (genre && genre.trim()) qsParams.set('genre', genre.trim());
+      if (trackId && trackId.trim()) qsParams.set('track', trackId.trim());
+      const qs = qsParams.toString() ? `?${qsParams.toString()}` : '';
+      canonicalUrl = `${PUBLIC_SITE_ORIGIN}/charts${qs}`;
+      const { topTrack, artist, totalCount } = await readTopChartTrackForShare({ tab, genre, trackId });
       if (topTrack) {
         const safeTrack = String(topTrack.title || 'Top Track').trim();
         const safeArtist = String(topTrack.artistName || artist?.name || 'Independent Artist').trim();
-        title = `Most Played & Trending Charts (#1: ${safeTrack} by ${safeArtist}) – LOWERVIBE`;
-        description = `Explore ${totalCount} tracks on LOWERVIBE Top Charts. #1 right now: "${safeTrack}" by ${safeArtist}. Stream free and share trending genres.`;
+        const label = genre ? `Top ${genre} Chart` : tab === 'trending' ? 'Most Trending Chart' : 'Most Played & Trending Charts';
+        title = `${label} (#1: ${safeTrack} by ${safeArtist}) – LOWERVIBE`;
+        description = `Explore ${totalCount} tracks on LOWERVIBE ${label}. #1 right now: "${safeTrack}" by ${safeArtist}. Stream free and share.`;
         imageAlt = `#1 Charting: ${safeTrack} by ${safeArtist}`;
         const rawImg = pickFirstValidArtworkCandidate([
           topTrack.coverArt,
@@ -478,7 +506,7 @@ exports.shareMeta = onRequest({ cors: true }, async (req, res) => {
           artist?.banner,
         ]);
         if (rawImg) {
-          image = `${PUBLIC_SITE_ORIGIN}/og/charts/cover`;
+          image = `${PUBLIC_SITE_ORIGIN}/og/charts/cover${qs}`;
         }
       } else {
         title = 'Most Played & Trending Charts – LOWERVIBE';

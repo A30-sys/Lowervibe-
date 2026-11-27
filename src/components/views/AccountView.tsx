@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
+  Battery,
+  BatteryCharging,
   Bell,
   Bug,
   Camera,
@@ -44,6 +46,7 @@ import {
   Volume2,
   Wifi,
   X,
+  Zap,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useAudio } from '../../context/AudioContext';
@@ -53,6 +56,7 @@ import { useRouter } from '../../context/RouterContext';
 import { useTheme } from '../../context/ThemeContext';
 import { AudioQualityPreference } from '../../context/AudioContext';
 import { COUNTRIES_LIST } from '../../data/regions';
+import { setBatterySaverMode, useBatterySaver } from '../../utils/batterySaver';
 import {
   clearOfflineCache,
   getOfflineCacheStats,
@@ -243,6 +247,7 @@ export const AccountView: React.FC = () => {
   const { navigate } = useRouter();
   const { themeMode, setThemeMode } = useTheme();
   const { language, setLanguage, t } = useLanguage();
+  const batterySaver = useBatterySaver();
   const isNy = language === 'ny';
 
   const [toast, setToast] = useState<{ text: string; type: 'ok' | 'err' } | null>(null);
@@ -2080,6 +2085,103 @@ export const AccountView: React.FC = () => {
               checked={Boolean(userSettings.appearance.reducedMotion)}
               onChange={(v) => updateUserSettings({ appearance: { reducedMotion: v } })}
             />
+
+            {/* Battery Saver Mode */}
+            <div className="p-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <div
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                      batterySaver.active
+                        ? 'bg-[var(--accent)] text-[var(--accent-contrast)] border-transparent'
+                        : 'bg-[var(--surface)] text-[var(--accent-text)] border-[var(--border)]'
+                    }`}
+                  >
+                    {batterySaver.charging ? (
+                      <BatteryCharging className="w-4 h-4" />
+                    ) : (
+                      <Battery className="w-4 h-4" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs sm:text-sm font-bold text-[var(--text)]">
+                        {isNy ? 'Kupulumutsa Batire' : 'Battery Saver'}
+                      </span>
+                      <span
+                        className={`text-[11px] font-mono font-semibold ${
+                          batterySaver.active ? 'text-[var(--accent-text)]' : 'text-[var(--text-muted)]'
+                        }`}
+                      >
+                        {batterySaver.active
+                          ? isNy ? '· Yogwira ntchito' : '· Active'
+                          : isNy ? '· Yachibadwa' : '· Standard'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[var(--text-muted)] leading-relaxed mt-0.5">
+                      {isNy
+                        ? 'Imachepetsa kusintha kwa chinsalu (1Hz pa nyimbo), imayimitsa visualizer, ndi kuzimitsa makanema osafunikira batire ikatsika.'
+                        : 'Reduces UI refresh rates (1Hz player updates, pauses audio canvas visualizers) and disables non-essential animations when battery is low.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {batterySaver.batterySupported && batterySaver.level !== null && (
+                <div className="flex items-center gap-2 text-[11px] font-mono text-[var(--text-muted)] px-1">
+                  <Zap className="w-3.5 h-3.5 text-[var(--accent-text)] shrink-0" />
+                  <span>
+                    {Math.round(batterySaver.level * 100)}%
+                    {' · '}
+                    {batterySaver.charging
+                      ? isNy ? 'Ikuchajidwa' : 'Charging'
+                      : batterySaver.isLowBattery
+                      ? isNy ? 'Batire yatsika (≤20%)' : 'Low power (≤20%)'
+                      : isNy ? 'Ikugwiritsa batire' : 'On battery'}
+                  </span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'auto' as const, label: isNy ? 'Yokha (≤20%)' : 'Auto (≤20%)' },
+                  { id: 'on' as const, label: isNy ? 'Yoyatsidwa' : 'Always On' },
+                  { id: 'off' as const, label: isNy ? 'Yozimitsidwa' : 'Off' },
+                ].map((opt) => {
+                  const selected = (userSettings.appearance.batterySaverMode || batterySaver.mode) === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        setBatterySaverMode(opt.id);
+                        updateUserSettings({ appearance: { batterySaverMode: opt.id } });
+                        showNotice(
+                          opt.id === 'on'
+                            ? isNy
+                              ? 'Kupulumutsa batire kwayatsidwa'
+                              : 'Battery Saver enabled — animations & UI refresh reduced.'
+                            : opt.id === 'off'
+                            ? isNy
+                              ? 'Kupulumutsa batire kwazimitsidwa'
+                              : 'Battery Saver turned off.'
+                            : isNy
+                            ? 'Kupulumutsa batire kumadziyatsa pa ≤20%'
+                            : 'Battery Saver set to Auto on low battery (≤20%).'
+                        );
+                      }}
+                      className={`py-2.5 px-3 rounded-xl border text-xs font-semibold cursor-pointer min-h-[44px] transition ${
+                        selected
+                          ? 'bg-[var(--accent)] text-[var(--accent-contrast)] border-transparent font-bold'
+                          : 'bg-[var(--surface)] text-[var(--text)] border-[var(--border)] hover:border-[var(--border-strong)]'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </SettingsGroup>
 

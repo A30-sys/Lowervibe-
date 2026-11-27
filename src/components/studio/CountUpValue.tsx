@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { getIsBatterySaverActive } from '../../utils/batterySaver';
 
 interface UseCountUpOptions {
   durationMs?: number;
@@ -11,8 +12,9 @@ export function useCountUp(targetValue: number, options: UseCountUpOptions = {})
 
   const [displayValue, setDisplayValue] = useState<number>(() => {
     const reduced =
-      typeof window !== 'undefined' &&
-      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      getIsBatterySaverActive() ||
+      (typeof window !== 'undefined' &&
+        window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
     return reduced || durationMs <= 0 ? safeTarget : 0;
   });
   const currentDisplayedRef = useRef<number>(displayValue);
@@ -21,8 +23,9 @@ export function useCountUp(targetValue: number, options: UseCountUpOptions = {})
 
   useEffect(() => {
     const prefersReducedMotion =
-      typeof window !== 'undefined' &&
-      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      getIsBatterySaverActive() ||
+      (typeof window !== 'undefined' &&
+        window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
     const isManualReplay = lastReplayKeyRef.current !== replayKey;
     lastReplayKeyRef.current = replayKey;

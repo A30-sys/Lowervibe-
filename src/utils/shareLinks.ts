@@ -1,4 +1,4 @@
-const PRODUCTION_ORIGIN = 'https://lowervibemusic.web.app';
+const FALLBACK_PRODUCTION_ORIGIN = 'https://lowervibemusic.web.app';
 
 export function getTrustedShareOrigin(): string {
   const configured =
@@ -6,10 +6,16 @@ export function getTrustedShareOrigin(): string {
     typeof import.meta.env?.VITE_PUBLIC_SITE_URL === 'string'
       ? import.meta.env.VITE_PUBLIC_SITE_URL.trim().replace(/\/+$/, '')
       : '';
-  if (configured.startsWith('https://')) {
+  if (configured.startsWith('https://') || configured.startsWith('http://')) {
     return configured;
   }
-  return PRODUCTION_ORIGIN;
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    const origin = window.location.origin.trim().replace(/\/+$/, '');
+    if (origin.startsWith('https://') || origin.startsWith('http://')) {
+      return origin;
+    }
+  }
+  return FALLBACK_PRODUCTION_ORIGIN;
 }
 
 export function getPlatformShareUrl(): string {
@@ -34,7 +40,7 @@ export function getShortArtistShareUrl(artist: { id: string; slug?: string }): s
   return `${getTrustedShareOrigin()}/a/${encodeURIComponent(handleOrId)}`;
 }
 
-export function getChartsShareUrl(options?: { tab?: string; genre?: string }): string {
+export function getChartsShareUrl(options?: { tab?: string; genre?: string; trackId?: string }): string {
   const params = new URLSearchParams();
   if (options?.tab && options.tab !== 'most-played') {
     params.set('tab', options.tab);
@@ -42,13 +48,21 @@ export function getChartsShareUrl(options?: { tab?: string; genre?: string }): s
   if (options?.genre && options.genre.trim()) {
     params.set('genre', options.genre.trim());
   }
+  if (options?.trackId && options.trackId.trim()) {
+    params.set('track', options.trackId.trim());
+  }
   const qs = params.toString();
   return `${getTrustedShareOrigin()}/charts${qs ? `?${qs}` : ''}`;
 }
 
-export function getShortChartsShareUrl(genre?: string): string {
-  if (genre && genre.trim()) {
-    return `${getTrustedShareOrigin()}/charts?genre=${encodeURIComponent(genre.trim())}`;
+export function getShortChartsShareUrl(
+  genreOrOptions?: string | { tab?: string; genre?: string; trackId?: string }
+): string {
+  if (typeof genreOrOptions === 'string') {
+    if (genreOrOptions.trim()) {
+      return `${getTrustedShareOrigin()}/charts?genre=${encodeURIComponent(genreOrOptions.trim())}`;
+    }
+    return `${getTrustedShareOrigin()}/charts`;
   }
-  return `${getTrustedShareOrigin()}/charts`;
+  return getChartsShareUrl(genreOrOptions);
 }

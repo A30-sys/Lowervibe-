@@ -60,6 +60,7 @@ import {
   UserSettings,
 } from '../types';
 import { DEFAULT_AVATAR_SVG, DEFAULT_ARTWORK_SVG, DEFAULT_BANNER_SVG } from '../utils/artworkFallback';
+import { setBatterySaverMode } from '../utils/batterySaver';
 import { LANG_STORAGE_KEY, useLanguage } from './LanguageContext';
 import { THEME_MODE_KEY, useTheme } from './ThemeContext';
 import { useToast } from './ToastContext';
@@ -295,7 +296,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {}
   };
 
-  // Sync settings, reduced-motion class & persistent device login cache
+  // Sync settings, reduced-motion class, battery saver & persistent device login cache
   useEffect(() => {
     try {
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(userSettings));
@@ -305,6 +306,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         'reduced-motion',
         Boolean(userSettings.appearance?.reducedMotion)
       );
+    }
+    if (userSettings.appearance?.batterySaverMode) {
+      setBatterySaverMode(userSettings.appearance.batterySaverMode);
     }
   }, [userSettings]);
 

@@ -1,4 +1,5 @@
 import { NotificationType } from '../types';
+import { getTrustedShareOrigin } from './shareLinks';
 
 function loadCanvasSafeImage(url?: string, timeoutMs: number = 4500): Promise<HTMLImageElement | null> {
   if (!url || typeof window === 'undefined') return Promise.resolve(null);
@@ -380,8 +381,9 @@ export async function exportAlertBannerPng(params: {
   });
 
   // Footer bar
+  const liveHost = getTrustedShareOrigin().replace(/^https?:\/\//, '').split('/')[0] || 'lowervibemusic.web.app';
   const btnY = cardY + cardH - 96;
-  const ctaLabel = params.actionLabel?.trim() || 'Listen at lowervibemusic.web.app';
+  const ctaLabel = params.actionLabel?.trim() || `Listen at ${liveHost}`;
   ctx.font = '800 22px "Plus Jakarta Sans", system-ui, sans-serif';
   const btnW = Math.min(cardW - 360, ctx.measureText(ctaLabel).width + 64);
 
@@ -394,7 +396,7 @@ export async function exportAlertBannerPng(params: {
 
   ctx.fillStyle = '#9ea49d';
   ctx.font = '600 20px ui-monospace, monospace';
-  const urlText = 'lowervibemusic.web.app';
+  const urlText = liveHost.slice(0, 34);
   const urlW = ctx.measureText(urlText).width;
   ctx.fillText(urlText, cardX + cardW - 48 - urlW, btnY + 35);
 

@@ -3,6 +3,7 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
+  HardDrive,
   Heart,
   ListMusic,
   Music2,
@@ -13,11 +14,13 @@ import {
   Trophy,
   Upload,
   UserPlus,
+  WifiOff,
 } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
 import { getLocalizedGreeting, useLanguage } from '../../context/LanguageContext';
+import { useOfflineQueue } from '../../context/OfflineQueueContext';
 import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
 import { matchesLocationFilter } from '../../data/regions';
@@ -176,6 +179,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     tracks,
     artists,
     playlists,
+    offlineTrackIds,
     isCatalogLoaded,
     catalogError,
     retryCatalogLoad,
@@ -190,6 +194,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     recordPlaylistPlay,
     selectedCountry,
   } = useAudio();
+  const { isOnline } = useOfflineQueue();
   const { currentUser, toggleFollowArtist } = useAuth();
   const { language, t } = useLanguage();
   const { navigate } = useRouter();
@@ -201,6 +206,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
     () => tracks.filter((tr) => !tr.isDraft && !tr.isDeranked),
     [tracks]
   );
+
+  const offlineDownloadedTracks = useMemo(() => {
+    if (offlineTrackIds.length === 0) return [];
+    const idSet = new Set(offlineTrackIds);
+    return publicTracks.filter((tr) => idSet.has(tr.id));
+  }, [publicTracks, offlineTrackIds]);
 
   // Normalized live genre chips computed strictly from stored public tracks
   const topGenres = useMemo(() => {
@@ -616,8 +627,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
     return parts;
   }, [currentUser, playHistory.length, t]);
 
-  // 1. Skeleton Loading State
-  if (!isCatalogLoaded && tracks.length === 0) {
+  // 1. Skeleton Loading State (never stall when offline)
+  if (!isCatalogLoaded && tracks.length === 0 && isOnline) {
     return (
       <div className="space-y-8 pb-8">
         <HeroSkeleton />
@@ -627,8 +638,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
     );
   }
 
-  // 2. Catalog Error State with Retry
-  if (catalogError && tracks.length === 0) {
+  // 2. Catalog Error State with Retry (only when truly empty and online)
+  if (catalogError && tracks.length === 0 && isOnline) {
     return (
       <div className="py-16">
         <div className="max-w-md mx-auto p-8 rounded-[28px] bg-[var(--surface)] border border-[var(--border)] text-center space-y-4">
@@ -654,7 +665,57 @@ export const HomeView: React.FC<HomeViewProps> = ({
     );
   }
 
-  // 3. Designed Empty Catalog State
+  // 3. Offline Empty Cache State (when visitor opens offline before ever caching any tracks)
+  if (!isOnline && publicTracks.length === 0) {
+    return (
+      <div className="space-y-8 pb-8">
+        <div className="space-y-1">
+          <h1 className="text-2xl sm:text-3xl font-extrabold font-heading text-[var(--text)]">
+            {getLocalizedGreeting(language, currentUser?.name)}
+          </h1>
+          <p className="text-xs sm:text-sm text-[var(--text-muted)]">
+            {language === 'ny' ? 'Simuli pa intaneti' : 'Offline mode · Local cache'}
+          </p>
+        </div>
+
+        <div className="max-w-lg mx-auto p-8 sm:p-10 rounded-[28px] bg-[var(--surface)] border border-[var(--border)] text-center space-y-5">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/15 border border-amber-500/35 text-amber-500 flex items-center justify-center mx-auto">
+            <WifiOff className="w-7 h-7" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-extrabold font-heading text-[var(--text)]">
+              {language === 'ny' ? 'Palibe nyimbo zosungidwa pa chipangizochi' : 'No cached songs on this device yet'}
+            </h2>
+            <p className="text-xs sm:text-sm text-[var(--text-muted)] leading-relaxed">
+              {language === 'ny'
+                ? 'Lumikizani ku intaneti kuti mumvere kapena kusunga nyimbo zoti muzimvera popanda ma bando.'
+                : 'Connect once to browse the catalog or save songs for offline listening.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-2.5">
+            <button
+              type="button"
+              onClick={retryCatalogLoad}
+              className="px-5 py-3 rounded-2xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-sm inline-flex items-center gap-2 hover:brightness-95 active:scale-95 transition cursor-pointer min-h-[48px]"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>{language === 'ny' ? 'Yesaninso' : 'Reconnect'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/library?tab=downloads')}
+              className="px-5 py-3 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] font-semibold text-sm inline-flex items-center gap-2 cursor-pointer min-h-[48px]"
+            >
+              <HardDrive className="w-4 h-4 text-[var(--accent-text)]" />
+              <span>{language === 'ny' ? 'Zosungidwa' : 'Downloads'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 4. Designed Empty Catalog State (online with zero tracks)
   if (isCatalogLoaded && publicTracks.length === 0) {
     return (
       <div className="space-y-8 pb-8">
@@ -770,6 +831,27 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Offline Downloaded Songs Shelf (surfaces immediately when offline) */}
+      {!isOnline && offlineDownloadedTracks.length > 0 && (
+        <HorizontalTrackShelf
+          title={language === 'ny' ? 'Nyimbo zanu zosungidwa' : 'Ready to play offline'}
+          subtitle={
+            language === 'ny'
+              ? 'Nyimbo zomwe munasunga pa foni yanu'
+              : 'Saved audio tracks available without mobile data'
+          }
+          items={offlineDownloadedTracks}
+          minItems={1}
+          currentTrackId={currentTrack?.id}
+          isPlaying={isPlaying}
+          onPlayTrack={handleTrackPlay}
+          playAllLabel={t('play_all', 'Play all')}
+          onPlayAll={(list) => playTrackList(list, 0)}
+          onSelectArtist={onSelectArtist}
+          onOpenTrackDetails={onOpenTrackDetails}
+        />
+      )}
 
       {/* Instant Genre Spotlight when user picks a specific genre chip */}
       {selectedGenre !== 'All' && genreSpotlightTracks.length > 0 && (

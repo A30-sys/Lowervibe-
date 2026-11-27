@@ -23,6 +23,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
+import { useOfflineQueue } from '../../context/OfflineQueueContext';
 import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
 import { MACRO_REGIONS, matchesLocationFilter, WORLD_REGIONS } from '../../data/regions';
@@ -59,6 +60,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
 
   const { currentUser, toggleLikeTrack } = useAuth();
   const { language, t } = useLanguage();
+  const { isOnline } = useOfflineQueue();
   const isNy = language === 'ny';
   const { showToast } = useToast();
   const { navigate, searchParams } = useRouter();
@@ -916,7 +918,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
         </div>
       ) : (
         <div className="space-y-6">
-          {!isCatalogLoaded && tracks.length === 0 ? (
+          {!isCatalogLoaded && tracks.length === 0 && isOnline ? (
             <div className="space-y-2.5">
               <TrackRowSkeleton />
               <TrackRowSkeleton />
@@ -926,9 +928,19 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
           ) : publicTracks.length === 0 ? (
             <div className="p-12 text-center rounded-3xl bg-[var(--surface)] border border-[var(--border)] space-y-3">
               <Music className="w-10 h-10 text-[var(--accent-text)] mx-auto opacity-70" />
-              <h3 className="text-base font-bold text-[var(--text)] font-heading">{t('no_songs_yet')}</h3>
+              <h3 className="text-base font-bold text-[var(--text)] font-heading">
+                {!isOnline
+                  ? isNy
+                    ? 'Simuli pa intaneti'
+                    : 'Offline · No cached songs on this device yet'
+                  : t('no_songs_yet')}
+              </h3>
               <p className="text-xs text-[var(--text-muted)] max-w-sm mx-auto">
-                {isNy
+                {!isOnline
+                  ? isNy
+                    ? 'Lumikizani intaneti kamodzi kuti musunge nyimbo zomvera popanda ma bando.'
+                    : 'Connect once to load songs or play downloaded tracks in Library → Downloads.'
+                  : isNy
                   ? 'Kwezani nyimbo mu Situdiyo kuti muyambe kumvera.'
                   : 'Publish a song in Upload to start streaming.'}
               </p>

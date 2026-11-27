@@ -5,12 +5,16 @@
  * Enforces square cover artwork >= 1400x1400px on upload.
  */
 
+import { Track } from '../types';
+import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../utils/artworkFallback';
 import { stampLowervibeCoverWatermark } from '../utils/artworkWatermark';
 
 const DB_NAME = 'lowervibe_offline_cache';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const AUDIO_STORE = 'audio_blobs';
 const RECENT_STORE = 'recent_offline_tracks';
+const SNAPSHOT_STORE = 'track_snapshots';
+const OFFLINE_SNAPSHOT_LS_KEY = 'lowervibe_offline_snapshots_v1';
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -26,10 +30,47 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(RECENT_STORE)) {
         db.createObjectStore(RECENT_STORE, { keyPath: 'trackId' });
       }
+      if (!db.objectStoreNames.contains(SNAPSHOT_STORE)) {
+        db.createObjectStore(SNAPSHOT_STORE, { keyPath: 'id' });
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+function sanitizeTrackForOfflineSnapshot(track: Track): Track {
+  const safeCover =
+    track.coverArt && (!track.coverArt.startsWith('data:') || track.coverArt.length <= 160000)
+      ? track.coverArt
+      : DEFAULT_ARTWORK_SVG;
+  const safeAvatar =
+    track.artistAvatar &&
+    (!track.artistAvatar.startsWith('data:') || track.artistAvatar.length <= 80000)
+      ? track.artistAvatar
+      : DEFAULT_AVATAR_SVG;
+  return {
+    ...track,
+    coverArt: safeCover,
+    artistAvatar: safeAvatar,
+  };
+}
+
+function writeLocalOfflineSnapshots(tracks: Track[]): void {
+  try {
+    localStorage.setItem(OFFLINE_SNAPSHOT_LS_KEY, JSON.stringify(tracks.slice(0, 80)));
+  } catch {}
+}
+
+export function readLocalOfflineSnapshotsSync(): Track[] {
+  try {
+    const raw = localStorage.getItem(OFFLINE_SNAPSHOT_LS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as Track[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface ExtractedAudioMetadata {
@@ -611,13 +652,76 @@ export async function isTrackCachedOffline(trackId: string): Promise<boolean> {
   }
 }
 
-export async function removeTrackOfflineCache(trackId: string): Promise<void> {
+export async function saveOfflineTrackSnapshot(track: Track): Promise<void> {
+  if (!track?.id) return;
+  const clean = sanitizeTrackForOfflineSnapshot(track);
+  try {
+    const existing = readLocalOfflineSnapshotsSync().filter((t) => t?.id && t.id !== clean.id);
+    writeLocalOfflineSnapshots([clean, ...existing]);
+  } catch {}
+
   try {
     const db = await openDb();
     await new Promise<void>((resolve) => {
-      const tx = db.transaction([AUDIO_STORE, RECENT_STORE], 'readwrite');
+      const tx = db.transaction(SNAPSHOT_STORE, 'readwrite');
+      tx.objectStore(SNAPSHOT_STORE).put(clean);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+  } catch {}
+}
+
+export async function getOfflineTrackSnapshots(): Promise<Track[]> {
+  const localFallback = readLocalOfflineSnapshotsSync();
+  try {
+    const db = await openDb();
+    const idbList = await new Promise<Track[]>((resolve) => {
+      const tx = db.transaction(SNAPSHOT_STORE, 'readonly');
+      const req = tx.objectStore(SNAPSHOT_STORE).getAll();
+      req.onsuccess = () => resolve(Array.isArray(req.result) ? (req.result as Track[]) : []);
+      req.onerror = () => resolve([]);
+    });
+    const byId = new Map<string, Track>();
+    for (const item of localFallback) {
+      if (item?.id) byId.set(item.id, item);
+    }
+    for (const item of idbList) {
+      if (item?.id) byId.set(item.id, item);
+    }
+    return Array.from(byId.values());
+  } catch {
+    return localFallback;
+  }
+}
+
+export async function getCachedAudioTrackIds(): Promise<string[]> {
+  try {
+    const db = await openDb();
+    return await new Promise<string[]>((resolve) => {
+      const tx = db.transaction(AUDIO_STORE, 'readonly');
+      const req = tx.objectStore(AUDIO_STORE).getAllKeys();
+      req.onsuccess = () => resolve((req.result || []).map((k) => String(k)));
+      req.onerror = () => resolve([]);
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function removeTrackOfflineCache(trackId: string): Promise<void> {
+  try {
+    const existing = readLocalOfflineSnapshotsSync().filter((t) => t?.id !== trackId);
+    writeLocalOfflineSnapshots(existing);
+  } catch {}
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction([AUDIO_STORE, RECENT_STORE, SNAPSHOT_STORE], 'readwrite');
       tx.objectStore(AUDIO_STORE).delete(trackId);
       tx.objectStore(RECENT_STORE).delete(trackId);
+      if (db.objectStoreNames.contains(SNAPSHOT_STORE)) {
+        tx.objectStore(SNAPSHOT_STORE).delete(trackId);
+      }
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
     });
@@ -703,11 +807,20 @@ export async function getOfflineCacheStats(): Promise<OfflineCacheStats> {
 
 export async function clearOfflineCache(): Promise<void> {
   try {
+    localStorage.removeItem(OFFLINE_SNAPSHOT_LS_KEY);
+  } catch {}
+  try {
     const db = await openDb();
     await new Promise<void>((resolve) => {
-      const tx = db.transaction([AUDIO_STORE, RECENT_STORE], 'readwrite');
+      const stores = db.objectStoreNames.contains(SNAPSHOT_STORE)
+        ? [AUDIO_STORE, RECENT_STORE, SNAPSHOT_STORE]
+        : [AUDIO_STORE, RECENT_STORE];
+      const tx = db.transaction(stores, 'readwrite');
       tx.objectStore(AUDIO_STORE).clear();
       tx.objectStore(RECENT_STORE).clear();
+      if (db.objectStoreNames.contains(SNAPSHOT_STORE)) {
+        tx.objectStore(SNAPSHOT_STORE).clear();
+      }
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
     });

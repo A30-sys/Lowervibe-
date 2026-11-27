@@ -42,8 +42,10 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useRouter } from '../context/RouterContext';
 import { useToast } from '../context/ToastContext';
+import { audioEngine } from '../services/audioEngine';
 import { fetchTrackLyrics, ResolvedTrackLyrics } from '../services/lyricsService';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../utils/artworkFallback';
+import { useBatterySaver } from '../utils/batterySaver';
 import { ExtractedPalette, extractDominantColor } from '../utils/colorExtract';
 import { formatTime, getTrackLikeCount, isTrackLikedByUser } from '../utils/formatters';
 import { translateGenreCategory } from '../utils/genreCategories';
@@ -51,6 +53,8 @@ import { triggerHaptic } from '../utils/haptics';
 import {
   formatLrcTimestamp,
   getActiveLrcIndex,
+  getLineTimingState,
+  getPlainLyricsProgress,
   parseLrc,
   stripLrcTimestamps,
 } from '../utils/lrcParser';
@@ -145,7 +149,39 @@ export const FullscreenPlayerModal: React.FC = () => {
   const [lyricsRetryTick, setLyricsRetryTick] = useState(0);
   const [manualScrollPaused, setManualScrollPaused] = useState(false);
   const activeLyricLineRef = useRef<HTMLButtonElement | null>(null);
+  const activePlainLineRef = useRef<HTMLParagraphElement | null>(null);
   const manualScrollTimerRef = useRef<number | null>(null);
+  const { active: batterySaverActive } = useBatterySaver();
+  const [smoothLyricTime, setSmoothLyricTime] = useState<number>(currentTime);
+
+  const isLyricsVisible =
+    isFullscreenPlayerOpen && (isLyricsExpanded || activeTab === 'lyrics');
+
+  useEffect(() => {
+    if (!isLyricsVisible || !isPlaying || batterySaverActive) {
+      setSmoothLyricTime(currentTime);
+      return;
+    }
+
+    let rafId = 0;
+    let mounted = true;
+    const tick = () => {
+      if (!mounted) return;
+      const engineTime = audioEngine.getCurrentTime();
+      setSmoothLyricTime(engineTime > 0 ? engineTime : currentTime);
+      rafId = window.requestAnimationFrame(tick);
+    };
+
+    rafId = window.requestAnimationFrame(tick);
+    return () => {
+      mounted = false;
+      if (rafId) window.cancelAnimationFrame(rafId);
+    };
+  }, [isLyricsVisible, isPlaying, batterySaverActive, currentTime, currentTrack?.id]);
+
+  const effectiveLyricTime =
+    isLyricsVisible && isPlaying && !batterySaverActive ? smoothLyricTime : currentTime;
+  const effectiveDuration = Math.max(duration || 0, currentTrack?.durationSeconds || 0);
 
   const localParsedLyrics = useMemo(() => parseLrc(currentTrack?.lyrics), [currentTrack?.lyrics]);
   const parsedLyrics =
@@ -160,19 +196,35 @@ export const FullscreenPlayerModal: React.FC = () => {
       : 'none';
 
   const activeLyricIndex = useMemo(
-    () => (parsedLyrics.isSynced ? getActiveLrcIndex(parsedLyrics.lines, currentTime, 0.15) : -1),
-    [parsedLyrics, currentTime]
+    () => (parsedLyrics.isSynced ? getActiveLrcIndex(parsedLyrics.lines, effectiveLyricTime, 0.08) : -1),
+    [parsedLyrics, effectiveLyricTime]
   );
+
+  const activeLineTiming = useMemo(() => {
+    if (!parsedLyrics.isSynced || activeLyricIndex < 0) return null;
+    return getLineTimingState(
+      parsedLyrics.lines,
+      activeLyricIndex,
+      effectiveLyricTime,
+      effectiveDuration
+    );
+  }, [parsedLyrics, activeLyricIndex, effectiveLyricTime, effectiveDuration]);
+
+  const plainLyricsProgress = useMemo(() => {
+    if (parsedLyrics.isSynced || !parsedLyrics.hasLyrics) {
+      return { activeIndex: -1, lineProgress: 0 };
+    }
+    return getPlainLyricsProgress(parsedLyrics.plainLines, effectiveLyricTime, effectiveDuration);
+  }, [parsedLyrics, effectiveLyricTime, effectiveDuration]);
 
   useEffect(() => {
     setManualScrollPaused(false);
     setCopiedLyrics(false);
   }, [currentTrack?.id, activeTab]);
 
-  // Fetch synced lyrics whenever FullscreenPlayer is open for a track (with abort & cache)
+  // Fetch synced lyrics whenever FullscreenPlayer opens or Lyrics tab is active
   useEffect(() => {
     if (!isFullscreenPlayerOpen || !currentTrack) return;
-    if (!isLyricsExpanded && activeTab !== 'lyrics' && !currentTrack.lyrics) return;
 
     const controller = new AbortController();
     let active = true;
@@ -195,15 +247,28 @@ export const FullscreenPlayerModal: React.FC = () => {
     };
   }, [isFullscreenPlayerOpen, currentTrack?.id, isLyricsExpanded, activeTab, lyricsRetryTick]);
 
-  // Auto-scroll active synced line into center view unless user just scrolled manually
+  // Auto-scroll active line into center view unless user just scrolled manually
   useEffect(() => {
-    if (!isFullscreenPlayerOpen || (!isLyricsExpanded && activeTab !== 'lyrics')) return;
-    if (manualScrollPaused || activeLyricIndex < 0) return;
-    activeLyricLineRef.current?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'center',
-    });
-  }, [activeLyricIndex, isFullscreenPlayerOpen, isLyricsExpanded, activeTab, manualScrollPaused]);
+    if (!isLyricsVisible || manualScrollPaused) return;
+    if (parsedLyrics.isSynced && activeLyricIndex >= 0) {
+      activeLyricLineRef.current?.scrollIntoView({
+        behavior: batterySaverActive ? 'auto' : 'smooth',
+        block: 'center',
+      });
+    } else if (!parsedLyrics.isSynced && plainLyricsProgress.activeIndex >= 0) {
+      activePlainLineRef.current?.scrollIntoView({
+        behavior: batterySaverActive ? 'auto' : 'smooth',
+        block: 'center',
+      });
+    }
+  }, [
+    activeLyricIndex,
+    plainLyricsProgress.activeIndex,
+    parsedLyrics.isSynced,
+    isLyricsVisible,
+    manualScrollPaused,
+    batterySaverActive,
+  ]);
 
   // Extract dominant color from album cover for background tint
   useEffect(() => {
@@ -1492,37 +1557,80 @@ export const FullscreenPlayerModal: React.FC = () => {
                             setManualScrollPaused(false);
                             seekTo(line.timeSeconds);
                           }}
-                          className={`group flex items-baseline justify-between gap-3 w-full text-left transition-all duration-200 leading-snug cursor-pointer px-3 py-2 rounded-2xl min-h-[44px] ${
+                          className={`group flex flex-col gap-1.5 w-full text-left transition-all duration-150 leading-snug cursor-pointer px-3.5 py-2.5 rounded-2xl min-h-[44px] ${
                             isActiveLine
-                              ? 'bg-white/[0.08] text-xl sm:text-2xl font-extrabold text-[#C6FF3D]'
+                              ? 'bg-white/[0.1] border border-[#C6FF3D]/30 text-xl sm:text-2xl font-extrabold shadow-lg'
                               : isPast
                               ? 'text-base sm:text-lg font-bold text-white/40 hover:text-white/75 hover:bg-white/[0.04]'
                               : 'text-base sm:text-lg font-bold text-white/80 hover:text-white hover:bg-white/[0.04]'
                           }`}
                         >
-                          <span className="flex-1">{line.text}</span>
-                          <span
-                            className={`text-[11px] font-mono tabular-nums shrink-0 transition-opacity ${
-                              isActiveLine
-                                ? 'text-[#C6FF3D]/90 opacity-100'
-                                : 'text-white/40 opacity-60 group-hover:opacity-100'
-                            }`}
-                          >
-                            {formatLrcTimestamp(line.timeSeconds)}
-                          </span>
+                          <div className="flex items-baseline justify-between gap-3 w-full">
+                            <span className="flex-1">
+                              {isActiveLine && activeLineTiming && activeLineTiming.words.length > 0 ? (
+                                activeLineTiming.words.map((word, wIdx) => (
+                                  <React.Fragment key={wIdx}>
+                                    <span
+                                      className={
+                                        word.state === 'sung'
+                                          ? 'text-[#C6FF3D]'
+                                          : word.state === 'active'
+                                          ? 'text-[#C6FF3D] underline decoration-[#C6FF3D]/70 decoration-2 underline-offset-4'
+                                          : 'text-white/55'
+                                      }
+                                    >
+                                      {word.text}
+                                    </span>
+                                    {word.trailingSpace}
+                                  </React.Fragment>
+                                ))
+                              ) : (
+                                line.text
+                              )}
+                            </span>
+                            <span
+                              className={`text-[11px] font-mono tabular-nums shrink-0 transition-opacity ${
+                                isActiveLine
+                                  ? 'text-[#C6FF3D]/95 opacity-100'
+                                  : 'text-white/40 opacity-60 group-hover:opacity-100'
+                              }`}
+                            >
+                              {formatLrcTimestamp(line.timeSeconds)}
+                            </span>
+                          </div>
+                          {isActiveLine && activeLineTiming && (
+                            <div className="w-full h-0.5 rounded-full bg-white/15 overflow-hidden">
+                              <div
+                                className="h-full bg-[#C6FF3D] rounded-full"
+                                style={{ width: `${Math.round(activeLineTiming.lineProgress * 100)}%` }}
+                              />
+                            </div>
+                          )}
                         </button>
                       );
                     })}
                   </>
                 ) : (
-                  parsedLyrics.plainLines.map((line, idx) => (
-                    <p
-                      key={`${idx}-${line.slice(0, 12)}`}
-                      className="text-lg sm:text-xl font-bold text-white/85 leading-relaxed px-2"
-                    >
-                      {line}
-                    </p>
-                  ))
+                  parsedLyrics.plainLines.map((line, idx) => {
+                    const isActivePlain = idx === plainLyricsProgress.activeIndex;
+                    const isPastPlain =
+                      plainLyricsProgress.activeIndex >= 0 && idx < plainLyricsProgress.activeIndex;
+                    return (
+                      <p
+                        key={`${idx}-${line.slice(0, 12)}`}
+                        ref={isActivePlain ? activePlainLineRef : undefined}
+                        className={`text-lg sm:text-xl leading-relaxed px-3 py-1.5 rounded-xl transition ${
+                          isActivePlain
+                            ? 'bg-white/[0.08] font-extrabold text-[#C6FF3D]'
+                            : isPastPlain
+                            ? 'font-semibold text-white/45'
+                            : 'font-semibold text-white/85'
+                        }`}
+                      >
+                        {line}
+                      </p>
+                    );
+                  })
                 )}
               </div>
 
@@ -1755,37 +1863,80 @@ export const FullscreenPlayerModal: React.FC = () => {
                           setManualScrollPaused(false);
                           seekTo(line.timeSeconds);
                         }}
-                        className={`group flex items-baseline justify-between gap-3 w-full text-left transition leading-relaxed cursor-pointer px-2.5 py-1.5 rounded-xl min-h-[44px] ${
+                        className={`group flex flex-col gap-1 w-full text-left transition leading-relaxed cursor-pointer px-3 py-2 rounded-xl min-h-[44px] ${
                           isActiveLine
-                            ? 'bg-white/[0.08] text-lg sm:text-xl font-extrabold text-[#C6FF3D]'
+                            ? 'bg-white/[0.1] border border-[#C6FF3D]/30 text-lg sm:text-xl font-extrabold'
                             : isPast
                             ? 'text-base font-bold text-white/40 hover:text-white/75 hover:bg-white/[0.04]'
                             : 'text-base font-bold text-white/75 hover:text-white hover:bg-white/[0.04]'
                         }`}
                       >
-                        <span className="flex-1">{line.text}</span>
-                        <span
-                          className={`text-[11px] font-mono tabular-nums shrink-0 ${
-                            isActiveLine
-                              ? 'text-[#C6FF3D]/90'
-                              : 'text-white/35 group-hover:text-white/70'
-                          }`}
-                        >
-                          {formatLrcTimestamp(line.timeSeconds)}
-                        </span>
+                        <div className="flex items-baseline justify-between gap-3 w-full">
+                          <span className="flex-1">
+                            {isActiveLine && activeLineTiming && activeLineTiming.words.length > 0 ? (
+                              activeLineTiming.words.map((word, wIdx) => (
+                                <React.Fragment key={wIdx}>
+                                  <span
+                                    className={
+                                      word.state === 'sung'
+                                        ? 'text-[#C6FF3D]'
+                                        : word.state === 'active'
+                                        ? 'text-[#C6FF3D] underline decoration-[#C6FF3D]/70 decoration-2 underline-offset-4'
+                                        : 'text-white/55'
+                                    }
+                                  >
+                                    {word.text}
+                                  </span>
+                                  {word.trailingSpace}
+                                </React.Fragment>
+                              ))
+                            ) : (
+                              line.text
+                            )}
+                          </span>
+                          <span
+                            className={`text-[11px] font-mono tabular-nums shrink-0 ${
+                              isActiveLine
+                                ? 'text-[#C6FF3D]/95'
+                                : 'text-white/35 group-hover:text-white/70'
+                            }`}
+                          >
+                            {formatLrcTimestamp(line.timeSeconds)}
+                          </span>
+                        </div>
+                        {isActiveLine && activeLineTiming && (
+                          <div className="w-full h-0.5 rounded-full bg-white/15 overflow-hidden">
+                            <div
+                              className="h-full bg-[#C6FF3D] rounded-full"
+                              style={{ width: `${Math.round(activeLineTiming.lineProgress * 100)}%` }}
+                            />
+                          </div>
+                        )}
                       </button>
                     );
                   })}
                 </>
               ) : (
-                parsedLyrics.plainLines.map((line, idx) => (
-                  <p
-                    key={`${idx}-${line.slice(0, 12)}`}
-                    className="text-base sm:text-lg font-semibold text-white/85 leading-relaxed px-1"
-                  >
-                    {line}
-                  </p>
-                ))
+                parsedLyrics.plainLines.map((line, idx) => {
+                  const isActivePlain = idx === plainLyricsProgress.activeIndex;
+                  const isPastPlain =
+                    plainLyricsProgress.activeIndex >= 0 && idx < plainLyricsProgress.activeIndex;
+                  return (
+                    <p
+                      key={`${idx}-${line.slice(0, 12)}`}
+                      ref={isActivePlain ? activePlainLineRef : undefined}
+                      className={`text-base sm:text-lg leading-relaxed px-2.5 py-1 rounded-xl transition ${
+                        isActivePlain
+                          ? 'bg-white/[0.08] font-extrabold text-[#C6FF3D]'
+                          : isPastPlain
+                          ? 'font-semibold text-white/45'
+                          : 'font-semibold text-white/85'
+                      }`}
+                    >
+                      {line}
+                    </p>
+                  );
+                })
               )}
             </div>
 

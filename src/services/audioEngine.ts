@@ -648,6 +648,17 @@ class AudioEngine {
     }
   }
 
+  public getCurrentTime(): number {
+    if (this.activeElement && Number.isFinite(this.activeElement.currentTime)) {
+      return this.activeElement.currentTime;
+    }
+    return 0;
+  }
+
+  public getIsPlaying(): boolean {
+    return this.isPlaying;
+  }
+
   public seek(seconds: number) {
     if (this.activeElement) {
       try {

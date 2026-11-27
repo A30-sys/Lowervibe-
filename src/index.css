@@ -464,14 +464,37 @@ html.light .stroke-numeral {
   animation-fill-mode: forwards;
 }
 
-/* Reduced Motion Override (OS preference or user Settings toggle) */
+/* Reduced Motion & Battery Saver Overrides */
 html.reduced-motion *,
 html.reduced-motion ::before,
-html.reduced-motion ::after {
+html.reduced-motion ::after,
+html.battery-saver *,
+html.battery-saver ::before,
+html.battery-saver ::after {
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.01ms !important;
   scroll-behavior: auto !important;
+}
+
+html.battery-saver .animate-eq-1,
+html.battery-saver .animate-eq-2,
+html.battery-saver .animate-eq-3,
+html.battery-saver .animate-eq-4,
+html.battery-saver .animate-lv-spin,
+html.battery-saver .animate-pulse,
+html.battery-saver .animate-ping,
+html.battery-saver .animate-bounce,
+html.battery-saver .shimmer-placeholder {
+  animation: none !important;
+}
+
+html.battery-saver .backdrop-blur-sm,
+html.battery-saver .backdrop-blur-md,
+html.battery-saver .backdrop-blur-lg,
+html.battery-saver .backdrop-blur-xl {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

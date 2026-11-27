@@ -3160,6 +3160,14 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                                     {sharePct}% {isNy ? 'gawo la nyimbo' : 'catalog share'}
                                   </span>
                                 )}
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/tracks/${encodeURIComponent(track.id)}`)}
+                                  className="hover:text-[var(--accent-text)] hover:underline cursor-pointer"
+                                  title={isNy ? 'Tsegulani tsamba la nyimbo' : 'Open song page'}
+                                >
+                                  ID: {track.id}
+                                </button>
                               </div>
 
                               {totalPlays > 0 && (
@@ -3199,6 +3207,15 @@ export const StudioView: React.FC<{ onOpenTrackDetails: (track: Track) => void }
                             </div>
 
                             <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setActiveShareTrack(track)}
+                                className="px-3 py-1.5 rounded-xl bg-[var(--accent)]/12 border border-[var(--accent)]/35 text-xs font-semibold text-[var(--accent-text)] cursor-pointer flex items-center gap-1 hover:bg-[var(--accent)] hover:text-[var(--accent-contrast)] transition-colors"
+                              >
+                                <Share2 className="w-3.5 h-3.5" />
+                                <span>{translate('share')}</span>
+                              </button>
+
                               <button
                                 type="button"
                                   onClick={() => {

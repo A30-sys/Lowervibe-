@@ -20,7 +20,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useRouter } from '../../context/RouterContext';
 import { useToast } from '../../context/ToastContext';
 import { db } from '../../services/firebase';
-import { Track } from '../../types';
+import { Track, Artist } from '../../types';
 import { DEFAULT_ARTWORK_SVG, DEFAULT_AVATAR_SVG } from '../../utils/artworkFallback';
 import {
   formatTime,
@@ -64,13 +64,16 @@ export const TrackPublicPageView: React.FC = () => {
   const [commentText, setCommentText] = useState('');
   const [audioError, setAudioError] = useState(false);
   const [fetchedTrack, setFetchedTrack] = useState<Track | null>(null);
+  const [fetchedArtist, setFetchedArtist] = useState<Artist | null>(null);
   const [isResolvingTrack, setIsResolvingTrack] = useState(false);
 
   const contextTrack =
     tracks.find((tr) => tr.id === trackId && !tr.isDraft && !tr.isDeranked) ||
     tracks.find((tr) => tr.id === trackId);
   const track = contextTrack || (fetchedTrack?.id === trackId ? fetchedTrack : undefined);
-  const artistForTrack = track ? artists.find((a) => a.id === track.artistId) : undefined;
+  const artistForTrack =
+    (track ? artists.find((a) => a.id === track.artistId) : undefined) ||
+    (track && fetchedArtist?.id === track.artistId ? fetchedArtist : undefined);
 
   useEffect(() => {
     let active = true;
@@ -84,7 +87,13 @@ export const TrackPublicPageView: React.FC = () => {
         if (!active) return;
         if (snap.exists()) {
           const data = snap.data() as Omit<Track, 'id'>;
-          if (!data.isDraft && !data.isDeranked) {
+          const isOwnerViewer = Boolean(
+            currentUser &&
+              (data.uploadedByUserId === currentUser.id ||
+                currentUser.isAdmin ||
+                (currentUser.artistId && data.artistId === currentUser.artistId))
+          );
+          if ((!data.isDraft || isOwnerViewer) && !data.isDeranked) {
             setFetchedTrack({ ...data, id: snap.id });
           } else {
             setFetchedTrack(null);
@@ -102,7 +111,21 @@ export const TrackPublicPageView: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [trackId, contextTrack]);
+  }, [trackId, contextTrack, currentUser]);
+
+  useEffect(() => {
+    let active = true;
+    if (!track?.artistId || artists.some((a) => a.id === track.artistId)) return;
+    getDoc(doc(db, 'artists', track.artistId))
+      .then((snap) => {
+        if (!active || !snap.exists()) return;
+        setFetchedArtist({ ...(snap.data() as Omit<Artist, 'id'>), id: snap.id });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [track?.artistId, artists]);
 
   useEffect(() => {
     if (!track) {
@@ -226,6 +249,28 @@ export const TrackPublicPageView: React.FC = () => {
         <ArrowLeft className="w-4 h-4" />
         <span>{t('back', 'Back')}</span>
       </button>
+
+      {track.isDraft && (
+        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div>
+            <div className="font-bold text-amber-400">
+              {isNy ? 'Chitsanzo cha nyimbo yosafalitsidwa (Draft)' : 'Owner Draft Preview'}
+            </div>
+            <p className="text-[var(--text-muted)] mt-0.5">
+              {isNy
+                ? 'Nyimboyi ikali m\'zolembedwa. Falitsani mu Studio kuti aliyense atsegule ulalo wake.'
+                : 'This song is saved as a draft. Publish it in Creator Studio so listeners opening your share link can play it.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/artistcreator')}
+            className="px-4 py-2 rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] font-bold text-xs cursor-pointer shrink-0"
+          >
+            {isNy ? 'Tsegulani Studio' : 'Open Studio'}
+          </button>
+        </div>
+      )}
 
       {audioError && (
         <div className="p-4 rounded-2xl bg-[var(--danger)]/10 border border-[var(--danger)]/30 text-[var(--text)] flex items-center justify-between gap-3">
@@ -500,9 +545,11 @@ export const TrackPublicPageView: React.FC = () => {
             </span>
           </div>
           <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
-            <span className="text-[11px] text-[var(--text-muted)] block">ISRC</span>
-            <span className="font-mono font-bold text-[var(--text)]">
-              {track.isrcCode || (isNy ? 'Silinayikidwe' : 'Not set')}
+            <span className="text-[11px] text-[var(--text-muted)] block">
+              {track.isrcCode ? 'ISRC' : 'Track ID'}
+            </span>
+            <span className="font-mono font-bold text-[var(--text)] truncate block">
+              {track.isrcCode || track.id}
             </span>
           </div>
         </div>

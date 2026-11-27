@@ -46,6 +46,18 @@ function getNormalizedCanonicalUrl(): string {
   if (rawPath === '/studio') {
     return `${origin}/artistcreator`;
   }
+  if (rawPath === '/charts' || rawPath === '/trending' || rawPath === '/promo') {
+    const incoming = new URLSearchParams(window.location.search);
+    const cleanParams = new URLSearchParams();
+    const tab = incoming.get('tab');
+    const genre = incoming.get('genre');
+    const trackId = incoming.get('track');
+    if (tab && tab !== 'most-played') cleanParams.set('tab', tab);
+    if (genre && genre.trim()) cleanParams.set('genre', genre.trim());
+    if (trackId && trackId.trim()) cleanParams.set('track', trackId.trim());
+    const qs = cleanParams.toString();
+    return `${origin}/charts${qs ? `?${qs}` : ''}`;
+  }
   return `${origin}${rawPath}`;
 }
 
@@ -440,6 +452,92 @@ export function applyTrackSeoMeta(track: Track, artist?: Artist | null): void {
   setMetaTag('name', 'twitter:image:alt', seo.imageAlt);
 
   setStructuredData(seo.structuredData);
+}
+
+export function applyChartsSeoMeta(options?: {
+  tab?: string;
+  genre?: string;
+  topTrack?: Track | null;
+  artist?: Artist | null;
+  totalCount?: number;
+}): void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const origin = getPublicOrigin();
+  const params = new URLSearchParams();
+  if (options?.tab && options.tab !== 'most-played') {
+    params.set('tab', options.tab);
+  }
+  if (options?.genre && options.genre.trim()) {
+    params.set('genre', options.genre.trim());
+  }
+  const qs = params.toString();
+  const canonicalUrl = `${origin}/charts${qs ? `?${qs}` : ''}`;
+  const topTrack = options?.topTrack || null;
+  const artist = options?.artist || null;
+
+  const safeTrack = (topTrack?.title || '').trim();
+  const safeArtist = (topTrack?.artistName || artist?.name || '').trim();
+  const chartLabel = options?.genre?.trim()
+    ? `Top ${options.genre.trim()} Chart`
+    : options?.tab === 'trending'
+    ? 'Most Trending Chart'
+    : 'Most Played & Trending Charts';
+
+  const title = safeTrack
+    ? `${chartLabel} (#1: ${safeTrack}${safeArtist ? ` by ${safeArtist}` : ''}) – LOWERVIBE`
+    : `${chartLabel} – LOWERVIBE`;
+
+  const description = truncateText(
+    safeTrack
+      ? `Explore ${options?.totalCount || 'top'} tracks on LOWERVIBE ${chartLabel}. #1 right now: "${safeTrack}"${safeArtist ? ` by ${safeArtist}` : ''}. Stream free and share.`
+      : 'Explore and share the most played songs, fastest-rising trending tracks, and top genres across LOWERVIBE.',
+    160
+  );
+
+  const rawImg = topTrack
+    ? [topTrack.coverArt, artist?.avatar, topTrack.artistAvatar, artist?.banner].find(
+        (candidate) =>
+          typeof candidate === 'string' &&
+          candidate.trim().length > 0 &&
+          !candidate.includes('pwa-512x512.png') &&
+          !candidate.startsWith('data:image/svg+xml') &&
+          !candidate.startsWith('blob:')
+      )
+    : undefined;
+  const coverEndpointPath = `/og/charts/cover${qs ? `?${qs}` : ''}`;
+  const image = rawImg
+    ? resolvePublicImageUrl(rawImg, origin, coverEndpointPath)
+    : `${origin}${coverEndpointPath}`;
+  const imageAlt = safeTrack ? `#1 Charting: ${safeTrack} by ${safeArtist || 'Artist'}` : chartLabel;
+
+  clearDynamicMediaMetaTags();
+  document.title = title;
+  setCanonicalLink(canonicalUrl);
+  setMetaTag('name', 'description', description);
+  setMetaTag(
+    'name',
+    'robots',
+    'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1'
+  );
+  setMetaTag('property', 'og:type', 'website');
+  setMetaTag('property', 'og:locale', 'en_US');
+  setMetaTag('property', 'og:site_name', 'LOWERVIBE');
+  setMetaTag('property', 'og:title', title);
+  setMetaTag('property', 'og:description', description);
+  setMetaTag('property', 'og:image', image);
+  if (image.startsWith('https://')) {
+    setMetaTag('property', 'og:image:secure_url', image);
+  }
+  setMetaTag('property', 'og:image:width', '512');
+  setMetaTag('property', 'og:image:height', '512');
+  setMetaTag('property', 'og:image:alt', imageAlt);
+  setMetaTag('property', 'og:url', canonicalUrl);
+
+  setMetaTag('name', 'twitter:card', 'summary_large_image');
+  setMetaTag('name', 'twitter:title', title);
+  setMetaTag('name', 'twitter:description', description);
+  setMetaTag('name', 'twitter:image', image);
+  setMetaTag('name', 'twitter:image:alt', imageAlt);
 }
 
 export function applyRouteSeoMeta(route: string, searchQuery = ''): void {

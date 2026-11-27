@@ -3,10 +3,17 @@ export type VisualizerStyle = 'bars' | 'wave' | 'pulse';
 export type EqPreset = 'flat' | 'bass_boost' | 'vocal' | 'treble' | 'warm_tape' | 'studio_flat' | 'deep_sub' | 'air_clarity';
 export type ArtistApplicationStatus = 'none' | 'pending' | 'approved' | 'rejected';
 export type FullscreenPlayerTab = 'playing' | 'queue' | 'lyrics' | 'comments';
+export type BatterySaverMode = 'auto' | 'on' | 'off';
+
+export interface LrcWordToken {
+  timeSeconds: number;
+  text: string;
+}
 
 export interface LrcLyricLine {
   timeSeconds: number;
   text: string;
+  words?: LrcWordToken[];
 }
 
 export interface LrcLyricsMetadata {
@@ -71,6 +78,7 @@ export interface UserSettings {
     language: 'en' | 'ny';
     density: 'comfortable' | 'compact';
     reducedMotion?: boolean;
+    batterySaverMode?: BatterySaverMode;
   };
 }
 
@@ -120,6 +128,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     language: 'en',
     density: 'comfortable',
     reducedMotion: false,
+    batterySaverMode: 'auto',
   },
 };
 
