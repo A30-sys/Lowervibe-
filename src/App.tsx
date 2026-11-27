@@ -587,7 +587,7 @@ function AppContent() {
   }, [handleOpenTrackDetails]);
 
   if (!authReady) {
-    return <InitialLoader />;
+    return null;
   }
 
   const isLegalDocRoute =

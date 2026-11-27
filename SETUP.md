@@ -38,13 +38,16 @@ Verify:
 ---
 
 ## 4. Deploy Cloud Functions & Configure Payout Providers
-1. Initialize/install dependencies inside `functions/`:
+1. Install dependencies inside `functions/`:
    ```bash
-   cd functions
-   npm init -y   # if package.json is not yet created
-   npm install firebase-admin firebase-functions
+   cd functions && npm install && cd ..
    ```
-2. Set payout provider environment secrets (required **only** when switching from Manual Review to automated payouts):
+2. Build the web app and deploy Hosting + Cloud Functions (required for live OpenGraph social link cards on Facebook & WhatsApp):
+   ```bash
+   npm run build
+   firebase deploy --only hosting,functions
+   ```
+3. Set payout provider environment secrets (required **only** when switching from Manual Review to automated payouts):
    - **Malawi Mobile Money (Airtel Money / TNM Mpamba)**:
      - `PAYCHANGU_SECRET_KEY=...` (recommended for Malawi MWK payouts)
      - OR `FLUTTERWAVE_SECRET_KEY=...`
@@ -52,10 +55,6 @@ Verify:
      - `TRONGRID_API_KEY=...` (for TRC-20)
      - `BSC_RPC_URL=...` (for BEP-20)
      - `USDT_TREASURY_PRIVATE_KEY=...` (server-only hot wallet key)
-3. Deploy:
-   ```bash
-   firebase deploy --only functions
-   ```
 4. Once provider keys are live, sign in as `odulamw@gmail.com`, open **Admin Console → Settings**, and toggle **Automated Payout Provider Configured** ON. Until then, withdrawal requests stay clearly marked **Awaiting manual review**.
 
 ---

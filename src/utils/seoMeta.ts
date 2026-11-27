@@ -131,6 +131,19 @@ export function formatTrackShareTitle(trackTitle: string, artistName: string): s
   return `${trimmedTrack} by ${trimmedArtist} – LOWERVIBE`;
 }
 
+function toShareableSocialImageUrl(rawUrl: string): string {
+  const trimmed = rawUrl.trim();
+  const cldMatch = /^(https:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/)(.+)$/i.exec(trimmed);
+  if (!cldMatch) return trimmed;
+  const prefix = cldMatch[1];
+  let rest = cldMatch[2];
+  if (!/^f_(?:jpg|jpeg|png)/i.test(rest)) {
+    rest = `f_jpg,q_90,w_1200,h_1200,c_limit/${rest}`;
+  }
+  rest = rest.replace(/\.(?:webp|avif)(\?.*)?$/i, '.jpg$1');
+  return `${prefix}${rest}`;
+}
+
 export function resolvePublicImageUrl(
   rawUrl: string | undefined,
   origin: string,
@@ -145,7 +158,9 @@ export function resolvePublicImageUrl(
   if (trimmed.startsWith('data:image/') || trimmed.startsWith('/api/media/')) {
     return coverEndpointPath ? `${origin}${coverEndpointPath}` : fallback;
   }
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return toShareableSocialImageUrl(trimmed);
+  }
   if (trimmed.startsWith('/')) return `${origin}${trimmed}`;
   return `${origin}/${trimmed}`;
 }

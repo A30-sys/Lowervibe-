@@ -591,6 +591,19 @@ function isSafePublicHttpUrl(rawUrl: string): string | null {
   }
 }
 
+function toShareableSocialImageUrl(rawUrl: string): string {
+  const trimmed = rawUrl.trim();
+  const cldMatch = /^(https:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/)(.+)$/i.exec(trimmed);
+  if (!cldMatch) return trimmed;
+  const prefix = cldMatch[1];
+  let rest = cldMatch[2];
+  if (!/^f_(?:jpg|jpeg|png)/i.test(rest)) {
+    rest = `f_jpg,q_90,w_1200,h_1200,c_limit/${rest}`;
+  }
+  rest = rest.replace(/\.(?:webp|avif)(\?.*)?$/i, '.jpg$1');
+  return `${prefix}${rest}`;
+}
+
 function inferImageMimeType(imageUrl: string, fallback: string = 'image/jpeg'): string {
   const lower = imageUrl.toLowerCase().split('?')[0];
   if (lower.endsWith('.png')) return 'image/png';
@@ -615,7 +628,8 @@ function resolveSeoPublicImage(
     return coverEndpointPath ? `${origin}${coverEndpointPath}` : fallback;
   }
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    return isSafePublicHttpUrl(trimmed) || fallback;
+    const shareable = toShareableSocialImageUrl(trimmed);
+    return isSafePublicHttpUrl(shareable) || fallback;
   }
   if (trimmed.startsWith('/')) return `${origin}${trimmed}`;
   return `${origin}/${trimmed}`;
@@ -907,7 +921,7 @@ async function lookupPublicTrackForSeo(
 
   if (
     track &&
-    ((!includeDrafts && track.isDraft) ||
+    ((!includeDrafts && (track.isDraft || track.moderationStatus === 'rejected')) ||
       track.isDeranked ||
       isExcludedDemoArtistRecord({ id: track.artistId, name: track.artistName }))
   ) {
@@ -986,6 +1000,7 @@ async function lookupTopChartsForSeo(options?: ChartSeoLookupOptions): Promise<{
       (t) =>
         !t.isDraft &&
         !t.isDeranked &&
+        t.moderationStatus !== 'rejected' &&
         !isExcludedDemoArtistRecord({ id: t.artistId, name: t.artistName })
     );
 
@@ -1102,7 +1117,10 @@ function injectChartsSeoHtml(
     : undefined;
   const coverPath = `/og/charts/cover${qs}`;
   const image = rawImg ? `${origin}${coverPath}` : `${origin}/icons/pwa-512x512.png`;
-  const imageMime = inferImageMimeType(rawImg || image, rawImg ? 'image/jpeg' : 'image/png');
+  const imageMime = inferImageMimeType(
+    rawImg ? toShareableSocialImageUrl(rawImg) : image,
+    rawImg ? 'image/jpeg' : 'image/png'
+  );
   const imageAlt = safeTrack ? `#1 Charting: ${safeTrack} by ${safeArtist}` : 'LOWERVIBE Top Charts';
 
   const headInject = [
@@ -2572,12 +2590,12 @@ async function startServer() {
       }
 
       if (raw.startsWith('http://') || raw.startsWith('https://')) {
-        const safeExternal = isSafePublicHttpUrl(raw);
+        const safeExternal = isSafePublicHttpUrl(toShareableSocialImageUrl(raw));
         if (safeExternal) {
           try {
             const upstream = await fetch(safeExternal, {
-              headers: { Accept: 'image/*,*/*;q=0.8' },
-              signal: AbortSignal.timeout(3500),
+              headers: { Accept: 'image/jpeg,image/png,image/*;q=0.8' },
+              signal: AbortSignal.timeout(4000),
             });
             if (upstream.ok) {
               const contentType = upstream.headers.get('content-type') || inferImageMimeType(safeExternal);

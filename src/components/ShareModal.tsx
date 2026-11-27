@@ -117,6 +117,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [exportingCard, setExportingCard] = useState<'square' | 'story' | null>(null);
   const [serverPreview, setServerPreview] = useState<VerifiedServerPreview | null>(null);
   const [isVerifyingPreview, setIsVerifyingPreview] = useState(false);
+  const [previewEndpointMissing, setPreviewEndpointMissing] = useState(false);
 
   const resolvedArtist =
     artist ||
@@ -126,12 +127,14 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   useEffect(() => {
     if (!track && !artist && !promoShare) {
       setServerPreview(null);
+      setPreviewEndpointMissing(false);
       return;
     }
 
     let cancelled = false;
     const controller = new AbortController();
     setIsVerifyingPreview(true);
+    setPreviewEndpointMissing(false);
 
     let endpoint = '';
     if (promoShare) {
@@ -159,7 +162,14 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     }
 
     fetch(endpoint, { signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : null))
+      .then(async (res) => {
+        const contentType = (res.headers.get('content-type') || '').toLowerCase();
+        if (res.status === 404 && !contentType.includes('application/json')) {
+          if (!cancelled) setPreviewEndpointMissing(true);
+          return null;
+        }
+        return res.ok ? res.json() : null;
+      })
       .then((data: VerifiedServerPreview | null) => {
         if (!cancelled) {
           setServerPreview(data && data.ok ? data : null);
@@ -296,14 +306,15 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   };
 
   const previewImage = promoShare
-    ? promoShare.artworkUrl || serverPreview?.coverEndpointUrl || DEFAULT_ARTWORK_SVG
+    ? promoShare.artworkUrl || serverPreview?.imageUrl || serverPreview?.coverEndpointUrl || DEFAULT_ARTWORK_SVG
     : track
     ? track.coverArt ||
       resolvedArtist?.avatar ||
       track.artistAvatar ||
+      serverPreview?.imageUrl ||
       serverPreview?.coverEndpointUrl ||
       DEFAULT_ARTWORK_SVG
-    : artist!.avatar || artist!.banner || serverPreview?.coverEndpointUrl || DEFAULT_AVATAR_SVG;
+    : artist!.avatar || artist!.banner || serverPreview?.imageUrl || serverPreview?.coverEndpointUrl || DEFAULT_AVATAR_SVG;
 
   const handleDownloadPromoCard = async (aspect: 'square' | 'story') => {
     setExportingCard(aspect);
@@ -323,7 +334,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         : isNy
         ? 'Woimba wa LOWERVIBE'
         : 'Artist Spotlight',
-      artworkUrl: previewImage,
+      artworkUrl: serverPreview?.coverEndpointUrl || previewImage,
       shortUrl,
       aspect,
       ctaLabel: promoShare?.ctaLabel,
@@ -418,6 +429,22 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         <div className="p-6 overflow-y-auto max-h-[75vh]">
           {activeTab === 'card' && (
             <div className="space-y-4">
+              {previewEndpointMissing && (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-2.5 text-xs">
+                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <div className="font-bold text-amber-400">
+                      {isNy ? 'Ma Cloud Functions sanayikidwe' : 'Social crawler endpoint not deployed on this host'}
+                    </div>
+                    <p className="text-[var(--text-muted)] text-[11px] leading-relaxed">
+                      {isNy
+                        ? 'Ikani Firebase Hosting ndi Cloud Functions (firebase deploy --only hosting,functions) kuti Facebook ndi WhatsApp zione chithunzi ndi dzina la nyimbo m’malo mwa 404.'
+                        : 'Deploy Cloud Functions (firebase deploy --only hosting,functions) so Facebook and WhatsApp crawlers receive live OpenGraph song cards instead of 404.'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {track?.isDraft && (
                 <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-2.5 text-xs">
                   <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />

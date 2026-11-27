@@ -60,6 +60,51 @@ function isSafePublicHttpUrl(rawUrl) {
   }
 }
 
+/**
+ * Facebook & WhatsApp link preview scrapers frequently reject .webp images.
+ * Converts Cloudinary image URLs to guaranteed 1200px-max JPEG (image/jpeg) automatically.
+ */
+function toShareableSocialImageUrl(rawUrl) {
+  if (typeof rawUrl !== 'string') return rawUrl;
+  const trimmed = rawUrl.trim();
+  const cldMatch = /^(https:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/)(.+)$/i.exec(trimmed);
+  if (!cldMatch) return trimmed;
+  const prefix = cldMatch[1];
+  let rest = cldMatch[2];
+  if (!/^f_(?:jpg|jpeg|png)/i.test(rest)) {
+    rest = `f_jpg,q_90,w_1200,h_1200,c_limit/${rest}`;
+  }
+  rest = rest.replace(/\.(?:webp|avif)(\?.*)?$/i, '.jpg$1');
+  return `${prefix}${rest}`;
+}
+
+function inferImageMimeType(imageUrl, fallback = 'image/jpeg') {
+  const lower = String(imageUrl || '').toLowerCase().split('?')[0];
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  return fallback;
+}
+
+function resolveRequestOrigin(req) {
+  const fwdHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+  const host = fwdHost || String(req.headers.host || '').trim();
+  const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim() || 'https';
+  if (host && !/localhost|127\.0\.0\.1|0\.0\.0\.0|\.cloudfunctions\.net/i.test(host)) {
+    return `${proto}://${host}`;
+  }
+  return PUBLIC_SITE_ORIGIN;
+}
+
+function isSocialCrawlerUserAgent(userAgent) {
+  const ua = String(userAgent || '').toLowerCase();
+  if (!ua) return true;
+  return /facebookexternalhit|facebot|whatsapp|twitterbot|telegrambot|discordbot|slackbot|linkedinbot|pinterest|embedly|skypeuripreview|vkshare|googlebot|bingbot|applebot|yandex|baiduspider|curl\/|wget\//i.test(
+    ua
+  );
+}
+
 function pickFirstValidArtworkCandidate(candidates) {
   for (const candidate of candidates) {
     if (typeof candidate !== 'string') continue;
@@ -88,16 +133,115 @@ function formatTrackShareTitle(trackTitle, artistName) {
   return `${trimmedTrack} by ${trimmedArtist} – LOWERVIBE`;
 }
 
+async function lookupPublicTrackForFunction(trackId, includeDrafts = false) {
+  const cleanId = String(trackId || '').trim();
+  if (!cleanId) return { track: null, artist: null };
+
+  let track = null;
+  const directSnap = await db.collection('tracks').doc(cleanId).get();
+  if (directSnap.exists) {
+    track = { id: directSnap.id, ...(directSnap.data() || {}) };
+  } else {
+    const snap = await db.collection('tracks').limit(300).get();
+    const lowerTarget = cleanId.toLowerCase();
+    snap.forEach((docSnap) => {
+      if (track) return;
+      const data = docSnap.data() || {};
+      const candidateId = String(data.id || docSnap.id || '').trim();
+      if (
+        docSnap.id === cleanId ||
+        candidateId === cleanId ||
+        docSnap.id.toLowerCase() === lowerTarget ||
+        candidateId.toLowerCase() === lowerTarget
+      ) {
+        track = { id: docSnap.id, ...data };
+      }
+    });
+  }
+
+  if (
+    track &&
+    ((!includeDrafts && (track.isDraft || track.moderationStatus === 'rejected')) ||
+      track.isDeranked)
+  ) {
+    track = null;
+  }
+
+  let artist = null;
+  if (track && track.artistId) {
+    const artistSnap = await db.collection('artists').doc(String(track.artistId)).get();
+    if (artistSnap.exists) {
+      artist = { id: artistSnap.id, ...(artistSnap.data() || {}) };
+    }
+  }
+  if (track && !artist && track.uploadedByUserId) {
+    const q = await db
+      .collection('artists')
+      .where('ownerId', '==', String(track.uploadedByUserId))
+      .limit(1)
+      .get();
+    if (!q.empty) {
+      artist = { id: q.docs[0].id, ...(q.docs[0].data() || {}) };
+    }
+  }
+
+  return { track, artist };
+}
+
+async function lookupPublicArtistForFunction(slugOrId) {
+  const clean = String(slugOrId || '').trim();
+  if (!clean) return { artist: null, tracksCount: 0 };
+
+  let artist = null;
+  const directSnap = await db.collection('artists').doc(clean).get();
+  if (directSnap.exists) {
+    artist = { id: directSnap.id, ...(directSnap.data() || {}) };
+  }
+  if (!artist) {
+    const q = await db.collection('artists').where('slug', '==', clean).limit(1).get();
+    if (!q.empty) {
+      artist = { id: q.docs[0].id, ...(q.docs[0].data() || {}) };
+    }
+  }
+  if (!artist) {
+    const snap = await db.collection('artists').limit(200).get();
+    const lower = clean.toLowerCase();
+    snap.forEach((docSnap) => {
+      if (artist) return;
+      const d = docSnap.data() || {};
+      const slugVal = String(d.slug || '').trim().toLowerCase();
+      if (docSnap.id.toLowerCase() === lower || slugVal === lower) {
+        artist = { id: docSnap.id, ...d };
+      }
+    });
+  }
+
+  let tracksCount = 0;
+  if (artist) {
+    const tracksSnap = await db
+      .collection('tracks')
+      .where('artistId', '==', artist.id)
+      .limit(200)
+      .get();
+    tracksSnap.forEach((docSnap) => {
+      const d = docSnap.data() || {};
+      if (!d.isDraft && !d.isDeranked) tracksCount += 1;
+    });
+  }
+
+  return { artist, tracksCount };
+}
+
 async function readTopChartTrackForShare(options) {
   const tab = options && options.tab === 'trending' ? 'trending' : 'most-played';
   const rawGenre = options && typeof options.genre === 'string' ? options.genre.trim().toLowerCase() : '';
   const requestedTrackId = options && typeof options.trackId === 'string' ? options.trackId.trim() : '';
 
-  const snap = await db.collection('tracks').limit(200).get();
+  const snap = await db.collection('tracks').limit(250).get();
   let tracks = [];
   snap.forEach((docSnap) => {
     const data = docSnap.data() || {};
-    if (!data.isDraft && !data.isDeranked) {
+    if (!data.isDraft && !data.isDeranked && data.moderationStatus !== 'rejected') {
       tracks.push({ id: docSnap.id, ...data });
     }
   });
@@ -155,6 +299,41 @@ async function readMediaAssetBuffer(assetId) {
   }
 
   return null;
+}
+
+let cachedSpaIndexHtml = '';
+let cachedSpaIndexAt = 0;
+
+async function fetchSpaIndexHtml(origin) {
+  if (cachedSpaIndexHtml && Date.now() - cachedSpaIndexAt < 5 * 60 * 1000) {
+    return cachedSpaIndexHtml;
+  }
+  try {
+    const res = await fetch(`${origin}/index.html`, {
+      signal: AbortSignal.timeout(3500),
+    });
+    if (res.ok) {
+      const text = await res.text();
+      if (text && text.includes('id="root"')) {
+        cachedSpaIndexHtml = text;
+        cachedSpaIndexAt = Date.now();
+        return text;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function stripStaticSeoTags(html) {
+  return String(html || '')
+    .replace(/<title>[\s\S]*?<\/title>/i, '')
+    .replace(/<link\s+rel="canonical"[^>]*>/gi, '')
+    .replace(/<meta\s+name="description"[^>]*>/gi, '')
+    .replace(/<meta\s+property="og:[^"]+"[^>]*>/gi, '')
+    .replace(/<meta\s+property="profile:[^"]+"[^>]*>/gi, '')
+    .replace(/<meta\s+property="music:[^"]+"[^>]*>/gi, '')
+    .replace(/<meta\s+name="twitter:[^"]+"[^>]*>/gi, '')
+    .replace(/<script\s+id="lv-structured-data"[\s\S]*?<\/script>/gi, '');
 }
 
 /**
@@ -320,38 +499,26 @@ exports.onReportCreate = onDocumentCreated(
  * 5. ogCover: Binary cover artwork responder for social share crawlers (/og/track/:id/cover, /og/artist/:slug/cover, /og/charts/cover)
  */
 exports.ogCover = onRequest({ cors: true }, async (req, res) => {
+  const origin = resolveRequestOrigin(req);
+  const fallbackImage = `${origin}/icons/pwa-512x512.png`;
   try {
     const reqPath = String(req.path || '/').replace(/\/+$/, '');
     const trackMatch = reqPath.match(/^\/(?:api\/)?og\/track\/([^/]+)\/cover$/);
     const artistMatch = reqPath.match(/^\/(?:api\/)?og\/artist\/([^/]+)\/cover$/);
     const chartsMatch = /^\/(?:api\/)?og\/charts\/cover$/.test(reqPath);
+    const includeDrafts = req.query.preview === '1';
 
     const candidates = [];
     if (trackMatch) {
       const trackId = decodeURIComponent(trackMatch[1]);
-      const trackSnap = await db.collection('tracks').doc(trackId).get();
-      if (trackSnap.exists) {
-        const track = trackSnap.data() || {};
-        if (!track.isDraft && !track.isDeranked) {
-          candidates.push(track.coverArt, track.artistAvatar);
-          if (track.artistId) {
-            const artistSnap = await db.collection('artists').doc(String(track.artistId)).get();
-            if (artistSnap.exists) {
-              const artist = artistSnap.data() || {};
-              candidates.push(artist.avatar, artist.banner);
-            }
-          }
-        }
+      const { track, artist } = await lookupPublicTrackForFunction(trackId, includeDrafts);
+      if (track) {
+        candidates.push(track.coverArt, artist?.avatar, track.artistAvatar, artist?.banner);
       }
     } else if (artistMatch) {
       const slugOrId = decodeURIComponent(artistMatch[1]);
-      let artistSnap = await db.collection('artists').doc(slugOrId).get();
-      if (!artistSnap.exists) {
-        const q = await db.collection('artists').where('slug', '==', slugOrId).limit(1).get();
-        if (!q.empty) artistSnap = q.docs[0];
-      }
-      if (artistSnap.exists) {
-        const artist = artistSnap.data() || {};
+      const { artist } = await lookupPublicArtistForFunction(slugOrId);
+      if (artist) {
         candidates.push(artist.avatar, artist.banner);
       }
     } else if (chartsMatch) {
@@ -374,6 +541,7 @@ exports.ogCover = onRequest({ cors: true }, async (req, res) => {
           'Content-Type': mimeType,
           'Content-Length': String(buffer.length),
           'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+          'Access-Control-Allow-Origin': '*',
         }).send(buffer);
         return;
       }
@@ -386,85 +554,241 @@ exports.ogCover = onRequest({ cors: true }, async (req, res) => {
             'Content-Type': media.contentType,
             'Content-Length': String(media.buffer.length),
             'Cache-Control': 'public, max-age=86400, immutable',
+            'Access-Control-Allow-Origin': '*',
           }).send(media.buffer);
           return;
         }
       }
 
       if (raw.startsWith('http://') || raw.startsWith('https://')) {
-        const safeExternal = isSafePublicHttpUrl(raw);
+        const transformed = toShareableSocialImageUrl(raw);
+        const safeExternal = isSafePublicHttpUrl(transformed);
         if (safeExternal) {
+          try {
+            const upstream = await fetch(safeExternal, {
+              headers: { Accept: 'image/jpeg,image/png,image/*;q=0.8' },
+              signal: AbortSignal.timeout(4500),
+            });
+            if (upstream.ok) {
+              const contentType = upstream.headers.get('content-type') || inferImageMimeType(safeExternal);
+              if (contentType.startsWith('image/')) {
+                const buffer = Buffer.from(await upstream.arrayBuffer());
+                if (buffer.length > 0 && buffer.length <= 10 * 1024 * 1024) {
+                  res.status(200).set({
+                    'Content-Type': contentType,
+                    'Content-Length': String(buffer.length),
+                    'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+                    'Access-Control-Allow-Origin': '*',
+                  }).send(buffer);
+                  return;
+                }
+              }
+            }
+          } catch {}
           res.redirect(302, safeExternal);
           return;
         }
       }
     }
 
-    res.redirect(302, DEFAULT_FALLBACK_IMAGE);
+    res.redirect(302, fallbackImage);
   } catch {
-    res.redirect(302, DEFAULT_FALLBACK_IMAGE);
+    res.redirect(302, fallbackImage);
   }
 });
 
 /**
- * 6. shareMeta: OpenGraph metadata HTML responder for social crawlers (/s/:id, /tracks/:id, /a/:slug, /artists/:slug, /charts)
+ * 6. shareMeta: OpenGraph metadata responder for social crawlers & SPA routes
+ *    (/s/:id, /tracks/:id, /a/:slug, /artists/:slug, /charts, /api/share-preview)
  */
 exports.shareMeta = onRequest({ cors: true }, async (req, res) => {
+  const origin = resolveRequestOrigin(req);
   const reqPath = String(req.path || '/').replace(/\/+$/, '') || '/';
+  const fallbackImage = `${origin}/icons/pwa-512x512.png`;
+
+  // Live Share Preview JSON verification endpoint for ShareModal
+  if (reqPath === '/api/share-preview') {
+    try {
+      const type = String(req.query.type || 'track').trim();
+      const id = String(req.query.id || '').trim();
+      const includeDrafts = req.query.includeDraft === '1';
+
+      if (type === 'track') {
+        if (!id) {
+          res.status(400).json({ ok: false, error: 'Missing track id' });
+          return;
+        }
+        const { track, artist } = await lookupPublicTrackForFunction(id, includeDrafts);
+        if (!track) {
+          res.status(404).json({ ok: false, found: false, error: 'Track not found or unpublished' });
+          return;
+        }
+        const safeTrack = String(track.title || 'Track').trim();
+        const safeArtist = String(track.artistName || artist?.name || 'Independent Artist').trim();
+        const rawImg = pickFirstValidArtworkCandidate([
+          track.coverArt,
+          artist?.avatar,
+          track.artistAvatar,
+          artist?.banner,
+        ]);
+        const coverEndpoint = `${origin}/og/track/${encodeURIComponent(track.id)}/cover${
+          track.isDraft ? '?preview=1' : ''
+        }`;
+        const imageUrl = rawImg
+          ? rawImg.startsWith('data:image/') || rawImg.startsWith('/api/media/')
+            ? coverEndpoint
+            : isSafePublicHttpUrl(toShareableSocialImageUrl(rawImg)) ||
+              (rawImg.startsWith('/') ? `${origin}${rawImg}` : coverEndpoint)
+          : fallbackImage;
+        res.status(200).json({
+          ok: true,
+          found: true,
+          type: 'track',
+          id: track.id,
+          isDraft: Boolean(track.isDraft),
+          title: safeTrack,
+          artistName: safeArtist,
+          shareTitle: formatTrackShareTitle(safeTrack, safeArtist),
+          description: track.story
+            ? String(track.story).slice(0, 160)
+            : `Stream "${safeTrack}" by ${safeArtist} (${track.genre || 'Independent Music'}) on LOWERVIBE.`,
+          imageUrl,
+          coverEndpointUrl: coverEndpoint,
+          shortUrl: `${origin}/s/${encodeURIComponent(track.id)}`,
+          canonicalUrl: `${origin}/tracks/${encodeURIComponent(track.id)}`,
+        });
+        return;
+      }
+
+      if (type === 'artist') {
+        if (!id) {
+          res.status(400).json({ ok: false, error: 'Missing artist id' });
+          return;
+        }
+        const { artist, tracksCount } = await lookupPublicArtistForFunction(id);
+        if (!artist) {
+          res.status(404).json({ ok: false, found: false, error: 'Artist not found' });
+          return;
+        }
+        const safeName = String(artist.name || 'Independent Artist').trim();
+        const slugOrId = String(artist.slug || artist.id || id).trim();
+        const rawImg = pickFirstValidArtworkCandidate([artist.avatar, artist.banner]);
+        const coverEndpoint = `${origin}/og/artist/${encodeURIComponent(slugOrId)}/cover`;
+        const imageUrl = rawImg
+          ? rawImg.startsWith('data:image/') || rawImg.startsWith('/api/media/')
+            ? coverEndpoint
+            : isSafePublicHttpUrl(toShareableSocialImageUrl(rawImg)) ||
+              (rawImg.startsWith('/') ? `${origin}${rawImg}` : coverEndpoint)
+          : fallbackImage;
+        res.status(200).json({
+          ok: true,
+          found: true,
+          type: 'artist',
+          id: artist.id,
+          isDraft: false,
+          title: safeName,
+          artistName: safeName,
+          shareTitle: `${safeName} – Listen on LOWERVIBE`,
+          description: artist.bio
+            ? String(artist.bio).slice(0, 160)
+            : `Listen to ${safeName} (${tracksCount} tracks) on LOWERVIBE.`,
+          imageUrl,
+          coverEndpointUrl: coverEndpoint,
+          shortUrl: `${origin}/a/${encodeURIComponent(slugOrId)}`,
+          canonicalUrl: `${origin}/artists/${encodeURIComponent(slugOrId)}`,
+        });
+        return;
+      }
+
+      const tab = typeof req.query.tab === 'string' ? req.query.tab : undefined;
+      const genre = typeof req.query.genre === 'string' ? req.query.genre : undefined;
+      const trackId = typeof req.query.track === 'string' ? req.query.track : undefined;
+      const { topTrack, artist, totalCount } = await readTopChartTrackForShare({ tab, genre, trackId });
+      const qsParams = new URLSearchParams();
+      if (tab && tab !== 'most-played') qsParams.set('tab', tab);
+      if (genre && genre.trim()) qsParams.set('genre', genre.trim());
+      if (trackId && trackId.trim()) qsParams.set('track', trackId.trim());
+      const qs = qsParams.toString() ? `?${qsParams.toString()}` : '';
+      const safeTrack = String(topTrack?.title || '').trim();
+      const safeArtist = String(topTrack?.artistName || artist?.name || '').trim();
+      const label = genre ? `Top ${genre} Chart` : tab === 'trending' ? 'Most Trending Chart' : 'Most Played & Trending Charts';
+      const coverEndpoint = `${origin}/og/charts/cover${qs}`;
+      res.status(200).json({
+        ok: true,
+        found: Boolean(topTrack),
+        type: 'charts',
+        id: topTrack?.id || 'charts',
+        title: safeTrack || label,
+        artistName: safeArtist || 'LOWERVIBE Charts',
+        shareTitle: safeTrack ? `${label} (#1: ${safeTrack} by ${safeArtist || 'Artist'}) – LOWERVIBE` : `${label} – LOWERVIBE`,
+        description: safeTrack
+          ? `Explore ${totalCount} tracks on LOWERVIBE ${label}. #1 right now: "${safeTrack}" by ${safeArtist || 'Independent Artist'}.`
+          : 'Explore and share the most played songs and trending charts across LOWERVIBE.',
+        imageUrl: coverEndpoint,
+        coverEndpointUrl: coverEndpoint,
+        shortUrl: `${origin}/charts${qs}`,
+        canonicalUrl: `${origin}/charts${qs}`,
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Preview failed' });
+    }
+    return;
+  }
+
   const trackMatch = reqPath.match(/^\/(?:s|song|tracks)\/([^/?#]+)/);
   const artistMatch = reqPath.match(/^\/(?:a|artist|artists)\/([^/?#]+)/);
   const chartsMatch = /^\/(?:charts|trending|promo)$/.test(reqPath);
 
   let title = 'LOWERVIBE — African Independent Music Streaming';
   let description = 'Stream independent African music from Malawi and beyond on LOWERVIBE.';
-  let image = DEFAULT_FALLBACK_IMAGE;
+  let image = fallbackImage;
   let imageAlt = 'LOWERVIBE';
-  let canonicalUrl = `${PUBLIC_SITE_ORIGIN}${reqPath}`;
+  let canonicalUrl = `${origin}${reqPath}`;
   let ogType = 'website';
+  let audioUrl = '';
+  let durationSeconds = 0;
+  let fallbackRedirectUrl = `${origin}/`;
 
   try {
     if (trackMatch) {
       const trackId = decodeURIComponent(trackMatch[1]);
-      const trackSnap = await db.collection('tracks').doc(trackId).get();
-      if (trackSnap.exists) {
-        const track = trackSnap.data() || {};
-        if (!track.isDraft && !track.isDeranked) {
-          const artistSnap = track.artistId
-            ? await db.collection('artists').doc(String(track.artistId)).get()
-            : null;
-          const artist = artistSnap?.exists ? artistSnap.data() : null;
-          const safeTrack = String(track.title || 'Track').trim();
-          const safeArtist = String(track.artistName || artist?.name || 'Independent Artist').trim();
-          title = formatTrackShareTitle(safeTrack, safeArtist);
-          imageAlt = `${safeTrack} by ${safeArtist} cover artwork`;
-          description = track.story
-            ? String(track.story).slice(0, 160)
-            : `Stream "${safeTrack}" by ${safeArtist} (${track.genre || 'Independent Music'}) on LOWERVIBE.`;
-          const rawImg = pickFirstValidArtworkCandidate([
-            track.coverArt,
-            artist?.avatar,
-            track.artistAvatar,
-            artist?.banner,
-          ]);
-          if (rawImg) {
-            if (rawImg.startsWith('data:image/') || rawImg.startsWith('/api/media/')) {
-              image = `${PUBLIC_SITE_ORIGIN}/og/track/${encodeURIComponent(trackId)}/cover`;
-            } else {
-              image = isSafePublicHttpUrl(rawImg) || (rawImg.startsWith('/') ? `${PUBLIC_SITE_ORIGIN}${rawImg}` : DEFAULT_FALLBACK_IMAGE);
-            }
+      fallbackRedirectUrl = `${origin}/?track=${encodeURIComponent(trackId)}`;
+      const { track, artist } = await lookupPublicTrackForFunction(trackId, false);
+      if (track) {
+        const safeTrack = String(track.title || 'Track').trim();
+        const safeArtist = String(track.artistName || artist?.name || 'Independent Artist').trim();
+        title = formatTrackShareTitle(safeTrack, safeArtist);
+        imageAlt = `${safeTrack} by ${safeArtist} cover artwork`;
+        description = track.story
+          ? String(track.story).slice(0, 160)
+          : `Stream "${safeTrack}" by ${safeArtist} (${track.genre || 'Independent Music'}) on LOWERVIBE.`;
+        const rawImg = pickFirstValidArtworkCandidate([
+          track.coverArt,
+          artist?.avatar,
+          track.artistAvatar,
+          artist?.banner,
+        ]);
+        if (rawImg) {
+          if (rawImg.startsWith('data:image/') || rawImg.startsWith('/api/media/')) {
+            image = `${origin}/og/track/${encodeURIComponent(track.id)}/cover`;
+          } else {
+            const converted = toShareableSocialImageUrl(rawImg);
+            image =
+              isSafePublicHttpUrl(converted) ||
+              (rawImg.startsWith('/') ? `${origin}${rawImg}` : `${origin}/og/track/${encodeURIComponent(track.id)}/cover`);
           }
-          ogType = 'music.song';
         }
+        if (typeof track.audioUrl === 'string' && track.audioUrl.startsWith('https://')) {
+          audioUrl = track.audioUrl.trim();
+        }
+        durationSeconds = Math.round(Number(track.durationSeconds || track.metadata?.duration || 0));
+        ogType = 'music.song';
       }
     } else if (artistMatch) {
       const slugOrId = decodeURIComponent(artistMatch[1]);
-      let artistSnap = await db.collection('artists').doc(slugOrId).get();
-      if (!artistSnap.exists) {
-        const q = await db.collection('artists').where('slug', '==', slugOrId).limit(1).get();
-        if (!q.empty) artistSnap = q.docs[0];
-      }
-      if (artistSnap.exists) {
-        const artist = artistSnap.data() || {};
+      fallbackRedirectUrl = `${origin}/?artist=${encodeURIComponent(slugOrId)}`;
+      const { artist } = await lookupPublicArtistForFunction(slugOrId);
+      if (artist) {
         const safeName = String(artist.name || 'Independent Artist').trim();
         title = `${safeName} – Listen on LOWERVIBE`;
         imageAlt = `${safeName} on LOWERVIBE`;
@@ -474,9 +798,12 @@ exports.shareMeta = onRequest({ cors: true }, async (req, res) => {
         const rawImg = pickFirstValidArtworkCandidate([artist.avatar, artist.banner]);
         if (rawImg) {
           if (rawImg.startsWith('data:image/') || rawImg.startsWith('/api/media/')) {
-            image = `${PUBLIC_SITE_ORIGIN}/og/artist/${encodeURIComponent(String(artist.slug || artistSnap.id))}/cover`;
+            image = `${origin}/og/artist/${encodeURIComponent(String(artist.slug || artist.id))}/cover`;
           } else {
-            image = isSafePublicHttpUrl(rawImg) || (rawImg.startsWith('/') ? `${PUBLIC_SITE_ORIGIN}${rawImg}` : DEFAULT_FALLBACK_IMAGE);
+            const converted = toShareableSocialImageUrl(rawImg);
+            image =
+              isSafePublicHttpUrl(converted) ||
+              (rawImg.startsWith('/') ? `${origin}${rawImg}` : `${origin}/og/artist/${encodeURIComponent(String(artist.slug || artist.id))}/cover`);
           }
         }
         ogType = 'profile';
@@ -490,7 +817,8 @@ exports.shareMeta = onRequest({ cors: true }, async (req, res) => {
       if (genre && genre.trim()) qsParams.set('genre', genre.trim());
       if (trackId && trackId.trim()) qsParams.set('track', trackId.trim());
       const qs = qsParams.toString() ? `?${qsParams.toString()}` : '';
-      canonicalUrl = `${PUBLIC_SITE_ORIGIN}/charts${qs}`;
+      canonicalUrl = `${origin}/charts${qs}`;
+      fallbackRedirectUrl = canonicalUrl;
       const { topTrack, artist, totalCount } = await readTopChartTrackForShare({ tab, genre, trackId });
       if (topTrack) {
         const safeTrack = String(topTrack.title || 'Top Track').trim();
@@ -506,7 +834,7 @@ exports.shareMeta = onRequest({ cors: true }, async (req, res) => {
           artist?.banner,
         ]);
         if (rawImg) {
-          image = `${PUBLIC_SITE_ORIGIN}/og/charts/cover${qs}`;
+          image = `${origin}/og/charts/cover${qs}`;
         }
       } else {
         title = 'Most Played & Trending Charts – LOWERVIBE';
@@ -515,31 +843,64 @@ exports.shareMeta = onRequest({ cors: true }, async (req, res) => {
     }
   } catch {}
 
+  const imageMime = inferImageMimeType(image, image.includes('/og/') ? 'image/jpeg' : 'image/png');
+  const headTags = [
+    `<title>${escapeHtmlAttr(title)}</title>`,
+    `<link rel="canonical" href="${escapeHtmlAttr(canonicalUrl)}" />`,
+    `<meta name="description" content="${escapeHtmlAttr(description)}" />`,
+    `<meta property="og:type" content="${escapeHtmlAttr(ogType)}" />`,
+    `<meta property="og:locale" content="en_US" />`,
+    `<meta property="og:site_name" content="LOWERVIBE" />`,
+    `<meta property="og:title" content="${escapeHtmlAttr(title)}" />`,
+    `<meta property="og:description" content="${escapeHtmlAttr(description)}" />`,
+    `<meta property="og:image" content="${escapeHtmlAttr(image)}" />`,
+    `<meta property="og:image:secure_url" content="${escapeHtmlAttr(image)}" />`,
+    `<meta property="og:image:type" content="${escapeHtmlAttr(imageMime)}" />`,
+    `<meta property="og:image:width" content="512" />`,
+    `<meta property="og:image:height" content="512" />`,
+    `<meta property="og:image:alt" content="${escapeHtmlAttr(imageAlt)}" />`,
+    `<meta property="og:url" content="${escapeHtmlAttr(canonicalUrl)}" />`,
+    ...(durationSeconds > 0 ? [`<meta property="music:duration" content="${durationSeconds}" />`] : []),
+    ...(audioUrl
+      ? [
+          `<meta property="og:audio" content="${escapeHtmlAttr(audioUrl)}" />`,
+          `<meta property="og:audio:type" content="audio/mpeg" />`,
+        ]
+      : []),
+    `<meta name="twitter:card" content="summary_large_image" />`,
+    `<meta name="twitter:title" content="${escapeHtmlAttr(title)}" />`,
+    `<meta name="twitter:description" content="${escapeHtmlAttr(description)}" />`,
+    `<meta name="twitter:image" content="${escapeHtmlAttr(image)}" />`,
+    `<meta name="twitter:image:src" content="${escapeHtmlAttr(image)}" />`,
+    `<meta name="twitter:image:alt" content="${escapeHtmlAttr(imageAlt)}" />`,
+  ].join('\n    ');
+
+  const isBot = isSocialCrawlerUserAgent(req.headers['user-agent']);
+  if (!isBot) {
+    const spaHtml = await fetchSpaIndexHtml(origin);
+    if (spaHtml) {
+      const injected = stripStaticSeoTags(spaHtml).replace('</head>', `    ${headTags}\n  </head>`);
+      res
+        .status(200)
+        .set({
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'public, max-age=30, stale-while-revalidate=120',
+        })
+        .send(injected);
+      return;
+    }
+  }
+
   const html = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>${escapeHtmlAttr(title)}</title>
-    <link rel="canonical" href="${escapeHtmlAttr(canonicalUrl)}" />
-    <meta name="description" content="${escapeHtmlAttr(description)}" />
-    <meta property="og:type" content="${escapeHtmlAttr(ogType)}" />
-    <meta property="og:site_name" content="LOWERVIBE" />
-    <meta property="og:title" content="${escapeHtmlAttr(title)}" />
-    <meta property="og:description" content="${escapeHtmlAttr(description)}" />
-    <meta property="og:image" content="${escapeHtmlAttr(image)}" />
-    <meta property="og:image:secure_url" content="${escapeHtmlAttr(image)}" />
-    <meta property="og:image:width" content="512" />
-    <meta property="og:image:height" content="512" />
-    <meta property="og:image:alt" content="${escapeHtmlAttr(imageAlt)}" />
-    <meta property="og:url" content="${escapeHtmlAttr(canonicalUrl)}" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="${escapeHtmlAttr(title)}" />
-    <meta name="twitter:description" content="${escapeHtmlAttr(description)}" />
-    <meta name="twitter:image" content="${escapeHtmlAttr(image)}" />
-    <meta name="twitter:image:alt" content="${escapeHtmlAttr(imageAlt)}" />
+    ${headTags}
+    ${!isBot ? `<meta http-equiv="refresh" content="0;url=${escapeHtmlAttr(fallbackRedirectUrl)}" />` : ''}
   </head>
-  <body>
-    <p>Opening <a href="${escapeHtmlAttr(canonicalUrl)}">${escapeHtmlAttr(title)}</a>…</p>
+  <body style="background:#0A0B0A;color:#F4F5F3;font-family:sans-serif;padding:24px;text-align:center;">
+    <p>Opening <a href="${escapeHtmlAttr(fallbackRedirectUrl)}" style="color:#C6FF3D;">${escapeHtmlAttr(title)}</a>…</p>
+    ${!isBot ? `<script>window.location.replace(${JSON.stringify(fallbackRedirectUrl)});</script>` : ''}
   </body>
 </html>`;
 

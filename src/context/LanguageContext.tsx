@@ -382,6 +382,26 @@ const TRANSLATIONS: Record<Language, Record<string, string>> = {
     releases_saved_offline: 'Releases saved',
     remove_offline_batch: 'Remove offline',
     syncing_offline_progress: 'Saving offline {completed}/{total}',
+
+    // Opening 6-second Experience
+    intro_skip: 'Skip intro',
+    intro_tagline: 'Independent African Music',
+    intro_direct_artists: 'Direct to artists · Built for offline listening',
+    intro_now_streaming: 'Now streaming',
+    intro_offline_ready: 'Offline library ready',
+    intro_ready_to_listen: 'Your sound is ready',
+    intro_vibe_1_title: 'Afro-Soul Sunrise',
+    intro_vibe_1_sub: 'Warm acoustic melodies & fresh Malawi voices',
+    intro_vibe_2_title: 'Blantyre Bassline',
+    intro_vibe_2_sub: 'Trap, Dancehall & street-level energy',
+    intro_vibe_3_title: 'Lake Malawi Sunset',
+    intro_vibe_3_sub: 'Amapiano log drums & sunlit grooves',
+    intro_vibe_4_title: 'Lilongwe Studio',
+    intro_vibe_4_sub: 'Independent creators, direct to every listener',
+    intro_vibe_5_title: 'Pan-African Pulse',
+    intro_vibe_5_sub: 'Sound moving from Malawi across the continent',
+    intro_vibe_6_title: 'After-Hours Echo',
+    intro_vibe_6_sub: 'R&B, chill sessions & late-night replay',
   },
   ny: {
     // Core Navigation (Chichewa)
@@ -751,6 +771,26 @@ const TRANSLATIONS: Record<Language, Record<string, string>> = {
     releases_saved_offline: 'Zasungidwa',
     remove_offline_batch: 'Chotsani zosungidwa',
     syncing_offline_progress: 'Ikusunga {completed}/{total}',
+
+    // Opening 6-second Experience (Chichewa)
+    intro_skip: 'Pitani kunyumba',
+    intro_tagline: 'Nyimbo za Oimba Odziyimira ku Africa',
+    intro_direct_artists: 'Mwachindunji kwa oimba · Zosungidwa popanda intaneti',
+    intro_now_streaming: 'Zikusewera pano',
+    intro_offline_ready: 'Nyimbo zanu zosungidwa zakonzeka',
+    intro_ready_to_listen: 'Mawu anu akonzeka',
+    intro_vibe_1_title: "M'mawa wa Afro-Soul",
+    intro_vibe_1_sub: 'Mawu okoma a gitala ndi oimba a ku Malawi',
+    intro_vibe_2_title: 'Mphamvu za Blantyre',
+    intro_vibe_2_sub: 'Trap, Dancehall ndi nyimbo za mphamvu',
+    intro_vibe_3_title: 'Madzulo ku Nyanja',
+    intro_vibe_3_sub: 'Amapiano ndi nyimbo za mtendere',
+    intro_vibe_4_title: "Nyimbo za M'studio",
+    intro_vibe_4_sub: 'Oimba odziyimira, mwachindunji kwa womvera',
+    intro_vibe_5_title: 'Nyimbo za Africa',
+    intro_vibe_5_sub: 'Phokoso la Malawi kupita mu Africa monse',
+    intro_vibe_6_title: 'Nyimbo za Usiku',
+    intro_vibe_6_sub: 'R&B, chill ndi nyimbo za usiku wabwino',
   },
 };
 

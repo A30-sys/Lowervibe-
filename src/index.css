@@ -464,6 +464,118 @@ html.light .stroke-numeral {
   animation-fill-mode: forwards;
 }
 
+/* 6-Second Opening Experience Keyframes (GPU transform & opacity only) */
+@keyframes lv-intro-orbit {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes lv-intro-orbit-reverse {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+@keyframes lv-intro-ripple {
+  0% {
+    transform: scale(0.86);
+    opacity: 0.6;
+  }
+  75% {
+    transform: scale(1.42);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.42);
+    opacity: 0;
+  }
+}
+
+@keyframes lv-intro-eq-a {
+  0%, 100% { transform: scaleY(0.32); opacity: 0.72; }
+  35% { transform: scaleY(0.95); opacity: 1; }
+  70% { transform: scaleY(0.48); opacity: 0.84; }
+}
+
+@keyframes lv-intro-eq-b {
+  0%, 100% { transform: scaleY(0.78); opacity: 0.92; }
+  45% { transform: scaleY(0.28); opacity: 0.68; }
+  80% { transform: scaleY(1); opacity: 1; }
+}
+
+@keyframes lv-intro-eq-c {
+  0%, 100% { transform: scaleY(0.42); opacity: 0.78; }
+  50% { transform: scaleY(0.98); opacity: 1; }
+}
+
+@keyframes lv-intro-beat-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.animate-lv-orbit {
+  animation: lv-intro-orbit 6s linear infinite;
+  will-change: transform;
+}
+
+.animate-lv-orbit-reverse {
+  animation: lv-intro-orbit-reverse 9s linear infinite;
+  will-change: transform;
+}
+
+.animate-lv-ripple-1 {
+  animation: lv-intro-ripple 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  will-change: transform, opacity;
+}
+
+.animate-lv-ripple-2 {
+  animation: lv-intro-ripple 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite 0.9s;
+  will-change: transform, opacity;
+}
+
+.animate-lv-beat-in {
+  animation: lv-intro-beat-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+@keyframes lv-intro-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.lv-intro-progress-fill {
+  transform-origin: left center;
+  animation: lv-intro-fill 6000ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: transform;
+}
+
+.lv-intro-progress-fill-fast {
+  transform-origin: left center;
+  animation: lv-intro-fill 1600ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: transform;
+}
+
+.lv-eq-bar {
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+
+.lv-eq-bar-1 { animation: lv-intro-eq-a 0.92s ease-in-out infinite 0ms; }
+.lv-eq-bar-2 { animation: lv-intro-eq-b 0.78s ease-in-out infinite 90ms; }
+.lv-eq-bar-3 { animation: lv-intro-eq-c 0.86s ease-in-out infinite 160ms; }
+.lv-eq-bar-4 { animation: lv-intro-eq-a 0.74s ease-in-out infinite 240ms; }
+.lv-eq-bar-5 { animation: lv-intro-eq-b 0.96s ease-in-out infinite 60ms; }
+.lv-eq-bar-6 { animation: lv-intro-eq-c 0.80s ease-in-out infinite 190ms; }
+
 /* Reduced Motion & Battery Saver Overrides */
 html.reduced-motion *,
 html.reduced-motion ::before,
